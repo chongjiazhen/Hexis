@@ -65,21 +65,19 @@ Write-Host "[start] Docker DB"
 Push-Location $Root
 docker compose up -d db | Out-Null
 Pop-Location
-if (-not (Wait-Health "http://127.0.0.1:43815" "postgres :43815" 60)) {
-    # Postgres has no HTTP health, fall back to docker inspect
+Write-Host -NoNewline "[wait] postgres :43815 "
+$deadline = (Get-Date).AddSeconds(60)
+while ($true) {
     $health = (docker inspect hexis_brain --format '{{.State.Health.Status}}' 2>$null)
-    if ($health -ne "healthy") {
-        Write-Host "[wait] postgres via docker inspect: $health (retrying)"
-        $deadline = (Get-Date).AddSeconds(60)
-        while ((Get-Date) -lt $deadline -and $health -ne "healthy") {
-            Start-Sleep -Seconds 2
-            $health = (docker inspect hexis_brain --format '{{.State.Health.Status}}' 2>$null)
-        }
-    }
-    if ($health -ne "healthy") {
-        Write-Host "[fail] DB never went healthy"; exit 1
-    }
-    Write-Host "[ok] postgres healthy"
+    if ($health -eq "healthy") { Write-Host "OK"; break }
+    if ((Get-Date) -ge $deadline) { break }
+    Write-Host -NoNewline "."
+    Start-Sleep -Seconds 2
+}
+if ($health -ne "healthy") {
+    Write-Host "TIMEOUT"
+    Write-Host "[fail] DB never went healthy (last status: $health)"
+    exit 1
 }
 
 # 2. Chat llama-server :8080
