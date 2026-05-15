@@ -119,29 +119,6 @@ if (-not ($chatOk -and $embedOk)) {
     exit 1
 }
 
-# 5. Re-apply DB-side patches (wiped by hexis reset; idempotent here)
-Write-Host "[patch] DB-side patches (get_agent_profile_context + llm endpoints)"
-$sql = @'
-CREATE OR REPLACE FUNCTION get_agent_profile_context()
-RETURNS JSONB AS $$
-BEGIN
-    RETURN jsonb_build_object(
-        'name', get_config('agent.init_profile')->'agent'->>'name',
-        'objectives', COALESCE(get_config('agent.objectives'), '[]'::jsonb),
-        'budget', COALESCE(get_config('agent.budget'), '{}'::jsonb),
-        'guardrails', COALESCE(get_config('agent.guardrails'), '[]'::jsonb),
-        'tools', COALESCE(get_config('agent.tools'), '[]'::jsonb),
-        'initial_message', COALESCE(get_config('agent.initial_message'), to_jsonb(''::text))
-    );
-END;
-$$ LANGUAGE plpgsql STABLE;
-
-SELECT set_config('llm.chat',         '{"provider":"openai_compatible","model":"hexis-vesper-12b","endpoint":"http://localhost:8080/v1","api_key_env":"OPENAI_API_KEY"}'::jsonb);
-SELECT set_config('llm.heartbeat',    '{"provider":"openai_compatible","model":"hexis-vesper-12b","endpoint":"http://localhost:8080/v1","api_key_env":"OPENAI_API_KEY"}'::jsonb);
-SELECT set_config('llm.subconscious', '{"provider":"openai_compatible","model":"hexis-vesper-12b","endpoint":"http://localhost:8080/v1","api_key_env":"OPENAI_API_KEY"}'::jsonb);
-'@
-$sql | docker exec -i hexis_brain psql -U hexis_user -d hexis_memory | Out-Null
-
 Write-Host ""
 Write-Host "[ready] Hexis stack up"
 Write-Host "  chat  http://127.0.0.1:8080"

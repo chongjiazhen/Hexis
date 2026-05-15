@@ -227,6 +227,7 @@ CREATE OR REPLACE FUNCTION get_agent_profile_context()
 RETURNS JSONB AS $$
 BEGIN
     RETURN jsonb_build_object(
+        'name', get_config('agent.init_profile')->'agent'->>'name',
         'objectives', COALESCE(get_config('agent.objectives'), '[]'::jsonb),
         'budget', COALESCE(get_config('agent.budget'), '{}'::jsonb),
         'guardrails', COALESCE(get_config('agent.guardrails'), '[]'::jsonb),
