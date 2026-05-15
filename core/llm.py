@@ -410,6 +410,8 @@ def _endpoint_cache_key(endpoint: str | None) -> str:
 def _should_try_responses(endpoint: str | None) -> bool:
     if not _HAS_RESPONSES_API:
         return False
+    if endpoint and any(h in endpoint for h in ("localhost", "127.0.0.1", "host.docker.internal")):
+        return False
     key = _endpoint_cache_key(endpoint)
     cached = _endpoint_responses_support.get(key)
     if cached is False:
