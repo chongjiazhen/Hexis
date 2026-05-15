@@ -127,7 +127,7 @@ Write-Host ""
 if ($Repl) {
     $env:PYTHONIOENCODING = "utf-8"
     $env:PYTHONUTF8 = "1"
-    & "$Root\.venv\Scripts\python.exe" "$Root\chat_repl.py"
+    & "$Root\venv\Scripts\python.exe" "$Root\chat_repl.py"
 } else {
-    Write-Host "Next:  .\.venv\Scripts\python.exe chat_repl.py"
+    Write-Host "Next:  .\venv\Scripts\python.exe chat_repl.py"
 }
