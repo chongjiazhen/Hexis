@@ -25,6 +25,16 @@ $StartAll  = Join-Path $Root "start-all.ps1"
 $Desktop   = [Environment]::GetFolderPath("Desktop")
 $TaskName  = "Hexis Autostart"
 
+# Self-log everything (incl. terminating errors) so an elevated-window run that
+# flash-closes still leaves a readable trace.
+$LogDir = Join-Path $Root "logs"
+if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Force -Path $LogDir | Out-Null }
+$LogFile = Join-Path $LogDir ("install-autostart_{0}.log" -f (Get-Date -Format "yyyyMMdd_HHmmss"))
+Start-Transcript -Path $LogFile -Append | Out-Null
+Write-Host "[ctx] elevated=$([bool]([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) user=$env:USERNAME"
+
+try {
+
 if (-not (Test-Path $StartAll)) {
     throw "start-all.ps1 not found at $StartAll - run this from the Hexis repo root."
 }
@@ -127,3 +137,14 @@ Write-Host "start-all.ps1 then waits for the engine; full online typically lands
 Write-Host "few minutes after the machine reaches the logon screen / a user signs in."
 Write-Host "For true pre-login headless Docker you'd run the engine via WSL2 + systemd"
 Write-Host "(dockerd as a service, no Docker Desktop). Ask if you want that variant."
+
+}
+catch {
+    Write-Host "[FAIL] $($_.Exception.GetType().Name): $($_.Exception.Message)"
+    Write-Host $_.ScriptStackTrace
+    throw
+}
+finally {
+    Write-Host "[log] $LogFile"
+    Stop-Transcript | Out-Null
+}
