@@ -70,11 +70,14 @@ function Invoke-Docker {
     # $ErrorActionPreference='Stop' - even benign docker warnings ("Found
     # orphan containers") on exit 0. Demote EAP, surface stderr as text,
     # return docker's real exit code.
-    param([Parameter(ValueFromRemainingArguments = $true)][string[]]$DockerArgs)
+    #
+    # Simple (non-advanced) function on purpose: $args captures dash-prefixed
+    # tokens like -d / -f / --profile verbatim; an advanced param([...]) would
+    # try to bind them as parameters.
     $prev = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        & docker @DockerArgs 2>&1 | ForEach-Object { Write-Host $_ }
+        & docker @args 2>&1 | ForEach-Object { Write-Host $_ }
         return $LASTEXITCODE
     } finally {
         $ErrorActionPreference = $prev
