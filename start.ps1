@@ -137,17 +137,28 @@ if (Get-PortPid 8081) {
 }
 
 # 4. Nano CPU-1B llama-server :8082 (always-on; ECO floor). CPU only -> 0 VRAM.
+# Thread-capped + below-normal priority: pure-CPU inference (Rocky+TARS in
+# PRIME, everyone in ECO) must NOT saturate all cores and starve interactive
+# apps (this crashed VS Code). 8 physical cores -> cap at 4, leave headroom.
+$NanoThreads = 4
 if (Get-PortPid 8082) {
     Write-Host "[start] nano :8082 already running"
 } else {
-    Write-Host "[start] nano llama-server :8082 ($NanoRepo)"
-    Start-Process -FilePath $LlamaServer `
+    Write-Host "[start] nano llama-server :8082 ($NanoRepo, threads=$NanoThreads, below-normal)"
+    $nanoProc = Start-Process -FilePath $LlamaServer `
         -ArgumentList @("-hf",$NanoRepo,
                         "--host","0.0.0.0","--port","8082",
                         "--ctx-size","4096","--n-gpu-layers","0",
                         "--parallel","1",
+                        "--threads","$NanoThreads","--threads-batch","$NanoThreads",
                         "--alias","nano-imp-1b","--jinja") `
-        -WindowStyle Hidden
+        -WindowStyle Hidden -PassThru
+    try {
+        $nanoProc.PriorityClass = [System.Diagnostics.ProcessPriorityClass]::BelowNormal
+        Write-Host "[start] nano PID $($nanoProc.Id) priority=BelowNormal"
+    } catch {
+        Write-Host "[warn] could not lower nano priority: $($_.Exception.Message)"
+    }
 }
 
 # 5. Wait health. chat + embed are fatal; nano is best-effort (CPU load slower,
