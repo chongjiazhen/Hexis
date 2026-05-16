@@ -158,6 +158,28 @@ if (Test-Path $setMode) {
     Write-Host "[mode] set-power-mode.ps1 not present - skipping mode normalize"
 }
 
+# 4b. VRAM guard: auto-fallback to ECO if a game/heavy GPU app appears.
+#     Single-instance (own lockfile); spawn hidden if not already running.
+$guard = Join-Path $Root "hexis-vram-guard.ps1"
+if (Test-Path $guard) {
+    $guardLock = Join-Path $LogDir "vram-guard.lock"
+    $running = $false
+    if (Test-Path $guardLock) {
+        $gpid = (Get-Content $guardLock -ErrorAction SilentlyContinue | Select-Object -First 1)
+        if ($gpid -and (Get-Process -Id $gpid -ErrorAction SilentlyContinue)) { $running = $true }
+    }
+    if ($running) {
+        Write-Host "[guard] vram-guard already running (PID $gpid)"
+    } else {
+        Write-Host "[guard] starting vram-guard (auto-ECO on heavy GPU app)"
+        Start-Process powershell `
+            -ArgumentList @("-NoProfile","-ExecutionPolicy","Bypass","-WindowStyle","Hidden","-File","`"$guard`"") `
+            -WorkingDirectory $Root -WindowStyle Hidden | Out-Null
+    }
+} else {
+    Write-Host "[guard] hexis-vram-guard.ps1 not present - no auto-fallback"
+}
+
 # 5. Summary
 Write-Host ""
 Write-Host "[ready] Hexis full stack up"

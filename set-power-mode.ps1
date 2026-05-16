@@ -169,6 +169,11 @@ try {
 }
 if ($pyRc -ne 0) { throw "set_power_mode.py failed (exit $pyRc) - plan: $planFile" }
 
+# Mode marker - cheap source of truth for hexis-vram-guard.ps1 (no DB/port probe).
+$markerFile = Join-Path $LogDir "current-mode.txt"
+[System.IO.File]::WriteAllText($markerFile, "$Mode`n$(Get-Date -Format o)",
+    (New-Object System.Text.UTF8Encoding($false)))
+
 Write-Host ""
 Write-Host "[done] power mode = $($Mode.ToUpper())"
 Write-Host "  Config flip takes effect on each character's next heartbeat/chat (no worker restart)."
