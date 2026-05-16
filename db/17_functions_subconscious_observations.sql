@@ -896,15 +896,39 @@ BEGIN
             PERFORM satisfy_drive('coherence', 0.1);
 
         WHEN 'reprioritize' THEN
-            PERFORM change_goal_priority(
-                (p_params->>'goal_id')::UUID,
-                (p_params->>'new_priority')::goal_priority,
-                p_params->>'reason'
-            );
-            IF (p_params->>'new_priority') = 'completed' THEN
-                PERFORM satisfy_drive('competence', 0.4);
-            END IF;
-            result := jsonb_build_object('reprioritized', true);
+            DECLARE
+                requested_priority TEXT := lower(btrim(COALESCE(p_params->>'new_priority', '')));
+                resolved_priority goal_priority;
+            BEGIN
+                -- Coerce unknown LLM-emitted priorities (e.g. "highest", "urgent")
+                -- to the closest valid enum value rather than crashing the heartbeat.
+                IF requested_priority IN ('active', 'queued', 'backburner', 'completed', 'abandoned') THEN
+                    resolved_priority := requested_priority::goal_priority;
+                ELSIF requested_priority IN ('highest', 'high', 'urgent', 'top', 'now') THEN
+                    resolved_priority := 'active'::goal_priority;
+                ELSIF requested_priority IN ('low', 'lowest', 'later', 'someday') THEN
+                    resolved_priority := 'backburner'::goal_priority;
+                ELSIF requested_priority IN ('done', 'finished', 'complete') THEN
+                    resolved_priority := 'completed'::goal_priority;
+                ELSIF requested_priority IN ('drop', 'dropped', 'cancel', 'cancelled', 'abandon') THEN
+                    resolved_priority := 'abandoned'::goal_priority;
+                ELSE
+                    resolved_priority := 'queued'::goal_priority;
+                END IF;
+                PERFORM change_goal_priority(
+                    (p_params->>'goal_id')::UUID,
+                    resolved_priority,
+                    p_params->>'reason'
+                );
+                IF resolved_priority = 'completed' THEN
+                    PERFORM satisfy_drive('competence', 0.4);
+                END IF;
+                result := jsonb_build_object(
+                    'reprioritized', true,
+                    'priority', resolved_priority::text,
+                    'requested', requested_priority
+                );
+            END;
 
         WHEN 'reflect' THEN
             queued_call := build_external_call(
