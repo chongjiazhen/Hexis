@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import random
 from typing import Any, Callable, Awaitable
 
 from .base import ChannelAdapter, ChannelCapabilities, ChannelMessage, parse_allowlist, resolve_channel_token
@@ -30,11 +31,17 @@ class TelegramAdapter(ChannelAdapter):
     Config keys (from DB config table):
         channel.telegram.bot_token: env var name holding the bot token
         channel.telegram.allowed_chat_ids: JSON array of chat IDs, or "*"
+        channel.telegram.ambient_reply_chance: float 0.0-1.0 (default 0.0).
+            Probability that the bot replies to a non-@mention message in an
+            allowed group. 0.0 = mention-only, 1.0 = always reply.
 
     The bot responds to:
         - Private messages (always)
-        - Group messages where the bot is mentioned (@botname)
-        - Group messages in allowed chats
+        - Group messages where the bot is mentioned (@botname) (always)
+        - Group messages in allowed chats:
+            * always when mentioned
+            * with probability ambient_reply_chance otherwise
+        - Group messages NOT in allowlist: only when mentioned
     """
 
     def __init__(self, config: dict[str, Any] | None = None) -> None:
@@ -44,6 +51,11 @@ class TelegramAdapter(ChannelAdapter):
         self._connected = False
         self._bot_username: str | None = None
         self._allowed_chat_ids = self._parse_allowlist(self._config.get("allowed_chat_ids"))
+        try:
+            self._ambient_reply_chance = float(self._config.get("ambient_reply_chance") or 0.0)
+        except (TypeError, ValueError):
+            self._ambient_reply_chance = 0.0
+        self._ambient_reply_chance = max(0.0, min(1.0, self._ambient_reply_chance))
 
     @staticmethod
     def _parse_allowlist(value: Any) -> set[str] | None:
@@ -164,12 +176,22 @@ class TelegramAdapter(ChannelAdapter):
         raw_text = message.text or message.caption or ""
 
         if not is_private:
-            # Check chat allowlist
-            if self._allowed_chat_ids is not None:
-                if str(chat.id) not in self._allowed_chat_ids:
-                    # Still respond if mentioned
-                    if self._bot_username and f"@{self._bot_username}" not in raw_text:
-                        return
+            mention_tag = f"@{self._bot_username}" if self._bot_username else None
+            mentioned = bool(mention_tag and mention_tag in raw_text)
+            allowed_here = (
+                self._allowed_chat_ids is None
+                or str(chat.id) in self._allowed_chat_ids
+            )
+            if not allowed_here:
+                # Chat not on allowlist: only respond when mentioned.
+                if not mentioned:
+                    return
+            elif not mentioned:
+                # Chat on allowlist, no mention: roll for ambient reply.
+                if self._ambient_reply_chance <= 0.0:
+                    return
+                if random.random() >= self._ambient_reply_chance:
+                    return
 
         # Strip bot mention from content
         content = raw_text
