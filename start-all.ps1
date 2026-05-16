@@ -125,13 +125,29 @@ if ($composeRc -ne 0) {
     exit 1
 }
 
-# 4. Summary
+# 4. Normalize to PRIME so every boot lands in a known mode (non-fatal:
+#    stack is up regardless; this only sets each character's llm.* config).
+$setMode = Join-Path $Root "set-power-mode.ps1"
+if (Test-Path $setMode) {
+    Write-Host "[mode] normalizing to PRIME"
+    try {
+        & $setMode prime
+        if ($LASTEXITCODE -ne 0) { Write-Host "[warn] set-power-mode prime exited $LASTEXITCODE - stack still up, config not normalized" }
+    } catch {
+        Write-Host "[warn] set-power-mode prime failed: $($_.Exception.Message) - stack still up"
+    }
+} else {
+    Write-Host "[mode] set-power-mode.ps1 not present - skipping mode normalize"
+}
+
+# 5. Summary
 Write-Host ""
 Write-Host "[ready] Hexis full stack up"
 docker ps --format "{{.Names}}`t{{.Status}}" | Sort-Object | ForEach-Object { Write-Host "  $_" }
 Write-Host ""
 Write-Host "  chat   http://127.0.0.1:8080"
 Write-Host "  embed  http://127.0.0.1:8081"
+Write-Host "  nano   http://127.0.0.1:8082  (CPU-1B, ECO floor)"
 Write-Host "  db     127.0.0.1:43815"
 Write-Host "  api    http://127.0.0.1:43817"
 Write-Host ""

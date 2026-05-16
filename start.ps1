@@ -1,4 +1,4 @@
-# start.ps1 — bring up Hexis stack: Docker DB + chat llama-server + embed llama-server
+# start.ps1 - bring up Hexis stack: Docker DB + chat + embed + nano llama-servers
 # Usage: .\start.ps1            # start services, exit
 #        .\start.ps1 -Repl      # start services then drop into chat_repl.py
 #        .\start.ps1 -Stop      # stop everything
@@ -15,6 +15,9 @@ $LlamaServer = "C:\llama.cpp-cuda\llama-server.exe"
 
 $ChatRepo  = "mradermacher/Hexis-Vesper-12B-i1-GGUF:Q6_K"
 $EmbedRepo = "ggml-org/embeddinggemma-300M-GGUF:Q8_0"
+# Always-on CPU nano (1B). The floor every character can fall to in ECO mode.
+# Kept resident in both modes; mode switches never touch it. See set-power-mode.ps1.
+$NanoRepo  = "SicariusSicariiStuff/Nano_Imp_1B_GGUF:Q6_K"
 
 function Get-PortPid([int]$Port) {
     $c = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
@@ -53,6 +56,7 @@ function Wait-Health([string]$Url, [string]$Label, [int]$TimeoutSec = 120) {
 if ($Stop) {
     Kill-Port 8080 "chat"
     Kill-Port 8081 "embed"
+    Kill-Port 8082 "nano"
     Push-Location $Root
     docker compose stop db
     Pop-Location
@@ -108,9 +112,28 @@ if (Get-PortPid 8081) {
         -WindowStyle Hidden
 }
 
-# 4. Wait both healthy
+# 4. Nano CPU-1B llama-server :8082 (always-on; ECO floor). CPU only -> 0 VRAM.
+if (Get-PortPid 8082) {
+    Write-Host "[start] nano :8082 already running"
+} else {
+    Write-Host "[start] nano llama-server :8082 ($NanoRepo)"
+    Start-Process -FilePath $LlamaServer `
+        -ArgumentList @("-hf",$NanoRepo,
+                        "--host","0.0.0.0","--port","8082",
+                        "--ctx-size","4096","--n-gpu-layers","0",
+                        "--parallel","1",
+                        "--alias","nano-imp-1b","--jinja") `
+        -WindowStyle Hidden
+}
+
+# 5. Wait health. chat + embed are fatal; nano is best-effort (CPU load slower,
+#    must not block the stack - characters only fall to it in ECO).
 $chatOk  = Wait-Health "http://127.0.0.1:8080/health"  "chat :8080" 240
 $embedOk = Wait-Health "http://127.0.0.1:8081/health"  "embed :8081" 120
+$nanoOk  = Wait-Health "http://127.0.0.1:8082/health"  "nano :8082" 180
+if (-not $nanoOk) {
+    Write-Host "[warn] nano :8082 not healthy yet - ECO fallback degraded until it loads"
+}
 
 if (-not ($chatOk -and $embedOk)) {
     Write-Host "[fail] one or more servers did not become healthy"
@@ -121,6 +144,7 @@ Write-Host ""
 Write-Host "[ready] Hexis stack up"
 Write-Host "  chat  http://127.0.0.1:8080"
 Write-Host "  embed http://127.0.0.1:8081"
+Write-Host "  nano  http://127.0.0.1:8082  (CPU-1B, ECO floor)"
 Write-Host "  db    127.0.0.1:43815"
 Write-Host ""
 
