@@ -35,7 +35,24 @@ function New-ModeShortcut([string]$Name, [string]$ModeArg) {
 New-ModeShortcut -Name "Hexis ECO"   -ModeArg "eco"
 New-ModeShortcut -Name "Hexis PRIME" -ModeArg "prime"
 
+# GUI launcher (model dropdowns per character + mode + Apply).
+$Launcher = Join-Path $Root "hexis-launcher.ps1"
+if (Test-Path $Launcher) {
+    $lnk = Join-Path $Desktop "Hexis Launcher.lnk"
+    $wsh = New-Object -ComObject WScript.Shell
+    $sc  = $wsh.CreateShortcut($lnk)
+    $sc.TargetPath       = "powershell.exe"
+    $sc.Arguments        = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$Launcher`""
+    $sc.WorkingDirectory = $Root
+    $sc.IconLocation     = "powershell.exe,0"
+    $sc.Description       = "Hexis Launcher - pick models per character, set ECO/PRIME"
+    $sc.Save()
+    Write-Host "[ok] shortcut: $lnk"
+} else {
+    Write-Host "[skip] hexis-launcher.ps1 not present - no launcher shortcut"
+}
+
 Write-Host ""
-Write-Host "Done. Double-click 'Hexis ECO' to free VRAM, 'Hexis PRIME' to restore."
+Write-Host "Done. 'Hexis Launcher' = GUI. 'Hexis ECO'/'Hexis PRIME' = one-click mode."
 Write-Host "Sam piggyback (ECO + a heavy model you already loaded) stays CLI-only:"
 Write-Host "  .\set-power-mode.ps1 eco -SamEndpoint http://host.docker.internal:<port>/v1 -SamModel <name>"

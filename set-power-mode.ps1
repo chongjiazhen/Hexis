@@ -61,18 +61,29 @@ function Kill-Port([int]$Port, [string]$Label) {
     }
 }
 
-function Ensure-GpuServer([string]$Repo, [int]$Port, [string]$Alias) {
+function Ensure-GpuServer([string]$Repo, [string]$Path, [int]$Port, [string]$Alias) {
     if (Get-PortPid $Port) {
         Write-Host "[arm] $Alias :$Port already up"
         return
     }
     if (-not (Test-Path $LlamaServer)) { throw "llama-server not found at $LlamaServer" }
-    Write-Host "[arm] $Alias :$Port ($Repo)"
+    # Prefer a concrete on-disk path (-m, what the GUI launcher writes); fall
+    # back to an -hf repo string (resolves from the HF cache).
+    if ($Path) {
+        if (-not (Test-Path $Path)) { throw "model file not found: $Path" }
+        $modelArgs = @("-m", $Path)
+        $src = $Path
+    } elseif ($Repo) {
+        $modelArgs = @("-hf", $Repo)
+        $src = $Repo
+    } else {
+        throw "character '$Alias' has neither Path nor Repo set in power-profiles.psd1"
+    }
+    Write-Host "[arm] $Alias :$Port ($src)"
     Start-Process -FilePath $LlamaServer `
-        -ArgumentList @("-hf",$Repo,
-                        "--host","0.0.0.0","--port","$Port",
+        -ArgumentList ($modelArgs + @("--host","0.0.0.0","--port","$Port",
                         "--ctx-size","8192","--n-gpu-layers","999",
-                        "--alias",$Alias,"--jinja") `
+                        "--alias",$Alias,"--jinja")) `
         -WindowStyle Hidden
 }
 
@@ -95,7 +106,7 @@ foreach ($ch in $P.Characters) {
     if ($Mode -eq "prime") {
         $pr = $ch.Prime
         if ($pr.Tier -eq "gpu") {
-            Ensure-GpuServer -Repo $pr.Repo -Port $pr.Port -Alias $pr.Alias
+            Ensure-GpuServer -Repo $pr.Repo -Path $pr.Path -Port $pr.Port -Alias $pr.Alias
             $gpuPortsInUse += [int]$pr.Port
             $cfg = New-LlmCfg -Model $pr.Alias -Port ([int]$pr.Port)
         } else {
