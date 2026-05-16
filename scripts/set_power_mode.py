@@ -51,7 +51,10 @@ async def main() -> int:
     ap.add_argument("--plan", required=True, help="path to plan JSON")
     args = ap.parse_args()
 
-    with open(args.plan, "r", encoding="utf-8") as fh:
+    # utf-8-sig: PowerShell 5.1 'Set-Content -Encoding utf8' emits a BOM that
+    # plain json.load rejects; utf-8-sig strips an optional BOM (and works
+    # fine when there is none).
+    with open(args.plan, "r", encoding="utf-8-sig") as fh:
         plan = json.load(fh)
 
     dsn_base = plan["dsn_base"].rstrip("/")
