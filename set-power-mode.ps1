@@ -146,8 +146,16 @@ $planFile = Join-Path $LogDir ("power-plan_{0}.json" -f (Get-Date -Format "yyyyM
 $py = Join-Path $Root "venv\Scripts\python.exe"
 if (-not (Test-Path $py)) { throw "venv python not found at $py" }
 Write-Host "[db] flipping $($instances.Count) instance(s) via set_power_mode.py"
-& $py (Join-Path $Root "scripts\set_power_mode.py") --plan $planFile
-$pyRc = $LASTEXITCODE
+# PS 5.1: native stderr under EAP=Stop is a terminating error. set_power_mode.py
+# prints per-DB progress/errors to stderr; demote EAP so we reach the rc check.
+$eapPrev = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+try {
+    & $py (Join-Path $Root "scripts\set_power_mode.py") --plan $planFile 2>&1 | ForEach-Object { Write-Host $_ }
+    $pyRc = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $eapPrev
+}
 if ($pyRc -ne 0) { throw "set_power_mode.py failed (exit $pyRc) - plan: $planFile" }
 
 Write-Host ""

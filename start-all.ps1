@@ -65,6 +65,22 @@ function Test-Port([int]$Port) {
     return [bool]$c
 }
 
+function Invoke-Docker {
+    # PS 5.1 turns native-command stderr into a terminating error under
+    # $ErrorActionPreference='Stop' - even benign docker warnings ("Found
+    # orphan containers") on exit 0. Demote EAP, surface stderr as text,
+    # return docker's real exit code.
+    param([Parameter(ValueFromRemainingArguments = $true)][string[]]$DockerArgs)
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & docker @DockerArgs 2>&1 | ForEach-Object { Write-Host $_ }
+        return $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+}
+
 function Test-StackPrereqs {
     $dbHealth = (docker inspect hexis_brain --format '{{.State.Health.Status}}' 2>$null)
     $ok = $true
@@ -78,7 +94,7 @@ function Test-StackPrereqs {
 if ($Stop) {
     if (Test-DockerEngine) {
         Push-Location $Root
-        docker compose @Compose --profile active stop
+        Invoke-Docker compose @Compose --profile active stop | Out-Null
         Pop-Location
     } else {
         Write-Host "[stop] docker engine down - skipping container stop"
@@ -116,8 +132,7 @@ if ($startRc -eq 1 -or -not (Test-StackPrereqs)) {
 # 3. rabbitmq + default workers/api + baymax/rocky/tars overlays (all `profile: active`)
 Write-Host "[start] rabbitmq + all workers + baymax/rocky/tars overlays"
 Push-Location $Root
-docker compose @Compose --profile active up -d
-$composeRc = $LASTEXITCODE
+$composeRc = Invoke-Docker compose @Compose --profile active up -d
 Pop-Location
 if ($composeRc -ne 0) {
     Write-Host "[fail] compose up failed (exit $composeRc)"
@@ -143,7 +158,7 @@ if (Test-Path $setMode) {
 # 5. Summary
 Write-Host ""
 Write-Host "[ready] Hexis full stack up"
-docker ps --format "{{.Names}}`t{{.Status}}" | Sort-Object | ForEach-Object { Write-Host "  $_" }
+docker ps --format "{{.Names}}`t{{.Status}}" 2>$null | Sort-Object | ForEach-Object { Write-Host "  $_" }
 Write-Host ""
 Write-Host "  chat   http://127.0.0.1:8080"
 Write-Host "  embed  http://127.0.0.1:8081"

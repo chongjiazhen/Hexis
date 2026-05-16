@@ -26,12 +26,29 @@ function Get-PortPid([int]$Port) {
 }
 
 function Kill-Port([int]$Port, [string]$Label) {
-    $pid = Get-PortPid $Port
-    if ($pid) {
-        Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
-        Write-Host "[stop] ${Label}: killed PID $pid on port $Port"
+    # NOTE: do not use $pid - it is a read-only PowerShell automatic variable.
+    $procId = Get-PortPid $Port
+    if ($procId) {
+        Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+        Write-Host "[stop] ${Label}: killed PID $procId on port $Port"
     } else {
         Write-Host "[stop] ${Label}: nothing on port $Port"
+    }
+}
+
+function Invoke-Docker {
+    # Windows PowerShell 5.1 turns ANY native-command stderr into a terminating
+    # error when $ErrorActionPreference='Stop' - even benign docker warnings
+    # like "Found orphan containers" on exit 0. Run docker with EAP demoted and
+    # surface stderr as plain text. Returns docker's real exit code.
+    param([Parameter(ValueFromRemainingArguments = $true)][string[]]$DockerArgs)
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & docker @DockerArgs 2>&1 | ForEach-Object { Write-Host $_ }
+        return $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $prev
     }
 }
 
@@ -58,7 +75,7 @@ if ($Stop) {
     Kill-Port 8081 "embed"
     Kill-Port 8082 "nano"
     Push-Location $Root
-    docker compose stop db
+    Invoke-Docker compose stop db | Out-Null
     Pop-Location
     Write-Host "[done] Hexis stack stopped"
     exit 0
@@ -67,8 +84,12 @@ if ($Stop) {
 # 1. Docker DB
 Write-Host "[start] Docker DB"
 Push-Location $Root
-docker compose up -d db | Out-Null
+$dbRc = Invoke-Docker compose up -d db
 Pop-Location
+if ($dbRc -ne 0) {
+    Write-Host "[fail] 'docker compose up -d db' exited $dbRc"
+    exit 1
+}
 Write-Host -NoNewline "[wait] postgres :43815 "
 $deadline = (Get-Date).AddSeconds(60)
 while ($true) {
