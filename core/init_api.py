@@ -6,10 +6,13 @@ that both the CLI (apps/hexis_init.py) and UI (hexis-ui) can use.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 PACKAGE_CHARACTERS_DIR = Path(__file__).resolve().parent.parent / "characters"
 USER_CHARACTERS_DIR = Path.home() / ".hexis" / "characters"
@@ -37,6 +40,17 @@ def _parse_card_file(path: Path) -> dict[str, Any] | None:
         return None
     card_data = data.get("data", {})
     hexis_ext = card_data.get("extensions", {}).get("hexis", {})
+    if not hexis_ext and isinstance(data.get("extensions"), dict):
+        # Common authoring mistake: 'extensions' placed at the top level
+        # instead of nested under 'data'. Without this guard the card loads
+        # with an empty hexis extension and the agent silently boots with
+        # default Hexis identity instead of the intended persona.
+        logger.warning(
+            "Character card %s has 'extensions' at the top level; expected "
+            "'data.extensions.hexis'. The persona will NOT be applied until "
+            "the block is moved inside 'data'.",
+            path.name,
+        )
     name = hexis_ext.get("name") or card_data.get("name") or path.stem
     return {
         "filename": path.name,
