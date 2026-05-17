@@ -1,60 +1,21 @@
 #
-# power-profiles.psd1 - canonical, hand-editable backing store for ECO/PRIME.
-#
-# This is the source of truth. set-power-mode.ps1 reads it; the (future) GUI
-# launcher WRITES it then calls set-power-mode.ps1. Edit by hand any time.
-#
-# Concepts:
-#   - 4 characters, each = its own Postgres DB on the shared hexis_brain.
-#   - "nano" = always-on CPU 1B server (started by start.ps1 on :8082). Never
-#     killed by mode switches. Floor every character can fall to.
-#   - "embed" :8081 = sacred, never touched.
-#   - PRIME = each character on its assigned model (GPU servers armed).
-#   - ECO   = every character on nano (GPU servers killed -> VRAM freed).
-#             Sam may be overridden at switch time via -SamEndpoint/-SamModel
-#             to piggyback a heavy model you already loaded for your own use.
-#
-# Model refs use llama.cpp -hf form "user/repo:QUANT" (resolves from the HF
-# cache at C:\Users\<you>\.cache\huggingface\hub - no redownload on cache hit).
+# power-profiles.psd1 - canonical ECO/PRIME store.
+# AUTO-WRITTEN by hexis-launcher.ps1 on 2026-05-16 17:29. Still hand-editable;
+# the launcher's Apply overwrites this file. See .local-notes/power-modes.md.
 #
 @{
     LlamaServer = 'C:\llama.cpp-cuda\llama-server.exe'
-
-    # Postgres reachable from host; workers (in containers) reach llama-servers
-    # via host.docker.internal, so DB-stored endpoints use that host.
     PgDsnBase   = 'postgresql://hexis_user:hexis_password@127.0.0.1:43815'
     DockerHost  = 'host.docker.internal'
     Provider    = 'openai_compatible'
     ApiKeyEnv   = 'OPENAI_API_KEY'
-
-    # Always-on CPU nano (managed by start.ps1, not by mode switches).
-    Nano = @{
-        Alias = 'nano-imp-1b'
-        Repo  = 'SicariusSicariiStuff/Nano_Imp_1B_GGUF:Q6_K'
-        Port  = 8082
-    }
-
-    Embed = @{ Port = 8081 }   # sacred, never touched
-
-    # Per-character config. Db = Postgres database name. Prime = the model this
-    # character uses in PRIME. Tier 'gpu' => server armed/killed by mode switch;
-    # 'nano' => uses the always-on :8082 (no dedicated server).
+    Nano  = @{ Alias = 'nano-imp-1b'; Repo = 'SicariusSicariiStuff/Nano_Imp_1B_GGUF:Q6_K'; Port = 8082 }
+    Embed = @{ Port = 8081 }
     Characters = @(
-        @{
-            Name = 'Sam';    Db = 'hexis_memory'
-            Prime = @{ Tier='gpu';  Alias='hexis-vesper-12b'; Repo='mradermacher/Hexis-Vesper-12B-i1-GGUF:Q6_K'; Port=8080 }
-        }
-        @{
-            Name = 'Baymax'; Db = 'hexis_baymax'
-            Prime = @{ Tier='gpu';  Alias='baymax-qwen-3b';   Repo='bartowski/Qwen2.5-3B-Instruct-GGUF:Q6_K_L'; Port=8083 }
-        }
-        @{
-            Name = 'Rocky';  Db = 'hexis_rocky'
-            Prime = @{ Tier='nano'; Alias='nano-imp-1b'; Port=8082 }
-        }
-        @{
-            Name = 'TARS';   Db = 'hexis_tars'
-            Prime = @{ Tier='nano'; Alias='nano-imp-1b'; Port=8082 }
-        }
+        @{ Name='Sam'; Db='hexis_memory'; Prime=@{ Tier='gpu'; Alias='hexis-vesper-12b-i1-q6-k'; Path='C:\Users\User\.cache\huggingface\hub\models--mradermacher--Hexis-Vesper-12B-i1-GGUF\snapshots\22e741178bdcf61bf08f98f41df93ac595947c08\Hexis-Vesper-12B.i1-Q6_K.gguf'; Port=8080 } }
+        @{ Name='Baymax'; Db='hexis_baymax'; Prime=@{ Tier='gpu'; Alias='qwen2-5-3b-instruct-q6-k-l'; Path='C:\Users\User\.cache\huggingface\hub\models--bartowski--Qwen2.5-3B-Instruct-GGUF\snapshots\f302c64a2269a69fb27b2f9473b362f5bb8e78d8\Qwen2.5-3B-Instruct-Q6_K_L.gguf'; Port=8083 } }
+        @{ Name='Rocky'; Db='hexis_rocky'; Prime=@{ Tier='nano'; Alias='nano-imp-1b'; Port=8082 } }
+        @{ Name='TARS'; Db='hexis_tars'; Prime=@{ Tier='nano'; Alias='nano-imp-1b'; Port=8082 } }
+        @{ Name='Warden'; Db='hexis_warden'; Prime=@{ Tier='gpu'; Alias='qwen3-6-35b-a3b-uncensored-heretic-i1-iq3-xxs'; Path='C:\Users\User\.cache\huggingface\hub\models--mradermacher--Qwen3.6-35B-A3B-uncensored-heretic-i1-GGUF\snapshots\97c91a931dbfd582487e8866bd129a2e8765051d\Qwen3.6-35B-A3B-uncensored-heretic.i1-IQ3_XXS.gguf'; Port=8086 } }
     )
 }

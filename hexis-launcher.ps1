@@ -62,7 +62,7 @@ function Write-Profile($Rows) {
     [void]$sb.AppendLine("#")
     [void]$sb.AppendLine("# power-profiles.psd1 - canonical ECO/PRIME store.")
     [void]$sb.AppendLine("# AUTO-WRITTEN by hexis-launcher.ps1 on $(Get-Date -Format 'yyyy-MM-dd HH:mm'). Still hand-editable;")
-    [void]$sb.AppendLine("# the launcher's Apply overwrites this file. See .reference/power-modes.md.")
+    [void]$sb.AppendLine("# the launcher's Apply overwrites this file. See .local-notes/power-modes.md.")
     [void]$sb.AppendLine("#")
     [void]$sb.AppendLine("@{")
     [void]$sb.AppendLine("    LlamaServer = '$($P.LlamaServer)'")
