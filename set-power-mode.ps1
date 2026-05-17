@@ -45,6 +45,13 @@ $ApiKeyEnv   = $P.ApiKeyEnv
 $NanoPort    = $P.Nano.Port
 $NanoAlias   = $P.Nano.Alias
 
+# Single shared GPU slot: ActiveBig (1-of-N) on BigPort. Decoupled from
+# persona - all gpu-tier characters ride this one server.
+$BigPort   = [int]$P.BigPort
+$ActiveBig = $P.ActiveBig
+$big       = $P.BigModels[$ActiveBig]
+if (-not $big) { throw "ActiveBig '$ActiveBig' not found in BigModels (power-profiles.psd1)" }
+
 function Get-PortPid([int]$Port) {
     $c = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
     if ($c) { return $c[0].OwningProcess }
@@ -101,14 +108,19 @@ function New-LlmCfg([string]$Model, [int]$Port, [string]$EndpointOverride) {
 $instances = @()
 $gpuPortsInUse = @()   # ports that must stay armed in this mode
 
+# Arm the ONE shared ActiveBig server once, if PRIME and any gpu-tier char.
+if ($Mode -eq "prime" -and ($P.Characters | Where-Object { $_.Prime.Tier -eq "gpu" })) {
+    Ensure-GpuServer -Repo $big.Repo -Path $big.Path -Port $BigPort -Alias $big.Alias
+    $gpuPortsInUse += $BigPort
+}
+
 foreach ($ch in $P.Characters) {
     $name = $ch.Name
     if ($Mode -eq "prime") {
         $pr = $ch.Prime
         if ($pr.Tier -eq "gpu") {
-            Ensure-GpuServer -Repo $pr.Repo -Path $pr.Path -Port $pr.Port -Alias $pr.Alias
-            $gpuPortsInUse += [int]$pr.Port
-            $cfg = New-LlmCfg -Model $pr.Alias -Port ([int]$pr.Port)
+            # all gpu personas share the one ActiveBig server on BigPort
+            $cfg = New-LlmCfg -Model $big.Alias -Port $BigPort
         } else {
             # nano-tier character: uses the always-on :8082
             $cfg = New-LlmCfg -Model $NanoAlias -Port ([int]$NanoPort)
@@ -136,13 +148,9 @@ foreach ($ch in $P.Characters) {
     Write-Host "[plan] $name ($($ch.Db)) -> $($cfg.model) @ $($cfg.endpoint)"
 }
 
-# ---- ECO: kill every GPU server defined in the profile (free VRAM) ----
+# ---- ECO: kill the shared GPU server (free VRAM) ----
 if ($Mode -eq "eco") {
-    foreach ($ch in $P.Characters) {
-        if ($ch.Prime.Tier -eq "gpu") {
-            Kill-Port ([int]$ch.Prime.Port) $ch.Prime.Alias
-        }
-    }
+    Kill-Port $BigPort $ActiveBig
 }
 # Never touch nano (:8082) or embed (:8081).
 

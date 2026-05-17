@@ -26,7 +26,7 @@ if (-not (Test-Path $SetMode))     { throw "set-power-mode.ps1 not found at $Set
 $P = Import-PowerShellDataFile -Path $ProfilePath
 
 # Stable per-character GPU port (so a nano character can be promoted to GPU).
-$DefaultGpuPort = @{ Sam = 8080; Baymax = 8083; Rocky = 8084; TARS = 8085 }
+$DefaultGpuPort = @{ Sam = 8080; Baymax = 8083; Rocky = 8084; TARS = 8085; Warden = 8086 }
 $NanoAlias = $P.Nano.Alias
 $NanoPort  = [int]$P.Nano.Port
 $NanoItem  = "nano-imp-1b  (CPU :$NanoPort, always-on)"
