@@ -1,7 +1,10 @@
 # chat-with.ps1 - one-arg terminal chat launcher for any fleet character.
 #
-# Resolves the venv hexis CLI + maps a friendly character name to its
-# instance, then drops you into `hexis -i <instance> chat`. Pane-per-char.
+# Maps a friendly character name to its DB and launches chat_repl.py
+# (plain stdin/stdout client). Deliberately NOT `hexis chat` - that path
+# prefers the Textual TUI, which has an unfixed streaming bug that drops
+# most of the response (see commit 8f99bbe). chat_repl.py bypasses it via
+# stream_agent. Pane-per-char.
 #
 #   .\chat-with.ps1 warden
 #   .\chat-with.ps1 eni
@@ -9,6 +12,7 @@
 #   .\chat-with.ps1            # no arg -> list available characters
 #
 # Source of truth: power-profiles.psd1 Characters array.
+# chat_repl.py routes by POSTGRES_DB env (no instance-registry awareness).
 
 param(
     [Parameter(Position = 0)]
@@ -22,8 +26,10 @@ $ProfilePath = Join-Path $Root "power-profiles.psd1"
 if (-not (Test-Path $ProfilePath)) { throw "power-profiles.psd1 not found at $ProfilePath" }
 $P = Import-PowerShellDataFile -Path $ProfilePath
 
-$Hexis = Join-Path $Root "venv\Scripts\hexis.exe"
-if (-not (Test-Path $Hexis)) { throw "hexis CLI not found at $Hexis (venv not set up?)" }
+$Py = Join-Path $Root "venv\Scripts\python.exe"
+if (-not (Test-Path $Py)) { throw "venv python not found at $Py (venv not set up?)" }
+$ReplScript = Join-Path $Root "chat_repl.py"
+if (-not (Test-Path $ReplScript)) { throw "chat_repl.py not found at $ReplScript" }
 
 function Show-Roster {
     Write-Host "Available characters:"
@@ -51,14 +57,15 @@ if (-not $match) {
     exit 1
 }
 
-$instance = $match.Db -replace '^hexis_', ''
-
-# hexis_memory (Sam) is the legacy default DB - not in the instance registry,
-# so it must run WITHOUT -i. Registry-backed chars use -i <instance>.
-if ($match.Db -ieq 'hexis_memory') {
-    Write-Host "[chat] $($match.Name) (default brain: $($match.Db))" -ForegroundColor Cyan
-    & $Hexis chat
-} else {
-    Write-Host "[chat] $($match.Name) (instance: $instance, db: $($match.Db))" -ForegroundColor Cyan
-    & $Hexis -i $instance chat
+# chat_repl.py reads the target DB from POSTGRES_DB. Scope the override to
+# this launch only - restore the caller's value on exit (the .ps1 runs in
+# the calling pane's process, so an unscoped change would leak).
+$prevDb = $env:POSTGRES_DB
+$env:POSTGRES_DB = $match.Db
+Write-Host "[chat] $($match.Name) (db: $($match.Db)) - chat_repl.py, Ctrl+C to exit" -ForegroundColor Cyan
+try {
+    & $Py $ReplScript
+} finally {
+    if ($null -eq $prevDb) { Remove-Item Env:\POSTGRES_DB -ErrorAction SilentlyContinue }
+    else { $env:POSTGRES_DB = $prevDb }
 }
