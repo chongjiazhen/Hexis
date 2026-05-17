@@ -170,5 +170,5 @@ resident, Baymax swap-in on demand).
 
 Low-risk, ~2 scripts + 1 editable profile file + a one-line `start.ps1` addition
 (nano `:8082`). No schema change, no worker restart. Blocked only on the 4 open
-items above (mostly your model/VRAM choices). Related: `.reference/multi-char-modes.md`
-(Mode A/B/C deployment shapes), `.reference/wsl2-docker-migration.md`.
+items above (mostly your model/VRAM choices). Related: `.local-notes/multi-char-modes.md`
+(Mode A/B/C deployment shapes), `.local-notes/wsl2-docker-migration.md`.
