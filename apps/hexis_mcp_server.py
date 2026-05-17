@@ -639,7 +639,7 @@ async def _run_server(dsn: str) -> None:
 
     server = Server("hexis-mcp")
 
-    client = await CognitiveMemory.connect(dsn)
+    client = await CognitiveMemory.create(dsn)
     pool = await asyncpg.create_pool(dsn, min_size=1, max_size=5)
     registry = await create_full_registry(pool)
 
