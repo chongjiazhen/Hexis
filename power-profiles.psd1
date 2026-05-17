@@ -1,9 +1,8 @@
 #
 # power-profiles.psd1 - canonical ECO/PRIME store.
-# Hand-editable. (Launcher GUI rewrite to the ActiveBig schema is pending -
-# until then DO NOT run hexis-launcher.ps1 Apply: it writes the old per-char
-# Path schema and will clobber BigModels/ActiveBig. Hand-edit ActiveBig.)
-# See .local-notes/power-modes.md.
+# AUTO-WRITTEN by hexis-launcher.ps1 on 2026-05-17 15:32. Hand-editable;
+# the launcher's Apply overwrites this file (the GUI is just another editor
+# of the same store). See .local-notes/power-modes.md.
 #
 @{
     LlamaServer = 'C:\llama.cpp-cuda\llama-server.exe'
@@ -22,21 +21,19 @@
     BigPort   = 8080
     ActiveBig = 'q36'
     BigModels = @{
-        'q36'           = @{ Alias = 'qwen3-6-35b-a3b-uncensored-heretic-i1-iq3-xxs'; Path = 'C:\Users\User\.cache\huggingface\hub\models--mradermacher--Qwen3.6-35B-A3B-uncensored-heretic-i1-GGUF\snapshots\97c91a931dbfd582487e8866bd129a2e8765051d\Qwen3.6-35B-A3B-uncensored-heretic.i1-IQ3_XXS.gguf' }
+        'cydonia' = @{ Alias = 'cydonia-24b-v4-3-heretic-v4-i1-iq4-xs'; Repo = 'mradermacher/Cydonia-24B-v4.3-heretic-v4-i1-GGUF'; Path = '' }
+        'pure-soul' = @{ Alias = 'hexis-pure-soul-24b-i1-iq4-xs'; Repo = 'mradermacher/Hexis-Pure-Soul-24B-i1-GGUF'; Path = '' }
+        'q36' = @{ Alias = 'qwen3-6-35b-a3b-uncensored-heretic-i1-iq3-xxs'; Path = 'C:\Users\User\.cache\huggingface\hub\models--mradermacher--Qwen3.6-35B-A3B-uncensored-heretic-i1-GGUF\snapshots\97c91a931dbfd582487e8866bd129a2e8765051d\Qwen3.6-35B-A3B-uncensored-heretic.i1-IQ3_XXS.gguf' }
         'sentient-mind' = @{ Alias = 'hexis-sentient-mind-24b-i1-iq4-xs'; Path = 'C:\Users\User\.cache\huggingface\hub\models--mradermacher--Hexis-Sentient-Mind-24B-i1-GGUF\snapshots\f29e1ace4a85ecc6c1509ff8b86c433803f5edbc\Hexis-Sentient-Mind-24B.i1-IQ4_XS.gguf' }
-        # Path='' until the download finalizes; -hf Repo fallback resolves from
-        # HF cache once present. Set Path after completion for a clean -m load.
-        'pure-soul'     = @{ Alias = 'hexis-pure-soul-24b-i1-iq4-xs'; Repo = 'mradermacher/Hexis-Pure-Soul-24B-i1-GGUF'; Path = '' }
-        'cydonia'       = @{ Alias = 'cydonia-24b-v4-3-heretic-v4-i1-iq4-xs'; Repo = 'mradermacher/Cydonia-24B-v4.3-heretic-v4-i1-GGUF'; Path = '' }
     }
 
     # gpu-tier characters all resolve to ActiveBig on BigPort (shared server).
     # nano-tier characters use the always-on CPU nano (:8082).
     Characters = @(
-        @{ Name='Sam';    Db='hexis_memory'; Prime=@{ Tier='gpu'  } }
+        @{ Name='Sam'; Db='hexis_memory'; Prime=@{ Tier='gpu' } }
         @{ Name='Baymax'; Db='hexis_baymax'; Prime=@{ Tier='nano' } }
-        @{ Name='Rocky';  Db='hexis_rocky';  Prime=@{ Tier='nano' } }
-        @{ Name='TARS';   Db='hexis_tars';   Prime=@{ Tier='nano' } }
-        @{ Name='Warden'; Db='hexis_warden'; Prime=@{ Tier='gpu'  } }
+        @{ Name='Rocky'; Db='hexis_rocky'; Prime=@{ Tier='nano' } }
+        @{ Name='TARS'; Db='hexis_tars'; Prime=@{ Tier='nano' } }
+        @{ Name='Warden'; Db='hexis_warden'; Prime=@{ Tier='gpu' } }
     )
 }

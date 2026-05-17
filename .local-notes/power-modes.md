@@ -5,13 +5,22 @@
 utf-8-sig). Full PRIME->ECO->PRIME round-trip verified: GPU servers
 killed/relaunched, embed `:8081` + nano `:8082` untouched, all 4 instance DBs
 flipped consistently (chat/heartbeat/subconscious). Desktop buttons live
-(`Hexis ECO`/`Hexis PRIME`). **Phase-2 GUI launcher BUILT** (`dd8d4d9`):
-`hexis-launcher.ps1` WinForms, per-character disk-model dropdown (scans HF
-cache), PRIME/ECO + Sam-piggyback, Apply rewrites `power-profiles.psd1` then
-calls the engine; `Hexis Launcher` desktop shortcut. Engine `Ensure-GpuServer`
-now takes a disk `Path` (-m) or `Repo` (-hf). psd1 generator round-trip
-verified; GUI render itself not headless-tested. Canonical editable source is
-`power-profiles.psd1` (this doc is rationale/history).
+(`Hexis ECO`/`Hexis PRIME`). **Phase-2 GUI launcher BUILT** (`dd8d4d9`),
+then **rewritten to the ActiveBig single-GPU-slot schema** (`a1ce053`
+engine + this commit GUI): `hexis-launcher.ps1` WinForms now has ONE
+`ActiveBig` selector (dropdown of `BigModels` keys, shows alias + on-disk/-hf
+source) plus a per-character `gpu`/`nano` `Tier` toggle, PRIME/ECO +
+Sam-piggyback. Apply rewrites `power-profiles.psd1` in the FULL ActiveBig
+schema (every `BigModels` entry preserved, `Repo` never dropped; the chosen
+entry's empty `Path` is filled from the HF cache when the gguf is present so
+`-m` beats the `-hf` fallback), then calls the engine. `Hexis Launcher`
+desktop shortcut. Engine `Ensure-GpuServer` takes a disk `Path` (-m) or
+`Repo` (-hf). Write-Profile round-trip headless-verified (dot-source the
+launcher = no GUI): psd1 parses, `BigModels[ActiveBig]` resolves, tiers/keys
+preserved, `set-power-mode prime`+`eco` consume it clean (arm/kill BigPort).
+The old per-char-Path Apply hazard is resolved; the hazard-warning header is
+gone. Canonical editable source is `power-profiles.psd1` (this doc is
+rationale/history).
 
 Engine artifacts: `power-profiles.psd1` (source of truth), `set-power-mode.ps1`
 `<eco|prime>`, `scripts/set_power_mode.py` (asyncpg flip), nano `:8082` added to
@@ -19,10 +28,14 @@ Engine artifacts: `power-profiles.psd1` (source of truth), `set-power-mode.ps1`
 (Desktop ECO/PRIME buttons). Per-char: Sam=Vesper-12B `:8080`,
 Baymax=Qwen2.5-3B `:8083`, Rocky/TARS=nano `:8082`. ECO kills 8080+8083.
 
-Phase 2 GUI: PowerShell WinForms grid — col1 characters, col2 dropdown of
-disk-scanned `*.gguf` (HF cache `C:\Users\User\.cache\huggingface\hub`), Apply
-writes `power-profiles.psd1` then calls `set-power-mode.ps1`. GUI never holds
-logic; psd1 stays canonical + hand-editable (the redundancy).
+Phase 2 GUI (ActiveBig rewrite): PowerShell WinForms — a single `ActiveBig`
+combo (the GPU model all gpu-tier chars share on `BigPort`) + a per-character
+`gpu`/`nano` `Tier` grid; disk-scan of `*.gguf` (HF cache
+`C:\Users\User\.cache\huggingface\hub`) is repurposed to back-fill the chosen
+entry's empty `Path`. Apply writes the full ActiveBig `power-profiles.psd1`
+then calls `set-power-mode.ps1`. GUI never holds logic; psd1 stays canonical +
+hand-editable (the redundancy). `Write-Profile` is single-sourced and
+dot-source-testable without rendering the form.
 
 Original design analysis below (kept for the why).
 
