@@ -25,6 +25,7 @@
         'pure-soul' = @{ Alias = 'hexis-pure-soul-24b-i1-iq4-xs'; Repo = 'mradermacher/Hexis-Pure-Soul-24B-i1-GGUF'; Path = '' }
         'q36' = @{ Alias = 'qwen3-6-35b-a3b-uncensored-heretic-i1-iq3-xxs'; Path = 'C:\Users\User\.cache\huggingface\hub\models--mradermacher--Qwen3.6-35B-A3B-uncensored-heretic-i1-GGUF\snapshots\97c91a931dbfd582487e8866bd129a2e8765051d\Qwen3.6-35B-A3B-uncensored-heretic.i1-IQ3_XXS.gguf' }
         'sentient-mind' = @{ Alias = 'hexis-sentient-mind-24b-i1-iq4-xs'; Path = 'C:\Users\User\.cache\huggingface\hub\models--mradermacher--Hexis-Sentient-Mind-24B-i1-GGUF\snapshots\f29e1ace4a85ecc6c1509ff8b86c433803f5edbc\Hexis-Sentient-Mind-24B.i1-IQ4_XS.gguf' }
+        'aeon27' = @{ Alias = 'qwen3-6-27b-aeon-ultimate-uncensored-bf16-i1-iq3-m'; Repo = 'mradermacher/Qwen3.6-27B-AEON-Ultimate-Uncensored-BF16-i1-GGUF'; Path = '' }
     }
 
     # gpu-tier characters all resolve to ActiveBig on BigPort (shared server).
