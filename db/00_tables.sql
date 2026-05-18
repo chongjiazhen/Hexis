@@ -418,6 +418,7 @@ INSERT INTO config (key, value, description) VALUES
     ('heartbeat.base_regeneration', '10'::jsonb, 'Energy regenerated per heartbeat'),
     ('heartbeat.max_energy', '20'::jsonb, 'Maximum energy cap'),
     ('heartbeat.heartbeat_interval_minutes', '60'::jsonb, 'Minutes between heartbeats'),
+    ('heartbeat.heartbeat_jitter_minutes', '12'::jsonb, 'Random +0..N minute spread added per cycle to de-cluster concurrent multi-instance heartbeats on shared inference'),
     ('heartbeat.max_decision_tokens', '2048'::jsonb, 'Max tokens for heartbeat decision'),
     ('heartbeat.allowed_actions', '["observe","review_goals","remember","recall","connect","reprioritize","reflect","contemplate","meditate","study","debate_internally","maintain","mark_turning_point","begin_chapter","close_chapter","acknowledge_relationship","update_trust","reflect_on_relationship","resolve_contradiction","accept_tension","brainstorm_goals","inquire_shallow","synthesize","reach_out_user","inquire_deep","reach_out_public","fast_ingest","slow_ingest","hybrid_ingest","pause_heartbeat","terminate","rest"]'::jsonb, 'Allowed heartbeat actions'),
     ('heartbeat.max_active_goals', '3'::jsonb, 'Maximum concurrent active goals'),

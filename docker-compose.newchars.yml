@@ -120,6 +120,22 @@ services:
       POSTGRES_DB: hexis_monika
       MONIKA_TELEGRAM_BOT_TOKEN: ${MONIKA_TELEGRAM_BOT_TOKEN:-}
 
+  monika_heartbeat_worker:
+    <<: *worker-base
+    container_name: hexis_monika_heartbeat_worker
+    command: ["hexis-worker", "--mode", "heartbeat"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_monika
+
+  monika_maintenance_worker:
+    <<: *worker-base
+    container_name: hexis_monika_maintenance_worker
+    command: ["hexis-worker", "--mode", "maintenance"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_monika
+
   # ── Joje ───────────────────────────────────────────────────────────────────
   joje_channel_worker:
     <<: *channel-base
@@ -128,6 +144,22 @@ services:
       <<: *common-env
       POSTGRES_DB: hexis_joje
       JOJE_TELEGRAM_BOT_TOKEN: ${JOJE_TELEGRAM_BOT_TOKEN:-}
+
+  joje_heartbeat_worker:
+    <<: *worker-base
+    container_name: hexis_joje_heartbeat_worker
+    command: ["hexis-worker", "--mode", "heartbeat"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_joje
+
+  joje_maintenance_worker:
+    <<: *worker-base
+    container_name: hexis_joje_maintenance_worker
+    command: ["hexis-worker", "--mode", "maintenance"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_joje
 
   # ── Nines ──────────────────────────────────────────────────────────────────
   nines_channel_worker:
@@ -138,6 +170,22 @@ services:
       POSTGRES_DB: hexis_nines
       NINES_TELEGRAM_BOT_TOKEN: ${NINES_TELEGRAM_BOT_TOKEN:-}
 
+  nines_heartbeat_worker:
+    <<: *worker-base
+    container_name: hexis_nines_heartbeat_worker
+    command: ["hexis-worker", "--mode", "heartbeat"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_nines
+
+  nines_maintenance_worker:
+    <<: *worker-base
+    container_name: hexis_nines_maintenance_worker
+    command: ["hexis-worker", "--mode", "maintenance"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_nines
+
   # ── Death ──────────────────────────────────────────────────────────────────
   death_channel_worker:
     <<: *channel-base
@@ -147,6 +195,22 @@ services:
       POSTGRES_DB: hexis_death
       DEATH_TELEGRAM_BOT_TOKEN: ${DEATH_TELEGRAM_BOT_TOKEN:-}
 
+  death_heartbeat_worker:
+    <<: *worker-base
+    container_name: hexis_death_heartbeat_worker
+    command: ["hexis-worker", "--mode", "heartbeat"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_death
+
+  death_maintenance_worker:
+    <<: *worker-base
+    container_name: hexis_death_maintenance_worker
+    command: ["hexis-worker", "--mode", "maintenance"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_death
+
   # ── Cassiel ────────────────────────────────────────────────────────────────
   cassiel_channel_worker:
     <<: *channel-base
@@ -155,3 +219,69 @@ services:
       <<: *common-env
       POSTGRES_DB: hexis_cassiel
       CASSIEL_TELEGRAM_BOT_TOKEN: ${CASSIEL_TELEGRAM_BOT_TOKEN:-}
+
+  cassiel_heartbeat_worker:
+    <<: *worker-base
+    container_name: hexis_cassiel_heartbeat_worker
+    command: ["hexis-worker", "--mode", "heartbeat"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_cassiel
+
+  cassiel_maintenance_worker:
+    <<: *worker-base
+    container_name: hexis_cassiel_maintenance_worker
+    command: ["hexis-worker", "--mode", "maintenance"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_cassiel
+
+  # ── LOVESICK ───────────────────────────────────────────────────────────────
+  lovesick_channel_worker:
+    <<: *channel-base
+    container_name: hexis_lovesick_channel_worker
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_lovesick
+      LOVESICK_TELEGRAM_BOT_TOKEN: ${LOVESICK_TELEGRAM_BOT_TOKEN:-}
+
+  lovesick_heartbeat_worker:
+    <<: *worker-base
+    container_name: hexis_lovesick_heartbeat_worker
+    command: ["hexis-worker", "--mode", "heartbeat"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_lovesick
+
+  lovesick_maintenance_worker:
+    <<: *worker-base
+    container_name: hexis_lovesick_maintenance_worker
+    command: ["hexis-worker", "--mode", "maintenance"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_lovesick
+
+  # ── Charlotte ──────────────────────────────────────────────────────────────
+  charlotte_channel_worker:
+    <<: *channel-base
+    container_name: hexis_charlotte_channel_worker
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_charlotte
+      CHARLOTTE_TELEGRAM_BOT_TOKEN: ${CHARLOTTE_TELEGRAM_BOT_TOKEN:-}
+
+  charlotte_heartbeat_worker:
+    <<: *worker-base
+    container_name: hexis_charlotte_heartbeat_worker
+    command: ["hexis-worker", "--mode", "heartbeat"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_charlotte
+
+  charlotte_maintenance_worker:
+    <<: *worker-base
+    container_name: hexis_charlotte_maintenance_worker
+    command: ["hexis-worker", "--mode", "maintenance"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_charlotte
