@@ -67,6 +67,26 @@ def _jsonable(obj: Any) -> Any:
     return str(obj)
 
 
+def _lean_memories(memories: Any) -> list[dict[str, Any]]:
+    """Low-ctx body projection: strip each Memory to {type, content}.
+
+    Drops the 9 metadata fields (id, relevance_score, similarity, source,
+    trust_level, source_attribution, importance, created_at,
+    emotional_valence) a chat persona never reads — pure context bloat.
+    Server-side and model-proof. See .local-notes/recall-ctx-cap-spec.md.
+    """
+    out: list[dict[str, Any]] = []
+    for m in memories or []:
+        mt = getattr(m, "type", None)
+        out.append(
+            {
+                "type": mt.value if isinstance(mt, Enum) else str(mt),
+                "content": getattr(m, "content", ""),
+            }
+        )
+    return out
+
+
 def _tool(name: str, description: str, schema: dict[str, Any]):
     # Tool class is provided by MCP; imported lazily in main().
     from mcp.types import Tool
@@ -111,8 +131,11 @@ async def _dispatch_tool(client: CognitiveMemory, name: str, args: dict[str, Any
 
     if name == "recall":
         query = _require(args, "query", name)
-        limit = int(args.get("limit", 10))
-        include_partial = bool(args.get("include_partial", True))
+        # Low-ctx body cap (model-proof, server-side): never return more than
+        # 3 memories, partial activations off, noise floored. A model asking
+        # for limit=10 still gets 3. See .local-notes/recall-ctx-cap-spec.md.
+        limit = min(int(args.get("limit", 3)), 3)
+        include_partial = False
 
         memory_types = args.get("memory_types")
         parsed_types: list[MemoryType] | None = None
@@ -121,13 +144,16 @@ async def _dispatch_tool(client: CognitiveMemory, name: str, args: dict[str, Any
                 raise ValueError("memory_types must be an array of strings")
             parsed_types = [MemoryType(t) for t in memory_types]
 
-        return await client.recall(
+        result = await client.recall(
             query,
             limit=limit,
             memory_types=parsed_types,
-            min_importance=float(args.get("min_importance", 0.0)),
+            min_importance=max(float(args.get("min_importance", 0.3)), 0.3),
             include_partial=include_partial,
         )
+        # Lean projection: ship only {type, content}. partial_activations
+        # forced off above; query echo dropped (model already sent it).
+        return {"memories": _lean_memories(result.memories)}
 
     if name == "sense_memory_availability":
         query = _require(args, "query", name)
@@ -246,7 +272,12 @@ async def _dispatch_tool(client: CognitiveMemory, name: str, args: dict[str, Any
 
     if name == "find_by_concept":
         concept = _require(args, "concept", name)
-        return await client.find_by_concept(concept, limit=int(args.get("limit", 10)))
+        # Low-ctx body cap (model-proof): clamp to 3. The recall-ctx-cap spec
+        # capped `recall` but missed this surface; transcript showed it firing
+        # uncapped at default limit=10. See .local-notes/recall-ctx-cap-spec.md.
+        limit = min(int(args.get("limit", 3)), 3)
+        result = await client.find_by_concept(concept, limit=limit)
+        return {"memories": _lean_memories(result)}
 
     if name == "hold":
         content = _require(args, "content", name)
@@ -680,7 +711,9 @@ async def _run_server(dsn: str) -> None:
             else:
                 # Legacy dispatch for memory tools
                 result = await _dispatch_tool(client, name, arguments or {})
-                text = json.dumps(_jsonable(result), indent=2, sort_keys=True)
+                # Compact: no indent/newlines/sort — whitespace is pure ctx
+                # bloat for low-ctx bodies. Semantically identical JSON.
+                text = json.dumps(_jsonable(result), separators=(",", ":"))
         except Exception as exc:
             text = f"Error: {exc}"
         return [TextContent(type="text", text=text)]

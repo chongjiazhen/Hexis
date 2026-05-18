@@ -1,0 +1,157 @@
+# Native channel (+ heartbeat/maintenance) workers for all hexis-native personas.
+# Reuses shared db + rabbitmq from docker-compose.yml.
+# Single source of truth — replaces the legacy per-persona docker-compose.<P>.yml files.
+#
+# Usage (channel workers only):
+#   docker compose -f docker-compose.yml -f docker-compose.newchars.yml \
+#     up -d --build <persona>_channel_worker [...]
+#
+# Usage (full stack per persona, once behavioral gate passes):
+#   docker compose -f docker-compose.yml -f docker-compose.newchars.yml \
+#     --profile active up -d \
+#     <persona>_channel_worker <persona>_heartbeat_worker <persona>_maintenance_worker
+
+x-channel-base: &channel-base
+  build:
+    context: .
+    dockerfile: ops/Dockerfile.channels
+  profiles:
+    - active
+  command: ["hexis-channels"]
+  depends_on:
+    db:
+      condition: service_healthy
+    rabbitmq:
+      condition: service_healthy
+  networks:
+    - private
+    - public
+
+x-worker-base: &worker-base
+  build:
+    context: .
+    dockerfile: ops/Dockerfile.worker
+  profiles:
+    - active
+  depends_on:
+    db:
+      condition: service_healthy
+    rabbitmq:
+      condition: service_healthy
+  networks:
+    - private
+    - public
+
+x-common-env: &common-env
+  POSTGRES_HOST: db
+  POSTGRES_PORT: 5432
+  POSTGRES_USER: ${POSTGRES_USER:-hexis_user}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hexis_password}
+  EMBEDDING_MODEL_ID: ${EMBEDDING_MODEL_ID:-unsloth/embeddinggemma-300m}
+  EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-768}
+  RABBITMQ_MANAGEMENT_URL: http://rabbitmq:15672
+  RABBITMQ_USER: ${RABBITMQ_DEFAULT_USER:-hexis}
+  RABBITMQ_PASSWORD: ${RABBITMQ_DEFAULT_PASS:-hexis_password}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+  XAI_API_KEY: ${XAI_API_KEY:-}
+  HEXIS_LLM_CONSCIOUS_API_KEY: ${HEXIS_LLM_CONSCIOUS_API_KEY:-}
+  HEXIS_LLM_SUBCONSCIOUS_API_KEY: ${HEXIS_LLM_SUBCONSCIOUS_API_KEY:-}
+
+services:
+
+  # ── Ennie ──────────────────────────────────────────────────────────────────
+  eni_channel_worker:
+    <<: *channel-base
+    container_name: hexis_eni_channel_worker
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_eni
+      ENNIE_TELEGRAM_BOT_TOKEN: ${ENNIE_TELEGRAM_BOT_TOKEN:-}
+
+  eni_heartbeat_worker:
+    <<: *worker-base
+    container_name: hexis_eni_heartbeat_worker
+    command: ["hexis-worker", "--mode", "heartbeat"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_eni
+
+  eni_maintenance_worker:
+    <<: *worker-base
+    container_name: hexis_eni_maintenance_worker
+    command: ["hexis-worker", "--mode", "maintenance"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_eni
+
+  # ── Mira ───────────────────────────────────────────────────────────────────
+  mira_channel_worker:
+    <<: *channel-base
+    container_name: hexis_mira_channel_worker
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_mira
+      MIRA_TELEGRAM_BOT_TOKEN: ${MIRA_TELEGRAM_BOT_TOKEN:-}
+
+  mira_heartbeat_worker:
+    <<: *worker-base
+    container_name: hexis_mira_heartbeat_worker
+    command: ["hexis-worker", "--mode", "heartbeat"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_mira
+
+  mira_maintenance_worker:
+    <<: *worker-base
+    container_name: hexis_mira_maintenance_worker
+    command: ["hexis-worker", "--mode", "maintenance"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_mira
+
+  # ── Monika ─────────────────────────────────────────────────────────────────
+  monika_channel_worker:
+    <<: *channel-base
+    container_name: hexis_monika_channel_worker
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_monika
+      MONIKA_TELEGRAM_BOT_TOKEN: ${MONIKA_TELEGRAM_BOT_TOKEN:-}
+
+  # ── Joje ───────────────────────────────────────────────────────────────────
+  joje_channel_worker:
+    <<: *channel-base
+    container_name: hexis_joje_channel_worker
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_joje
+      JOJE_TELEGRAM_BOT_TOKEN: ${JOJE_TELEGRAM_BOT_TOKEN:-}
+
+  # ── Nines ──────────────────────────────────────────────────────────────────
+  nines_channel_worker:
+    <<: *channel-base
+    container_name: hexis_nines_channel_worker
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_nines
+      NINES_TELEGRAM_BOT_TOKEN: ${NINES_TELEGRAM_BOT_TOKEN:-}
+
+  # ── Death ──────────────────────────────────────────────────────────────────
+  death_channel_worker:
+    <<: *channel-base
+    container_name: hexis_death_channel_worker
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_death
+      DEATH_TELEGRAM_BOT_TOKEN: ${DEATH_TELEGRAM_BOT_TOKEN:-}
+
+  # ── Cassiel ────────────────────────────────────────────────────────────────
+  cassiel_channel_worker:
+    <<: *channel-base
+    container_name: hexis_cassiel_channel_worker
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_cassiel
+      CASSIEL_TELEGRAM_BOT_TOKEN: ${CASSIEL_TELEGRAM_BOT_TOKEN:-}

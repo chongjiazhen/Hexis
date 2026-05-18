@@ -532,6 +532,24 @@ async def stream_channel_message(
         message_id = await coalescer.flush()
         assistant_text = "".join(collected)
 
+        if not assistant_text:
+            # Model returned nothing — don't poison history with an empty assistant turn.
+            # Send a fallback so the user knows the message was received.
+            logger.warning(
+                "Empty streaming response for %s/%s — sending fallback, not storing in history",
+                msg.channel_type, msg.sender_id,
+            )
+            try:
+                await adapter.send(
+                    msg.channel_id,
+                    "...",
+                    reply_to=msg.message_id,
+                    thread_id=msg.thread_id,
+                )
+            except Exception:
+                logger.debug("Failed to send empty-response fallback", exc_info=True)
+            return None
+
         # Update session and log
         new_history = list(history)
         new_history.append({"role": "user", "content": user_content})

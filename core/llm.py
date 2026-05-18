@@ -996,6 +996,12 @@ async def chat_completion(
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
+            # Qwen3 reasoning models otherwise burn the whole token budget on
+            # reasoning_content and return empty `content` via this
+            # OpenAI-compatible path. Disable thinking at the chat-template
+            # level (honored by llama.cpp --jinja; ignored by non-Qwen
+            # templates). See .local-notes/hexis-native-onboard.prompt.md.
+            "extra_body": {"chat_template_kwargs": {"enable_thinking": False}},
         }
         if tools:
             payload["tools"] = tools

@@ -1,3 +1,7 @@
+# DEPRECATED — services moved to docker-compose.newchars.yml.
+# Keep for reference only; do not use for new deployments.
+# Use: docker compose -f docker-compose.yml -f docker-compose.newchars.yml ...
+#
 # Worker stack for the ENI instance.
 #
 # Reuses the shared db + rabbitmq from docker-compose.yml. Workers point at the
@@ -34,7 +38,7 @@ services:
       RABBITMQ_MANAGEMENT_URL: http://rabbitmq:15672
       RABBITMQ_USER: ${RABBITMQ_DEFAULT_USER:-hexis}
       RABBITMQ_PASSWORD: ${RABBITMQ_DEFAULT_PASS:-hexis_password}
-      ROCKY_TELEGRAM_BOT_TOKEN: ${ROCKY_TELEGRAM_BOT_TOKEN:-}
+      ENNIE_TELEGRAM_BOT_TOKEN: ${ENNIE_TELEGRAM_BOT_TOKEN:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}

@@ -239,12 +239,19 @@ async def build_system_prompt(
     subconscious_output: SubconsciousOutput | None = None,
     has_backlog_tasks: bool = False,
     is_group: bool = False,
+    persona_system_prompt: str = "",
 ) -> str:
     """Build the system prompt for either chat or heartbeat mode."""
 
+    # Persona system prompt (character card override) takes priority — prepend first
+    if persona_system_prompt:
+        base_prefix = persona_system_prompt.strip() + "\n\n---\n\n"
+    else:
+        base_prefix = ""
+
     # Base prompt
     if mode == "chat":
-        prompt = load_conversation_prompt().strip()
+        prompt = base_prefix + load_conversation_prompt().strip()
         if is_group:
             from services.prompt_resources import load_channel_context_prompt
             prompt += "\n\n" + load_channel_context_prompt().strip()
@@ -350,6 +357,18 @@ async def run_agent(
         llm_fallback = "llm" if mode == "chat" else None
         llm_config = await load_llm_config(conn, llm_key, fallback_key=llm_fallback)
 
+        # Load persona system prompt override if set (character card system_prompt)
+        persona_system_prompt = ""
+        try:
+            raw_psp = await conn.fetchval(
+                "SELECT value FROM config WHERE key = 'agent.persona_system_prompt'"
+            )
+            if raw_psp:
+                import json as _json
+                persona_system_prompt = _json.loads(raw_psp) if isinstance(raw_psp, str) else str(raw_psp)
+        except Exception:
+            pass
+
         # 2. Hydrate memory context (chat mode - heartbeat builds its own context)
         memory_context = ""
         if mode == "chat":
@@ -413,6 +432,7 @@ async def run_agent(
         subconscious_output=subconscious_output,
         has_backlog_tasks=has_backlog_tasks,
         is_group=is_group,
+        persona_system_prompt=persona_system_prompt,
     )
 
     # 5. Build enriched user message
@@ -529,6 +549,18 @@ async def stream_agent(
         llm_fallback = "llm" if mode == "chat" else None
         llm_config = await load_llm_config(conn, llm_key, fallback_key=llm_fallback)
 
+        # Load persona system prompt override if set (character card system_prompt)
+        persona_system_prompt = ""
+        try:
+            raw_psp = await conn.fetchval(
+                "SELECT value FROM config WHERE key = 'agent.persona_system_prompt'"
+            )
+            if raw_psp:
+                import json as _json
+                persona_system_prompt = _json.loads(raw_psp) if isinstance(raw_psp, str) else str(raw_psp)
+        except Exception:
+            pass
+
         # Hydrate memory
         memory_context = ""
         if mode == "chat":
@@ -588,6 +620,7 @@ async def stream_agent(
         subconscious_output=subconscious_output,
         has_backlog_tasks=has_backlog_tasks,
         is_group=is_group,
+        persona_system_prompt=persona_system_prompt,
     )
 
     # Build enriched user message
