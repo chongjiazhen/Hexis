@@ -90,7 +90,7 @@ function Ensure-GpuServer([string]$Repo, [string]$Path, [int]$Port, [string]$Ali
     Start-Process -FilePath $LlamaServer `
         -ArgumentList ($modelArgs + @("--host","0.0.0.0","--port","$Port",
                         "--ctx-size","24576","--parallel","1","--n-gpu-layers","999",
-                        "--alias",$Alias,"--jinja")) `
+                        "--alias",$Alias,"--jinja","--reasoning-budget","0")) `
         -WindowStyle Hidden
 }
 
