@@ -19,6 +19,8 @@ from typing import Any, Callable
 
 from core.llm import chat_completion, normalize_llm_config
 from core.memory_repo import MemoryRepo
+from core.tools.base import ToolContext
+from core.tools.registry import create_default_registry
 from core.tools.repl_bridge import ReplToolBridge, call_records_to_actions_taken
 from services.prompt_resources import (
     compose_personhood_prompt,
@@ -459,6 +461,7 @@ async def run_chat_turn(
     max_iterations: int = 15,
     timeout_seconds: int = 120,
     workspace_budgets: WorkspaceBudgets | None = None,
+    pool: Any | None = None,
 ) -> dict[str, Any]:
     """
     Run the RLM loop for a chat turn.
@@ -470,6 +473,32 @@ async def run_chat_turn(
     time_start = time.perf_counter()
     llm_cfg = normalize_llm_config(llm_config)
     loop = asyncio.get_running_loop()
+
+    # Build a CHAT-context tool bridge so the chat REPL can call agent tools
+    # (web_search, web_fetch, ingest, schedule, goals, ...). Without this the
+    # chat REPL only has memory syscalls. Energy is not gated in CHAT context
+    # (policy enforces energy for HEARTBEAT only), so initial_energy is a
+    # large no-op ceiling. A fresh bridge is built per call to bind the
+    # current event loop (chat sessions reuse the REPL across calls/loops).
+    own_pool = pool is None
+    if own_pool:
+        import asyncpg
+
+        pool = await asyncpg.create_pool(dsn, min_size=1, max_size=3)
+
+    tool_bridge: ReplToolBridge | None = None
+    try:
+        registry = create_default_registry(pool)
+        tool_bridge = ReplToolBridge(
+            registry,
+            loop,
+            tool_context=ToolContext.CHAT,
+            initial_energy=1_000_000_000,
+            allow_network=True,
+        )
+    except Exception:
+        logger.exception("chat tool bridge unavailable; continuing memory-only")
+        tool_bridge = None
 
     # Create memory repo
     repo = MemoryRepo(dsn)
@@ -485,11 +514,19 @@ async def run_chat_turn(
             repl = _chat_sessions[session_id]
             # Add new user message as context
             repl.load_context(user_message, index=repl._context_count)
+            # Rebind tool bridge: the cached REPL's closures hold a stale
+            # event loop from the session's first turn. Point them at the
+            # fresh per-call bridge bound to the current loop.
+            if tool_bridge is not None:
+                repl.globals["tool_use"] = tool_bridge.tool_use
+                repl.globals["list_tools"] = tool_bridge.list_tools
+                repl.globals["energy_remaining"] = tool_bridge.energy_remaining
         else:
             repl = HexisLocalREPL()
             repl.setup(
                 context_payload=user_message,
                 memory_env=memory_env,
+                tool_bridge=tool_bridge,
                 llm_query_fn=llm_query_fn,
             )
             if session_id:
@@ -530,6 +567,8 @@ async def run_chat_turn(
         if not session_id:
             repl.cleanup()
         repo.close()
+        if own_pool and pool is not None:
+            await pool.close()
 
     duration = time.perf_counter() - time_start
 

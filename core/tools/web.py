@@ -7,6 +7,7 @@ Tools for web operations (search, fetch content).
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, Callable
 
 from .base import (
@@ -135,25 +136,6 @@ class WebSearchHandler(ToolHandler):
                 ToolErrorType.PERMISSION_DENIED,
             )
 
-        # Get API key
-        api_key = None
-        if self._api_key_resolver:
-            api_key = self._api_key_resolver()
-        else:
-            # Try to get from config
-            try:
-                config = await context.registry.get_config()
-                api_key = config.get_api_key("tavily")
-            except Exception:
-                pass
-
-        if not api_key:
-            return ToolResult.error_result(
-                "Web search API key not configured. Set TAVILY_API_KEY environment variable "
-                "or configure via 'hexis tools set-api-key tavily env:TAVILY_API_KEY'",
-                ToolErrorType.MISSING_CONFIG,
-            )
-
         query = arguments["query"]
         max_results = min(arguments.get("max_results", 5), 10)
         search_depth = arguments.get("search_depth", "basic")
@@ -165,6 +147,95 @@ class WebSearchHandler(ToolHandler):
             return ToolResult.error_result(
                 "aiohttp not installed - required for web search",
                 ToolErrorType.MISSING_DEPENDENCY,
+            )
+
+        # Resolve config (shared by SearXNG + Tavily resolution)
+        config = None
+        try:
+            config = await context.registry.get_config()
+        except Exception:
+            pass
+
+        # Provider 1: self-hosted SearXNG (no API key, local-inference-friendly).
+        # Base URL from config api_keys 'searxng' or env SEARXNG_URL.
+        searxng_url = None
+        if config is not None:
+            try:
+                searxng_url = config.get_api_key("searxng")
+            except Exception:
+                searxng_url = None
+        if not searxng_url:
+            searxng_url = os.getenv("SEARXNG_URL")
+
+        if searxng_url:
+            base = searxng_url.rstrip("/")
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        f"{base}/search",
+                        params={
+                            "q": query,
+                            "format": "json",
+                            "safesearch": "0",
+                            "pageno": "1",
+                        },
+                        headers={"Accept": "application/json"},
+                        timeout=aiohttp.ClientTimeout(total=30),
+                    ) as resp:
+                        if resp.status != 200:
+                            text = await resp.text()
+                            return ToolResult.error_result(
+                                f"SearXNG search failed with status {resp.status}: {text[:200]}",
+                                ToolErrorType.EXECUTION_FAILED,
+                            )
+                        data = await resp.json()
+
+                results = []
+                for r in data.get("results", [])[:max_results]:
+                    results.append({
+                        "title": r.get("title", ""),
+                        "url": r.get("url", ""),
+                        "snippet": (r.get("content") or "")[:500],
+                        "score": r.get("score"),
+                    })
+
+                output = {"query": query, "results": results, "count": len(results)}
+                if include_answer and data.get("answers"):
+                    output["answer"] = " ".join(str(a) for a in data["answers"])[:1000]
+
+                display_lines = [f"Search results for: {query}"]
+                for i, r in enumerate(results[:5], 1):
+                    display_lines.append(f"{i}. {r['title']}")
+                    display_lines.append(f"   {r['snippet'][:100]}...")
+
+                return ToolResult.success_result(
+                    output=output,
+                    display_output="\n".join(display_lines),
+                )
+            except aiohttp.ClientError as e:
+                return ToolResult.error_result(
+                    f"SearXNG request failed: {e}",
+                    ToolErrorType.EXECUTION_FAILED,
+                )
+            except Exception as e:
+                logger.exception("SearXNG search failed")
+                return ToolResult.error_result(str(e), ToolErrorType.EXECUTION_FAILED)
+
+        # Provider 2: Tavily (cloud, requires API key) - fallback if no SearXNG.
+        api_key = None
+        if self._api_key_resolver:
+            api_key = self._api_key_resolver()
+        elif config is not None:
+            try:
+                api_key = config.get_api_key("tavily")
+            except Exception:
+                pass
+
+        if not api_key:
+            return ToolResult.error_result(
+                "Web search not configured. Set SEARXNG_URL (self-hosted, recommended) "
+                "or TAVILY_API_KEY / 'hexis tools set-api-key tavily env:TAVILY_API_KEY'.",
+                ToolErrorType.MISSING_CONFIG,
             )
 
         try:

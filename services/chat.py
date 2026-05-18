@@ -168,6 +168,7 @@ async def chat_turn(
             llm_config=normalized,
             dsn=dsn,
             session_id=session_id,
+            pool=pool,
         )
         assistant_text = result["response"]
         # Still form memory from the turn
