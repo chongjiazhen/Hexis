@@ -187,9 +187,17 @@ def _run_loop(
     loop: asyncio.AbstractEventLoop,
     system_prompt: str,
     max_iterations: int,
+    chat_mode: bool = False,
+    llm_max_tokens: int = 4096,
 ) -> dict[str, Any]:
     """
     Synchronous RLM iteration loop (Algorithm 1).
+
+    chat_mode: in a conversational turn, an iteration that emits neither a
+    FINAL(...) nor a ```repl code block IS the assistant's reply (RP-tuned
+    models answer in prose and never use the FINAL contract). Return it
+    immediately instead of re-prompting until the no-FINAL exhaustion path
+    dumps a degenerate multi-thousand-token ramble.
 
     Runs in a thread pool executor to avoid blocking the async event loop.
     LLM calls bridge back to the async loop via run_coroutine_threadsafe.
@@ -209,7 +217,7 @@ def _run_loop(
 
         # Call LLM
         future = asyncio.run_coroutine_threadsafe(
-            _llm_completion(current_prompt, llm_config, max_tokens=4096),
+            _llm_completion(current_prompt, llm_config, max_tokens=llm_max_tokens),
             loop,
         )
         try:
@@ -230,6 +238,15 @@ def _run_loop(
 
         # Extract and execute code blocks
         code_blocks = find_code_blocks(response)
+
+        # Conversational reply: no FINAL, no tool/code request -> this prose
+        # IS the answer. Stops RP-tuned models (WorldSim) from looping to the
+        # no-FINAL exhaustion path and emitting a degenerate ramble.
+        if chat_mode and not code_blocks:
+            final_answer = response
+            logger.info("RLM chat: conversational reply at iteration %d", i + 1)
+            break
+
         results: list[REPLResult] = []
 
         for code in code_blocks:
@@ -458,7 +475,7 @@ async def run_chat_turn(
     llm_config: dict[str, Any],
     dsn: str,
     session_id: str | None = None,
-    max_iterations: int = 15,
+    max_iterations: int = 8,
     timeout_seconds: int = 120,
     workspace_budgets: WorkspaceBudgets | None = None,
     pool: Any | None = None,
@@ -552,6 +569,8 @@ async def run_chat_turn(
                 loop,
                 system_prompt,
                 max_iterations,
+                True,   # chat_mode: prose w/o FINAL/code = the reply
+                1536,   # llm_max_tokens: cap chat ramble (Telegram-sized)
             ),
             timeout=timeout_seconds,
         )

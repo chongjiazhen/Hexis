@@ -147,9 +147,15 @@ function Ensure-GpuServer([string]$Repo, [string]$Path, [int]$Port, [string]$Ali
         Write-Host "[arm] $Alias :$Port ($src) [defaults ctx=24576 kv=q4_0]"
     }
 
+    # --repeat-penalty/--repeat-last-n: RP-merge GGUFs at low quant fall into
+    # whole-paragraph repetition loops without sequence-level penalty (WorldSim
+    # IQ3_XXS). Hexis-orchestration sampler choice, not serve tuning - stays
+    # here, NOT in models.json (the kobold/SillyTavern consumer must not inherit
+    # it). Applies to every ActiveBig the fleet arms.
     Start-Process -FilePath $LlamaServer `
         -ArgumentList ($modelArgs + @("--host","0.0.0.0","--port","$Port") + $tuning +
-                        @("--alias",$Alias,"--jinja","--reasoning-budget","0")) `
+                        @("--alias",$Alias,"--jinja","--reasoning-budget","0",
+                          "--repeat-penalty","1.1","--repeat-last-n","256")) `
         -WindowStyle Hidden
 }
 
