@@ -52,6 +52,53 @@ $ActiveBig = $P.ActiveBig
 $big       = $P.BigModels[$ActiveBig]
 if (-not $big) { throw "ActiveBig '$ActiveBig' not found in BigModels (power-profiles.psd1)" }
 
+# ---- llm-serve registry: single source of truth for per-model serve flags ----
+# C:\llm-serve\models.json owns ctx/ngl/kv_quant/batch/threads per model and is
+# consumed by infra/switch.py, monitor.py, gen-litellm-config. Hexis sources GPU
+# serve TUNING from it keyed by ActiveBig; Hexis-specific ORCHESTRATION flags
+# (--alias/--jinja/--reasoning-budget) stay here - they are not serve tuning and
+# the kobold/SillyTavern consumer must never see them. Falls back to built-in
+# defaults when the registry file or the model's entry is absent, so models not
+# yet backfilled into the registry keep working unchanged.
+$RegistryPath = if ($env:HEXIS_LLM_REGISTRY) { $env:HEXIS_LLM_REGISTRY } else { 'C:\llm-serve\models.json' }
+
+function Get-RegistryEntry([string]$Key) {
+    if (-not $Key) { return $null }
+    if (-not (Test-Path $RegistryPath)) {
+        Write-Host "[registry] $RegistryPath not found - built-in serve defaults"
+        return $null
+    }
+    try {
+        $reg = Get-Content -Raw -Path $RegistryPath | ConvertFrom-Json
+    } catch {
+        Write-Host "[registry] parse failed ($($_.Exception.Message)) - built-in serve defaults"
+        return $null
+    }
+    $prop = $reg.PSObject.Properties[$Key]
+    if (-not $prop) {
+        Write-Host "[registry] no entry '$Key' - built-in serve defaults"
+        return $null
+    }
+    return $prop.Value
+}
+
+# Mirror of infra/switch.py build_llama_flags() - KEEP IN SYNC. Returns serve
+# tuning args only; the caller appends model source + Hexis orchestration flags.
+function Build-RegistryFlags($e) {
+    $kv = [string]$e.kv_quant
+    if ($kv -notin @('f16','q8_0','q4_0')) { throw "registry: unknown kv_quant '$kv'" }
+    $parts = @('-ngl', "$($e.ngl)")
+    if ($e.tensor_split) {
+        $parts += @('-ts', (($e.tensor_split | ForEach-Object { "$_" }) -join ','), '--split-mode', 'layer')
+    }
+    $parts += @('--flash-attn','true')
+    if ($kv -ne 'f16') { $parts += @('--cache-type-k',$kv,'--cache-type-v',$kv) }
+    $parts += @('-c',"$($e.ctx)",'-b',"$($e.batch_logical)",'-ub',"$($e.batch_physical)",
+                '--parallel',"$($e.parallel)",'--threads',"$($e.threads)")
+    if ($e.extra_flags) { $parts += ([string]$e.extra_flags -split '\s+') }
+    return $parts
+}
+
 function Get-PortPid([int]$Port) {
     $c = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
     if ($c) { return $c[0].OwningProcess }
@@ -68,7 +115,7 @@ function Kill-Port([int]$Port, [string]$Label) {
     }
 }
 
-function Ensure-GpuServer([string]$Repo, [string]$Path, [int]$Port, [string]$Alias) {
+function Ensure-GpuServer([string]$Repo, [string]$Path, [int]$Port, [string]$Alias, [string]$RegistryKey) {
     if (Get-PortPid $Port) {
         Write-Host "[arm] $Alias :$Port already up"
         return
@@ -86,11 +133,23 @@ function Ensure-GpuServer([string]$Repo, [string]$Path, [int]$Port, [string]$Ali
     } else {
         throw "character '$Alias' has neither Path nor Repo set in power-profiles.psd1"
     }
-    Write-Host "[arm] $Alias :$Port ($src)"
+
+    $entry = Get-RegistryEntry $RegistryKey
+    if ($entry) {
+        $tuning = Build-RegistryFlags $entry
+        Write-Host "[arm] $Alias :$Port ($src) [registry:$RegistryKey ctx=$($entry.ctx) kv=$($entry.kv_quant) ngl=$($entry.ngl)]"
+    } else {
+        # Built-in fallback - identical to the pre-registry hardcoded serve
+        # config (q4_0 KV + flash-attn, 24576 ctx, full offload, parallel 1).
+        # Keeps models absent from the registry working byte-for-byte unchanged.
+        $tuning = @('-ngl','999','--flash-attn','true','--cache-type-k','q4_0',
+                    '--cache-type-v','q4_0','-c','24576','--parallel','1')
+        Write-Host "[arm] $Alias :$Port ($src) [defaults ctx=24576 kv=q4_0]"
+    }
+
     Start-Process -FilePath $LlamaServer `
-        -ArgumentList ($modelArgs + @("--host","0.0.0.0","--port","$Port",
-                        "--ctx-size","24576","--parallel","1","--n-gpu-layers","999",
-                        "--alias",$Alias,"--jinja","--reasoning-budget","0")) `
+        -ArgumentList ($modelArgs + @("--host","0.0.0.0","--port","$Port") + $tuning +
+                        @("--alias",$Alias,"--jinja","--reasoning-budget","0")) `
         -WindowStyle Hidden
 }
 
@@ -110,7 +169,7 @@ $gpuPortsInUse = @()   # ports that must stay armed in this mode
 
 # Arm the ONE shared ActiveBig server once, if PRIME and any gpu-tier char.
 if ($Mode -eq "prime" -and ($P.Characters | Where-Object { $_.Prime.Tier -eq "gpu" })) {
-    Ensure-GpuServer -Repo $big.Repo -Path $big.Path -Port $BigPort -Alias $big.Alias
+    Ensure-GpuServer -Repo $big.Repo -Path $big.Path -Port $BigPort -Alias $big.Alias -RegistryKey $ActiveBig
     $gpuPortsInUse += $BigPort
 }
 

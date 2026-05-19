@@ -55,7 +55,7 @@ hexis/
 ├── docs/
 │   ├── architecture.md     # Design/architecture consolidation
 │   └── PHILOSOPHY.md       # Philosophical framework
-└── docker-compose.yml      # Local stack (Postgres + workers; embeddings via host Ollama)
+└── docker-compose.yml      # Base stack (Postgres + workers). Embeddings: host llama-server :8081 per .env (compose default is Ollama :11434 if no .env)
 ```
 
 ### Key Files
@@ -96,7 +96,7 @@ hexis/
 ## Build, Test, and Development Commands
 
 ```bash
-# Start services (passive - db only; embeddings via host Ollama)
+# Start services (passive - db only; embeddings via host llama-server :8081 per .env)
 docker compose up -d
 
 # Start services (active - adds heartbeat_worker + maintenance_worker)
@@ -174,28 +174,37 @@ The heartbeat is the agent's conscious cognitive loop:
 
 **Action costs**: Free (observe, remember) → Cheap (recall: 1, reflect: 2) → Expensive (reach out: 5-7)
 
+## Model Serving & Power Modes
+
+- **ECO/PRIME single GPU slot**: all gpu-tier characters share ONE llama-server on :8080 serving `ActiveBig`. Switch via `set-power-mode.ps1 prime` after editing `power-profiles.psd1` `ActiveBig`. `hexis-launcher.ps1` = GUI editor of the same store (preserves all BigModels entries on Apply).
+- **Per-model serve flags (ctx/ngl/kv_quant/batch) are owned by `C:\llm-serve\models.json`**, sourced by `set-power-mode.ps1` keyed on `ActiveBig` — do NOT hardcode them in Hexis. Boundary doc: `C:\llm-serve\docs\HEXIS-INTEGRATION.md`.
+- **Dense vs MoE on 16 GB VRAM**: ~6 instances share the slot (`--parallel 1`). A dense 24B collapses under fleet concurrency (prompt-eval thrash → ~1 tok/s, truncated replies); use a MoE (`q36`/`worldsim`) — ~8× cheaper per-token eval, absorbs the fleet.
+- **Multi-persona**: `docker-compose.newchars.yml` (+ per-persona `docker-compose.<name>.yml`). Channel/worker code is baked into the image — code changes need `docker compose ... up -d --build <svc>`, not just a restart.
+
 ## Debugging Tips
 
 - **Schema changes not taking effect?** SQL files are baked into the Docker image -- see "Bouncing the Database" below
 - **Heartbeat not running?** Check `agent.is_configured` via `hexis status` or run `hexis init`
-- **Memory not found?** Check if Ollama is running and has the embedding model (`ollama list`)
+- **Memory not found?** Embeddings = host llama-server :8081 (per `.env`). Check `curl localhost:8081/health`.
 - **Test failures?** Ensure Docker services are up before running pytest; after a fresh `down -v`, wait for Postgres to accept connections. Use `POSTGRES_HOST=127.0.0.1` with pytest if localhost SSL negotiation flakes.
 
 ## Agent Operational Notes
 
 ### Python Virtual Environment
 
-Always activate the venv before running any Python, pytest, or hexis CLI commands:
+The repo ships its venv at `./venv` (repo-relative; the `hexis` CLI is `venv/Scripts/hexis` on Windows, `venv/bin/hexis` on POSIX). The `hexis` package is NOT importable from system Python — always use this venv for any Python, pytest, or hexis CLI command.
 
-```bash
-source /Volumes/SB-XTM5/git/Hexis/.venv/bin/activate
+```powershell
+# Windows / PowerShell (this box)
+.\venv\Scripts\Activate.ps1
 ```
 
-Prefix all shell commands with this activation. Example:
-
 ```bash
-source /Volumes/SB-XTM5/git/Hexis/.venv/bin/activate && pytest tests -q
+# POSIX / bash
+source venv/bin/activate
 ```
+
+Example (PowerShell): `.\venv\Scripts\Activate.ps1; pytest tests -q`
 
 ### Bouncing the Database (Applying Schema Changes)
 
@@ -203,16 +212,18 @@ SQL schema files (`db/*.sql`) are **baked into the Docker image at build time** 
 
 To apply schema changes, you must rebuild the image and recreate the volume:
 
+No venv needed — this is pure Docker. Use `docker compose` (v2, space), not `docker-compose` (v1):
+
 ```bash
-source /Volumes/SB-XTM5/git/Hexis/.venv/bin/activate && docker-compose down -v && docker-compose build db && docker-compose up -d
+docker compose down -v && docker compose build db && docker compose up -d
 ```
 
 Breaking this down:
-1. `docker-compose down -v` -- stops containers and **removes the data volume** (required for fresh schema init)
-2. `docker-compose build db` -- rebuilds the `db` service image with the updated SQL files
-3. `docker-compose up -d` -- starts containers with the new image
+1. `docker compose down -v` -- stops containers and **removes the data volume** (required for fresh schema init)
+2. `docker compose build db` -- rebuilds the `db` service image with the updated SQL files
+3. `docker compose up -d` -- starts containers with the new image
 
-**Important**: The docker-compose service is named `db`, but the container is named `hexis_brain`. Always use the service name (`db`) with docker-compose commands (e.g., `docker-compose build db`), but use the container name with `docker exec` (e.g., `docker exec hexis_brain psql ...`).
+**Important**: The compose service is named `db`, but the container is named `hexis_brain`. Use the service name (`db`) with compose commands (e.g., `docker compose build db`), but the container name with `docker exec` (e.g., `docker exec hexis_brain psql ...`).
 
 ### Verifying Schema Changes
 

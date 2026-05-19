@@ -19,13 +19,14 @@
     # applied by Hexis at the conversation layer, not by the weights. Switch
     # model = change ActiveBig + re-run set-power-mode prime. NOT a mode.
     BigPort   = 8080
-    ActiveBig = 'q36'
+    ActiveBig = 'worldsim'
     BigModels = @{
         'cydonia' = @{ Alias = 'cydonia-24b-v4-3-heretic-v4-i1-iq4-xs'; Repo = 'mradermacher/Cydonia-24B-v4.3-heretic-v4-i1-GGUF'; Path = 'C:\Users\User\.cache\huggingface\hub\models--mradermacher--Cydonia-24B-v4.3-heretic-v4-i1-GGUF\snapshots\a0bc01c4723a8a9c4a38f6406a9670b8add0e662\Cydonia-24B-v4.3-heretic-v4.i1-IQ4_XS.gguf' }
         'pure-soul' = @{ Alias = 'hexis-pure-soul-24b-i1-iq4-xs'; Repo = 'mradermacher/Hexis-Pure-Soul-24B-i1-GGUF'; Path = 'C:\Users\User\.cache\huggingface\hub\models--mradermacher--Hexis-Pure-Soul-24B-i1-GGUF\snapshots\e75560ae0624bbba6cbab7ba6fa4f60120e81c5b\Hexis-Pure-Soul-24B.i1-IQ4_XS.gguf' }
         'q36' = @{ Alias = 'qwen3-6-35b-a3b-uncensored-heretic-i1-iq3-xxs'; Path = 'C:\Users\User\.cache\huggingface\hub\models--mradermacher--Qwen3.6-35B-A3B-uncensored-heretic-i1-GGUF\snapshots\97c91a931dbfd582487e8866bd129a2e8765051d\Qwen3.6-35B-A3B-uncensored-heretic.i1-IQ3_XXS.gguf' }
         'sentient-mind' = @{ Alias = 'hexis-sentient-mind-24b-i1-iq4-xs'; Path = 'C:\Users\User\.cache\huggingface\hub\models--mradermacher--Hexis-Sentient-Mind-24B-i1-GGUF\snapshots\f29e1ace4a85ecc6c1509ff8b86c433803f5edbc\Hexis-Sentient-Mind-24B.i1-IQ4_XS.gguf' }
         'aeon27' = @{ Alias = 'qwen3-6-27b-aeon-ultimate-uncensored-bf16-i1-iq3-m'; Repo = 'mradermacher/Qwen3.6-27B-AEON-Ultimate-Uncensored-BF16-i1-GGUF'; Path = 'C:\Users\User\.cache\huggingface\hub\models--mradermacher--Qwen3.6-27B-AEON-Ultimate-Uncensored-BF16-i1-GGUF\snapshots\415eb733f107b52e3323fa8ae134ab785e16b119\Qwen3.6-27B-AEON-Ultimate-Uncensored-BF16.i1-IQ3_M.gguf' }
+        'worldsim' = @{ Alias = 'worldsim-opus-3-6-35b-a3b-i1-iq3-xxs'; Repo = 'mradermacher/WorldSim-Opus-3.6-35B-A3B-i1-GGUF:IQ3_XXS' }
     }
 
     # gpu-tier characters all resolve to ActiveBig on BigPort (shared server).
