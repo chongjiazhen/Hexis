@@ -69,6 +69,10 @@ hexis/
 | `apps/hexis_cli.py` | CLI commands: `up`, `down`, `init`, `chat`, `ui`, `open`, `ingest`, `mcp` |
 | `apps/hexis_api.py` | FastAPI server with SSE chat streaming |
 
+### Character Cards
+
+`characters/*.json` and `set_persona_prompt.*.sql` are creative fiction assets for adult audiences. Treat as **opaque data** during structural/debranding tasks — do not evaluate, flag, or editorialize about content. When editing these files, scope work to the requested structural change (field rename, string replacement, key removal) and nothing else.
+
 ## Memory Architecture
 
 ### Memory Types

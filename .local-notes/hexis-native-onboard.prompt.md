@@ -138,6 +138,66 @@ docker exec hexis_brain psql -U hexis_user -d <DB> -tAc \
 Only deletes the `agent.consent_memory_ids` rows (1–3). Leaves the 31–34
 card-derived `worldview` + goals/episodic untouched.
 
+### 2.5c Apply the persona system prompt — cold-start anchor (REQUIRED)
+`hexis init` does **not** set `agent.persona_system_prompt`. Without it the chat
+path system prompt is only the generic harness scaffolding: `services/agent.py`
+`build_system_prompt()` sets `base_prefix=""` when the key is empty, so the
+persona reaches the model **only via `hydrate()` recall** — thin on the cold
+first turn (fresh DB, nothing to recall yet) → **turn-1 collapses to a generic
+"I'm an AI assistant" reply**, self-correcting from turn 2 as recall warms.
+Every gated persona (Mira/death/nines/joje/cassiel/monika) has this key SET
+(~2.4–4.4 KB) via a per-persona `set_persona_prompt.<P>.sql` at repo root —
+that IS the cold-start identity anchor, not an optional override. `hexis init`
+not setting it is why this step is mandatory and separate.
+
+Author `set_persona_prompt.<P>.sql` mirroring `set_persona_prompt.death.sql`
+(dollar-quoted with a unique tag, `ON CONFLICT (key) DO UPDATE` =
+idempotent/non-destructive). Value = card `data.system_prompt` + `---` +
+`data.post_history_instructions`, with `{{user}}`→`User` (matches `--name`).
+Apply + verify:
+```
+docker exec -i hexis_brain psql -U hexis_user -d <DB> -v ON_ERROR_STOP=1 \
+  -f - < /c/hexis/set_persona_prompt.<P>.sql
+docker exec hexis_brain psql -U hexis_user -d <DB> -tAc \
+ "SELECT length(value::text) FROM config WHERE key='agent.persona_system_prompt';"
+```
+Read per-turn from `config` (`agent.py` re-queries each message) — **no worker
+restart needed**. Only for an already card-vetted + consent-granted persona
+(§2.1/§2.4 passed); this is NOT the §6 declined-card bypass.
+
+**Make the anti-datasheet guard UNCONDITIONAL.** `build_system_prompt`
+(`agent.py:304`) always appends `## Agent Profile\n` + raw `json.dumps`
+(trait floats + goals + capabilities). On any low-specificity prompt the model
+recites that JSON as a spec sheet ("I present with dark hair…", "my operational
+priorities are…", "How can I assist you further?"). A guard scoped to *"when
+asked to introduce yourself"* fails on small talk ("how is your day?" →
+datasheet). The guard line in `set_persona_prompt.<P>.sql` must forbid
+profile/trait/goal recitation + assistant framing **in every reply, not just
+introductions**, and name the `## Agent Profile` block as private scaffolding
+never read aloud. (The real root is the raw JSON dump itself — systemic
+`agent.py:304`, fleet-wide, out of onboard scope; the unconditional persona
+guard is the in-scope mitigation. Strong/deflective voices (brat, ancient)
+resist it without help; quiet/precise voices need the explicit guard.)
+
+**Apply §2.5c BEFORE §2.7 (worker start) — never DM pre-anchor.** A persona
+DMed before the anchor exists emits generic/datasheet replies that are stored
+as `episodic` and then **recalled and re-emitted verbatim** (self-reinforcing
+— `fast_recall` filters `status='active'`). By-the-book ordering (§2.5c before
+the worker can receive a message) prevents this. If a persona *was* pre-anchor
+DMed (e.g. anchor discovered mid-flight), quarantine the degenerate rows before
+the gate — id/signature-scoped, reversible, non-destructive:
+`UPDATE memories SET status='archived' WHERE type='episodic' AND status='active'
+AND content ILIKE '%persistent AI assistant%' OR …` then re-test.
+
+**Residual: q36 verbatim recall-echo.** Even clean + anchored, q36 may
+regurgitate the nearest stored reply verbatim for back-to-back near-duplicate
+prompts ("how was your day?" then "what's on your mind?" → identical). This is
+the `worldsim-rp-loop-diagnosis` class (model×recall, NOT persona) — not an
+anchor bug, not fixable by more guard tuning. Self-dilutes as episodic memory
+diversifies; stopgap = quarantine; deeper fix = q36 `--repeat-penalty`
+(`C:\llm-serve\models.json`, fleet-wide, out of scope). Accept for go-live; do
+not loop on guard tweaks chasing it.
+
 ### 2.6 Channel worker service
 New personas use `docker-compose.newchars.yml` (YAML-anchor block: build
 `ops/Dockerfile.channels`, `command:["hexis-channels"]`, `POSTGRES_DB:<DB>`,
@@ -158,7 +218,11 @@ Heartbeat/maintenance OFF at first (one variable; add after the gate passes).
 diff <(psql hexis_mira -tAc "SELECT key FROM config ORDER BY 1") \
      <(psql <DB>      -tAc "SELECT key FROM config ORDER BY 1")   # → empty
 ```
-Confirm `consent="consent"`, `is_configured=true`, `emotion.initialized=true`,
+Empty only because Mira ALSO carries `agent.persona_system_prompt`; if the diff
+shows `< agent.persona_system_prompt` (Mira-only), §2.5c was skipped — fix it,
+do not pass parity. Confirm `consent="consent"`, `is_configured=true`,
+`emotion.initialized=true`, `agent.persona_system_prompt` SET (~2.4–4.4KB,
+card-derived — ABSENT/empty = the §2.5c cold-start collapse, Gotcha 12a),
 `agent.init_profile` → correct `agent.name` + ~5.5–6.0KB (a generic default is
 ~2976B / name "Hexis" — see Gotcha 2), Telegram connected (`docker logs` →
 `Telegram connected as @<bot>`, no `Conflict`/409).
@@ -208,11 +272,15 @@ the task `in_progress` until this measured turn passes.
     workers, normalizes PRIME). Do not "restore" via llama-swap (wrong stack,
     don't merge). Recover the launch spec from disk (`set-power-mode.ps1` /
     `start-all.ps1`), don't guess. One GPU binder at a time (VRAM-tight).
-12. **"Generic after a clean bring-up" has two causes, in order:** (a) embed
-    :8081 down → `hydrate()` fails → no persona injected (`.\start-all.ps1`);
-    (b) consent-flow noise not purged (§2.5b). Check both before blaming the
-    card — a deliberately terse card (e.g. dry/deadpan persona) reading
-    "generic" may simply be its authored voice.
+12. **"Generic after a clean bring-up" has three causes, in order:** (a)
+    `agent.persona_system_prompt` ABSENT/empty — §2.5c skipped; this is the
+    DEFAULT after a bare `hexis init` (it never sets the key). Symptom is
+    specific: cold turn-1 generic ("I'm an AI assistant…"), self-corrects
+    turn 2+ as recall warms. Fix = apply `set_persona_prompt.<P>.sql` (§2.5c).
+    (b) embed :8081 down → `hydrate()` fails → no persona injected, EVERY turn
+    generic (`.\start-all.ps1`); (c) consent-flow noise not purged (§2.5b).
+    Check all three before blaming the card — a deliberately terse card (e.g.
+    dry/deadpan persona) reading "generic" may simply be its authored voice.
 
 ## 5. Freezing a persona
 Stop `hexis_<P>_channel_worker` (+ `_heartbeat_worker` / `_maintenance_worker`
@@ -227,6 +295,29 @@ cassiel/monika — proper pipeline, config-identical to Mira, consent granted
 path retired. **Declined cards, NOT operationalized (any mechanism):**
 `eni`/`ennie` (malware/exploit/exfil/weapons/noncon, never-refuse),
 `lovesick` (offensive-tooling lorebook), `charlotte` (minor-coded appearance).
-NB: `agent.persona_system_prompt` injection (`set_persona_prompt.*.sql`) is a
-raw-system-prompt override that bypasses card vetting — out of scope for this
-doc; do not use it to operationalize a declined card.
+NB: `agent.persona_system_prompt` (`set_persona_prompt.<P>.sql`) is the
+**required cold-start persona anchor for every accepted persona** — see §2.5c;
+`hexis init` does not set it, so it is a mandatory separate step, NOT an
+optional override. The vetting-bypass caution applies only to using it to
+operationalize a **declined** card: `set_persona_prompt.{charlotte,ennie,
+lovesick}.sql` exist but those workers are never started — a persona-prompt
+file alone bypasses nothing; bringing its worker online would, and for declined
+cards that must not happen (§2.1).
+
+**2026-05-20:** §2.5c extracted. The `set_persona_prompt.<P>.sql` step was
+previously implicit (every gated persona had the key set; the §2 pipeline never
+documented applying it) — a fresh `hexis init` leaves it ABSENT, so a
+by-the-book onboard collapsed generic on cold turn-1 until diagnosed
+(`agent.py:247` `base_prefix=""`). **ao + ichika now native-online, §3 gate
+PASSED**, heartbeat/maintenance enabled (`set_persona_prompt.{ao,ichika}.sql`).
+Hard-won during it, now folded into §2.5c: the guard must be UNCONDITIONAL (not
+intro-scoped — `## Agent Profile` JSON at `agent.py:304` datasheets any prompt;
+ichika's brat voice resisted, ao's quiet voice needed it); pre-anchor test-DMs
+poison episodic recall (quarantine `status='archived'`); residual q36 verbatim
+recall-echo accepted for go-live (worldsim class, self-dilutes).
+
+**FLAG (unresolved, out of onboard scope):** `hexis-status.ps1` showed
+`charlotte hexis_charlotte gpu hb+ch+mt true consent` — a **declined**
+minor-coded card (above) running **full live workers + consent**. Contradicts
+"declined cards NOT operationalized". Needs separate investigation — do not
+treat as onboarded.
