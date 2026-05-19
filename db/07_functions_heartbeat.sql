@@ -707,6 +707,28 @@ BEGIN
     );
 END;
 $$ LANGUAGE plpgsql;
+-- TRUE when local wall-clock (heartbeat.timezone) is inside the night window.
+-- Window wraps midnight when night_start_hour > night_end_hour (e.g. 23..8).
+-- Server clock is UTC; tz config converts before the hour comparison.
+CREATE OR REPLACE FUNCTION is_heartbeat_night()
+RETURNS BOOLEAN AS $$
+DECLARE
+    tz TEXT;
+    cur_hour INT;
+    night_start INT;
+    night_end INT;
+BEGIN
+    tz := COALESCE(get_config_text('heartbeat.timezone'), 'Asia/Singapore');
+    night_start := COALESCE(get_config_int('heartbeat.night_start_hour'), 23);
+    night_end := COALESCE(get_config_int('heartbeat.night_end_hour'), 8);
+    cur_hour := extract(hour FROM (CURRENT_TIMESTAMP AT TIME ZONE tz))::INT;
+    IF night_start <= night_end THEN
+        RETURN cur_hour >= night_start AND cur_hour < night_end;
+    ELSE
+        RETURN cur_hour >= night_start OR cur_hour < night_end;
+    END IF;
+END;
+$$ LANGUAGE plpgsql STABLE;
 CREATE OR REPLACE FUNCTION should_run_heartbeat()
 RETURNS BOOLEAN AS $$
 DECLARE
@@ -732,8 +754,17 @@ BEGIN
     IF state_record.last_heartbeat_at IS NULL THEN
         RETURN TRUE;
     END IF;
-    interval_minutes := get_config_float('heartbeat.heartbeat_interval_minutes');
-    jitter_minutes := COALESCE(get_config_float('heartbeat.heartbeat_jitter_minutes'), 0);
+
+    -- Night throttle: slower interval + wider jitter during local quiet hours.
+    IF is_heartbeat_night() THEN
+        interval_minutes := COALESCE(get_config_float('heartbeat.night_interval_minutes'),
+                                     get_config_float('heartbeat.heartbeat_interval_minutes'));
+        jitter_minutes := COALESCE(get_config_float('heartbeat.night_jitter_minutes'),
+                                   get_config_float('heartbeat.heartbeat_jitter_minutes'), 0);
+    ELSE
+        interval_minutes := get_config_float('heartbeat.heartbeat_interval_minutes');
+        jitter_minutes := COALESCE(get_config_float('heartbeat.heartbeat_jitter_minutes'), 0);
+    END IF;
 
     -- Deterministic per-cycle jitter: stable within a cycle (depends only on
     -- last_heartbeat_at, fixed until the next beat) so the boolean does not

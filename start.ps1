@@ -125,13 +125,18 @@ if (Get-PortPid 8080) {
 if (Get-PortPid 8081) {
     Write-Host "[start] embed :8081 already running"
 } else {
-    Write-Host "[start] embed llama-server :8081 ($EmbedRepo)"
+    Write-Host "[start] embed llama-server :8081 ($EmbedRepo) [CPU]"
+    # CPU-bound (--n-gpu-layers 0): embeddinggemma-300M is tiny (~320MB Q8, no
+    # autoregressive gen); CPU latency is fine for DB-cached/batched embeddings.
+    # Keeps the GPU single-tenant for the 35B chat model on :8080 (eliminates
+    # the 8080-vs-8081 CUDA contention on the single 16 GB card). Same pattern
+    # as the always-on nano (:8082, also -ngl 0).
     Start-Process -FilePath $LlamaServer `
         -ArgumentList @("-hf",$EmbedRepo,
                         "--host","0.0.0.0","--port","8081",
                         "--ctx-size","4096",
                         "--batch-size","4096","--ubatch-size","4096",
-                        "--n-gpu-layers","999","--embeddings",
+                        "--n-gpu-layers","0","--embeddings",
                         "--alias","embeddinggemma-300m") `
         -WindowStyle Hidden
 }
