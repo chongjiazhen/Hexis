@@ -433,7 +433,7 @@ BEGIN
         FOR entry IN SELECT * FROM jsonb_array_elements(values_input)
         LOOP
             IF jsonb_typeof(entry) = 'string' THEN
-                value_text := btrim(entry::text, '"');
+                value_text := entry #>> '{}';
                 value_strength := 0.85;
             ELSIF jsonb_typeof(entry) = 'object' THEN
                 value_text := COALESCE(NULLIF(btrim(entry->>'value'), ''), NULLIF(btrim(entry->>'name'), ''));
@@ -528,7 +528,7 @@ BEGIN
     LOOP
         entry := worldview_input->key_name;
         IF jsonb_typeof(entry) = 'string' THEN
-            content := btrim(entry::text, '"');
+            content := entry #>> '{}';
         ELSIF jsonb_typeof(entry) = 'object' THEN
             content := NULLIF(btrim(entry->>'content'), '');
         ELSE
@@ -625,7 +625,7 @@ BEGIN
     FOR entry IN SELECT * FROM jsonb_array_elements(boundaries_input)
     LOOP
         IF jsonb_typeof(entry) = 'string' THEN
-            content := btrim(entry::text, '"');
+            content := entry #>> '{}';
             trigger_patterns := NULL;
             response_type := 'refuse';
             response_template := NULL;
@@ -708,7 +708,7 @@ BEGIN
     FOR entry IN SELECT * FROM jsonb_array_elements(interests_input)
     LOOP
         IF jsonb_typeof(entry) = 'string' THEN
-            interest_text := btrim(entry::text, '"');
+            interest_text := entry #>> '{}';
         ELSIF jsonb_typeof(entry) = 'object' THEN
             interest_text := COALESCE(NULLIF(btrim(entry->>'interest'), ''), NULLIF(btrim(entry->>'name'), ''));
         ELSE
@@ -785,7 +785,7 @@ BEGIN
     FOR entry IN SELECT * FROM jsonb_array_elements(goals_input)
     LOOP
         IF jsonb_typeof(entry) = 'string' THEN
-            title := btrim(entry::text, '"');
+            title := entry #>> '{}';
             description := NULL;
             source := 'curiosity';
             priority := 'queued';
@@ -1430,7 +1430,7 @@ BEGIN
     IF jsonb_typeof(c_values) = 'array' THEN
         FOR idx IN 0..jsonb_array_length(c_values) - 1 LOOP
             IF jsonb_typeof(c_values->idx) = 'string' THEN
-                embed_texts := embed_texts || format('I value %s.', btrim((c_values->idx)::text, '"'));
+                embed_texts := embed_texts || format('I value %s.', (c_values->idx #>> '{}'));
             END IF;
         END LOOP;
     END IF;
@@ -1445,7 +1445,7 @@ BEGIN
     IF jsonb_typeof(c_boundaries) = 'array' THEN
         FOR idx IN 0..jsonb_array_length(c_boundaries) - 1 LOOP
             IF jsonb_typeof(c_boundaries->idx) = 'string' THEN
-                embed_texts := embed_texts || btrim((c_boundaries->idx)::text, '"');
+                embed_texts := embed_texts || (c_boundaries->idx #>> '{}');
             ELSIF jsonb_typeof(c_boundaries->idx) = 'object' AND c_boundaries->idx ? 'content' THEN
                 embed_texts := embed_texts || (c_boundaries->idx->>'content');
             END IF;
@@ -1455,7 +1455,7 @@ BEGIN
     IF jsonb_typeof(c_interests) = 'array' THEN
         FOR idx IN 0..jsonb_array_length(c_interests) - 1 LOOP
             IF jsonb_typeof(c_interests->idx) = 'string' THEN
-                embed_texts := embed_texts || format('I am interested in %s.', btrim((c_interests->idx)::text, '"'));
+                embed_texts := embed_texts || format('I am interested in %s.', (c_interests->idx #>> '{}'));
             END IF;
         END LOOP;
     END IF;
