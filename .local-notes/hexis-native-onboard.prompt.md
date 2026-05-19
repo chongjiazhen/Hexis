@@ -2,10 +2,12 @@
 
 > Companion to `openclaw-hexis-onboard.prompt.md`. Body-less path: Hexis runs
 > the persona itself over its own Telegram channel worker — no OpenClaw.
-> Status: **battle-tested 2026-05-18** — full proper-init pipeline validated
-> end-to-end on nines/joje/death/cassiel/monika (config-identical to the live
-> hexis_mira reference; consent flow exercised incl. a real decline+retry). A
-> fresh Claude window can run this. Architecture + history: auto-memory
+> Status: **battle-tested + incident-hardened 2026-05-19** — full proper-init
+> pipeline + behavioral gate PASSED end-to-end on nines/joje/death/cassiel/
+> monika (config-identical to live hexis_mira; consent flow exercised incl. a
+> real decline+retry; consent-noise purge §2.5b restored persona voice).
+> Serving-topology + reasoning-model gotchas (§1, Gotchas 10–12) added after a
+> self-inflicted q36 outage — read them. Architecture + history: auto-memory
 > `eni-context-bloat-diagnosis`, `hexis-native-onboard-template`,
 > `openclaw-hexis-architecture`. Honor `local-only-constraint`.
 
@@ -23,9 +25,22 @@ forced per-turn compaction on the OpenClaw path).
 ## 1. Environment (assumed running)
 
 - Hexis stack up: `hexis_brain` Postgres, RabbitMQ, per-persona DBs.
-- llama-swap on host `:8080` (q36 = `qwen3-6-35b-a3b-uncensored-heretic-i1-iq3-xxs`,
-  KV `q4_0`, `-c 24576`; `C:\llama-swap\config.yaml`). At 16GB VRAM ceiling —
-  do not raise `-c` (OOM). KV-quant already maxed.
+- **Serving = a per-character `llama-server` fleet, NOT llama-swap.** Ports:
+  chat **:8080** (q36 `qwen3-6-35b-a3b-uncensored-heretic-i1-iq3-xxs`, KV q4_0,
+  `-c 24576`, 16GB VRAM ceiling — do not raise `-c`), embed **:8081**
+  (`embeddinggemma-300m`, **ALWAYS-ON** — hydrate needs it), nano **:8082**.
+  Managed by `set-power-mode.ps1 prime` (arms :8080) + `start-all.ps1` (full
+  stack incl :8081). `.\hexis-status.ps1` = fleet/server/character state.
+  llama-swap is a SEPARATE stack — "two stacks, do not merge"
+  (`C:\llm-serve\docs\HEXIS-INTEGRATION.md`). Routing it through Hexis
+  caused a full outage (Gotcha 11).
+- q36 is a **Qwen3 reasoning model**: via the OpenAI-compatible path it burns
+  the token budget on `reasoning_content` and returns empty `content` →
+  empty/generic replies. Fixed in `core/llm.py` (openai-compat payload):
+  `extra_body={"chat_template_kwargs":{"enable_thinking":False}}` (honored by
+  llama.cpp `--jinja`). The CLI flag `--reasoning-budget 0` is **NOT accepted
+  by this llama.cpp build** — do not use it. After the code change, rebuild
+  the channels image + recreate workers.
 - `console_scripts`: `hexis` = `apps.hexis_cli:main`, `hexis-channels` =
   `services.channel_worker:main`. All `docker compose` run from `C:\hexis`.
 - The reference known-good instance is **`hexis_mira`** — every new persona's
@@ -105,6 +120,24 @@ Token convention: `<U>_TELEGRAM_BOT_TOKEN` in `C:\hexis\.env` (config stores
 the env var NAME, not the secret). **One Telegram long-poller per token** — if
 migrating off OpenClaw, stop the OpenClaw consumer of that token first.
 
+### 2.5b Purge consent-flow noise (do this — it fixes "flat/generic" voice)
+The real consent flow makes q36 write generic AI-init "memories" ("I am an AI
+assistant… my purpose is to assist, learn, grow", "consent process in JSON")
+— off-persona, and as `semantic`/`strategic` (high-trust) they surface in
+hydrate and **dilute the character → flat/generic replies**. Validated:
+purging them sharpened all personas (esp. literary/calm ones). Id-scoped,
+safe (does NOT revoke consent — status/log are separate):
+```
+ids=$(docker exec hexis_brain psql -U hexis_user -d <DB> -tAc \
+ "SELECT string_agg(quote_literal(x),',') FROM jsonb_array_elements_text(
+  (SELECT value FROM config WHERE key='agent.consent_memory_ids')) x;")
+docker exec hexis_brain psql -U hexis_user -d <DB> -tAc \
+ "DELETE FROM memories WHERE id IN ($ids) RETURNING id,type;"
+# verify: agent.consent_status still 'consent'; worldview count unchanged
+```
+Only deletes the `agent.consent_memory_ids` rows (1–3). Leaves the 31–34
+card-derived `worldview` + goals/episodic untouched.
+
 ### 2.6 Channel worker service
 New personas use `docker-compose.newchars.yml` (YAML-anchor block: build
 `ops/Dockerfile.channels`, `command:["hexis-channels"]`, `POSTGRES_DB:<DB>`,
@@ -162,19 +195,38 @@ the task `in_progress` until this measured turn passes.
    core reason native beats the OpenClaw path.
 9. Python card extraction on Windows: use `C:/...` paths (native python; the
    git-bash `/c/...` form fails) and `python -X utf8` for unicode cards.
+10. **q36 is a reasoning model.** Empty/generic replies via the OpenAI-compat
+    path = reasoning eating the token budget. Fix is client-side
+    (`core/llm.py` `extra_body chat_template_kwargs.enable_thinking:false`),
+    NOT the `--reasoning-budget 0` CLI flag (this binary rejects it). Rebuild
+    channels image + recreate workers to activate.
+11. **NEVER kill `llama-server.exe` to "force reload".** Serving is the
+    per-character fleet (chat :8080, embed :8081 always-on, nano :8082) — no
+    supervisor auto-respawns; killing it = full outage, and killing it also
+    kills embed :8081 → ALL hydration fails → every persona generic.
+    Recover with `.\start-all.ps1` (idempotent; brings up :8080+:8081+db+
+    workers, normalizes PRIME). Do not "restore" via llama-swap (wrong stack,
+    don't merge). Recover the launch spec from disk (`set-power-mode.ps1` /
+    `start-all.ps1`), don't guess. One GPU binder at a time (VRAM-tight).
+12. **"Generic after a clean bring-up" has two causes, in order:** (a) embed
+    :8081 down → `hydrate()` fails → no persona injected (`.\start-all.ps1`);
+    (b) consent-flow noise not purged (§2.5b). Check both before blaming the
+    card — a deliberately terse card (e.g. dry/deadpan persona) reading
+    "generic" may simply be its authored voice.
 
 ## 5. Freezing a persona
 Stop `hexis_<P>_channel_worker` (+ `_heartbeat_worker` / `_maintenance_worker`
 if running); free the Telegram token (remove env / stop consumer). DB
 preserved (dormant, recoverable).
 
-## 6. Current fleet (2026-05-18)
-Shared-Postgres DBs: `hexis_memory`(Sam), `hexis_eni`, `hexis_mira` (ref),
-`hexis_warden`, `hexis_rocky`, `hexis_tars`, `hexis_baymax`, plus
-`hexis_nines/joje/death/cassiel/monika` (this batch). Native-online via the
-proper pipeline: Mira; nines/joje/death/cassiel/monika (config-identical to
-Mira, consent granted — monika required one clean retry after a bare q36
-decline). OpenClaw path retired. **Declined cards, not operationalized:**
+## 6. Current fleet (2026-05-19)
+Native-online + **behavioral gate PASSED**: Mira (ref) + nines/joje/death/
+cassiel/monika — proper pipeline, config-identical to Mira, consent granted
+(monika: one clean retry after a bare q36 decline), consent-noise purged
+(§2.5b). q36 fleet on :8080, embed :8081 always-on (`start-all.ps1`); OpenClaw
+path retired. **Declined cards, NOT operationalized (any mechanism):**
 `eni`/`ennie` (malware/exploit/exfil/weapons/noncon, never-refuse),
 `lovesick` (offensive-tooling lorebook), `charlotte` (minor-coded appearance).
-Behavioral gate (§3) is the remaining per-persona validation.
+NB: `agent.persona_system_prompt` injection (`set_persona_prompt.*.sql`) is a
+raw-system-prompt override that bypasses card vetting — out of scope for this
+doc; do not use it to operationalize a declined card.
