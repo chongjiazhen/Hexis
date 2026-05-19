@@ -61,6 +61,7 @@ if (-not $big) { throw "ActiveBig '$ActiveBig' not found in BigModels (power-pro
 # defaults when the registry file or the model's entry is absent, so models not
 # yet backfilled into the registry keep working unchanged.
 $RegistryPath = if ($env:HEXIS_LLM_REGISTRY) { $env:HEXIS_LLM_REGISTRY } else { 'C:\llm-serve\models.json' }
+$HFCache = Join-Path $env:USERPROFILE ".cache\huggingface\hub"
 
 function Get-RegistryEntry([string]$Key) {
     if (-not $Key) { return $null }
@@ -99,6 +100,62 @@ function Build-RegistryFlags($e) {
     return $parts
 }
 
+# PS mirror of infra/switch.py find_gguf() + test_registry.py case 5 - KEEP IN
+# SYNC. HF cache layout: <hub>\models--<org>--<name>\snapshots\<rev>\*.gguf.
+# Globs in models.json llama.file only use '*' (PS -like compatible with fnmatch).
+function Resolve-RegistryGguf($llamaCfg) {
+    if (-not $llamaCfg -or -not $llamaCfg.repo -or -not $llamaCfg.file) { return $null }
+    $hub  = "models--" + ([string]$llamaCfg.repo -replace '/', '--')
+    $snap = Join-Path (Join-Path $HFCache $hub) "snapshots"
+    if (-not (Test-Path $snap)) { return $null }
+    Get-ChildItem -Path $snap -Recurse -Filter *.gguf -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -like ([string]$llamaCfg.file) } |
+        Select-Object -First 1 -ExpandProperty FullName
+}
+
+# Single-registry resolution: alias + gguf source + serve tuning all come from
+# C:\llm-serve\models.json keyed by the BigModels key (== ActiveBig). The psd1
+# entry is now just a key pointer (no Alias/Path/Repo). Legacy psd1 fields are
+# accepted ONLY as a fallback for a key with no registry entry (un-backfilled or
+# a retired key whose weights are gone) - that path then hard-fails cleanly.
+function Resolve-BigModel([string]$RegistryKey, [string]$LegacyRepo, [string]$LegacyPath, [string]$LegacyAlias) {
+    $entry = Get-RegistryEntry $RegistryKey
+    if ($entry) {
+        $alias = [string]$entry.alias
+        if (-not $alias) { throw "registry '$RegistryKey': alias missing" }
+        $gguf = Resolve-RegistryGguf $entry.llama
+        if (-not $gguf) {
+            throw "registry '$RegistryKey' gguf not in HF cache (repo=$($entry.llama.repo) file=$($entry.llama.file)). Download it or pick another ActiveBig."
+        }
+        return @{
+            Alias     = $alias
+            ModelArgs = @("-m", $gguf)
+            Src       = $gguf
+            Tuning    = Build-RegistryFlags $entry
+            Tag       = "registry:$RegistryKey ctx=$($entry.ctx) kv=$($entry.kv_quant) ngl=$($entry.ngl)"
+        }
+    }
+    # No registry entry -> legacy psd1 fallback (kept so an un-backfilled model
+    # still works byte-for-byte; a retired key with no weights fails cleanly).
+    if ($LegacyPath) {
+        if (-not (Test-Path $LegacyPath)) { throw "ActiveBig '$RegistryKey': no registry entry and psd1 Path missing on disk: $LegacyPath" }
+        $modelArgs = @("-m", $LegacyPath); $src = $LegacyPath
+    } elseif ($LegacyRepo) {
+        $modelArgs = @("-hf", $LegacyRepo); $src = $LegacyRepo
+    } else {
+        throw "ActiveBig '$RegistryKey': no registry entry and no psd1 Path/Repo - cannot resolve model source"
+    }
+    if (-not $LegacyAlias) { throw "ActiveBig '$RegistryKey': legacy fallback requires Alias in power-profiles.psd1" }
+    return @{
+        Alias     = $LegacyAlias
+        ModelArgs = $modelArgs
+        Src       = $src
+        Tuning    = @('-ngl','999','--flash-attn','true','--cache-type-k','q4_0',
+                      '--cache-type-v','q4_0','-c','24576','--parallel','1')
+        Tag       = "defaults ctx=24576 kv=q4_0 (no registry entry '$RegistryKey')"
+    }
+}
+
 function Get-PortPid([int]$Port) {
     $c = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
     if ($c) { return $c[0].OwningProcess }
@@ -115,37 +172,13 @@ function Kill-Port([int]$Port, [string]$Label) {
     }
 }
 
-function Ensure-GpuServer([string]$Repo, [string]$Path, [int]$Port, [string]$Alias, [string]$RegistryKey) {
+function Ensure-GpuServer($Resolved, [int]$Port) {
     if (Get-PortPid $Port) {
-        Write-Host "[arm] $Alias :$Port already up"
+        Write-Host "[arm] $($Resolved.Alias) :$Port already up"
         return
     }
     if (-not (Test-Path $LlamaServer)) { throw "llama-server not found at $LlamaServer" }
-    # Prefer a concrete on-disk path (-m, what the GUI launcher writes); fall
-    # back to an -hf repo string (resolves from the HF cache).
-    if ($Path) {
-        if (-not (Test-Path $Path)) { throw "model file not found: $Path" }
-        $modelArgs = @("-m", $Path)
-        $src = $Path
-    } elseif ($Repo) {
-        $modelArgs = @("-hf", $Repo)
-        $src = $Repo
-    } else {
-        throw "character '$Alias' has neither Path nor Repo set in power-profiles.psd1"
-    }
-
-    $entry = Get-RegistryEntry $RegistryKey
-    if ($entry) {
-        $tuning = Build-RegistryFlags $entry
-        Write-Host "[arm] $Alias :$Port ($src) [registry:$RegistryKey ctx=$($entry.ctx) kv=$($entry.kv_quant) ngl=$($entry.ngl)]"
-    } else {
-        # Built-in fallback - identical to the pre-registry hardcoded serve
-        # config (q4_0 KV + flash-attn, 24576 ctx, full offload, parallel 1).
-        # Keeps models absent from the registry working byte-for-byte unchanged.
-        $tuning = @('-ngl','999','--flash-attn','true','--cache-type-k','q4_0',
-                    '--cache-type-v','q4_0','-c','24576','--parallel','1')
-        Write-Host "[arm] $Alias :$Port ($src) [defaults ctx=24576 kv=q4_0]"
-    }
+    Write-Host "[arm] $($Resolved.Alias) :$Port ($($Resolved.Src)) [$($Resolved.Tag)]"
 
     # --repeat-penalty/--repeat-last-n: RP-merge GGUFs at low quant fall into
     # whole-paragraph repetition loops without sequence-level penalty (WorldSim
@@ -153,8 +186,8 @@ function Ensure-GpuServer([string]$Repo, [string]$Path, [int]$Port, [string]$Ali
     # here, NOT in models.json (the kobold/SillyTavern consumer must not inherit
     # it). Applies to every ActiveBig the fleet arms.
     Start-Process -FilePath $LlamaServer `
-        -ArgumentList ($modelArgs + @("--host","0.0.0.0","--port","$Port") + $tuning +
-                        @("--alias",$Alias,"--jinja","--reasoning-budget","0",
+        -ArgumentList ($Resolved.ModelArgs + @("--host","0.0.0.0","--port","$Port") + $Resolved.Tuning +
+                        @("--alias",$Resolved.Alias,"--jinja","--reasoning-budget","0",
                           "--repeat-penalty","1.1","--repeat-last-n","256")) `
         -WindowStyle Hidden
 }
@@ -174,8 +207,12 @@ $instances = @()
 $gpuPortsInUse = @()   # ports that must stay armed in this mode
 
 # Arm the ONE shared ActiveBig server once, if PRIME and any gpu-tier char.
+$bigResolved = $null
 if ($Mode -eq "prime" -and ($P.Characters | Where-Object { $_.Prime.Tier -eq "gpu" })) {
-    Ensure-GpuServer -Repo $big.Repo -Path $big.Path -Port $BigPort -Alias $big.Alias -RegistryKey $ActiveBig
+    # Single source of truth: alias + gguf + tuning resolved from models.json by
+    # ActiveBig key. $big.* (psd1) is only a legacy fallback for un-backfilled keys.
+    $bigResolved = Resolve-BigModel $ActiveBig $big.Repo $big.Path $big.Alias
+    Ensure-GpuServer $bigResolved $BigPort
     $gpuPortsInUse += $BigPort
 }
 
@@ -184,8 +221,11 @@ foreach ($ch in $P.Characters) {
     if ($Mode -eq "prime") {
         $pr = $ch.Prime
         if ($pr.Tier -eq "gpu") {
-            # all gpu personas share the one ActiveBig server on BigPort
-            $cfg = New-LlmCfg -Model $big.Alias -Port $BigPort
+            # all gpu personas share the one ActiveBig server on BigPort.
+            # Model id = registry-resolved alias (== server --alias) so the
+            # char DB and the llama-server advertise the same name.
+            if (-not $bigResolved) { $bigResolved = Resolve-BigModel $ActiveBig $big.Repo $big.Path $big.Alias }
+            $cfg = New-LlmCfg -Model $bigResolved.Alias -Port $BigPort
         } else {
             # nano-tier character: uses the always-on :8082
             $cfg = New-LlmCfg -Model $NanoAlias -Port ([int]$NanoPort)

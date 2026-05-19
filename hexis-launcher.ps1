@@ -14,10 +14,11 @@
 # ActiveBig + Apply PRIME. It is NOT a mode.
 #
 # power-profiles.psd1 stays hand-editable; Apply overwrites it (expected - the
-# GUI is just another editor of the same store, the redundancy you wanted).
-# Apply writes the FULL ActiveBig schema and never drops a BigModels entry,
-# so it is safe to run against set-power-mode.ps1 (the old per-char-Path
-# hazard is gone).
+# GUI is just another editor of the same store). BigModels entries are now bare
+# key pointers (@{}); the key IS the C:\llm-serve\models.json short key, and
+# set-power-mode.ps1 resolves alias + gguf path + serve tuning from that single
+# registry. Apply never drops a BigModels key, so it stays safe against
+# set-power-mode.ps1 (the old duplicated-Alias / frozen-Path hazard is gone).
 #
 # Run: powershell -ExecutionPolicy Bypass -File C:\hexis\hexis-launcher.ps1
 # (a desktop "Hexis Launcher" shortcut is created by make-power-shortcuts.ps1)
@@ -58,26 +59,15 @@ function Get-DiskModels {
     return $out
 }
 
-# Find an on-disk *.gguf that backs a BigModels entry whose Path is empty.
-# A concrete -m path beats the -hf Repo fallback in set-power-mode.ps1, so we
-# fill Path when the file is already in the HF cache. Repo is never dropped.
-function Resolve-DiskPath([string]$Repo, [string]$Alias, $DiskFiles) {
-    # 1) HF cache layout: <hub>\models--<org>--<name>\snapshots\<rev>\*.gguf
-    if ($Repo) {
-        $repoNoQuant = ($Repo -split ':')[0]                 # org/name (drop :QUANT)
-        $hubDir = "models--" + ($repoNoQuant -replace '/', '--')
-        foreach ($f in $DiskFiles.Values) {
-            if ($f -like "*$hubDir*") { return $f }
-        }
-    }
-    # 2) Fallback: normalize the alias and the file stem the same way, match.
-    if ($Alias) {
-        $aliasNorm = ($Alias.ToLower() -replace '[^a-z0-9]+', '')
-        foreach ($f in $DiskFiles.Values) {
-            $stemNorm = ([System.IO.Path]::GetFileNameWithoutExtension($f).ToLower() -replace '[^a-z0-9]+', '')
-            if ($stemNorm -eq $aliasNorm -or $stemNorm -like "$aliasNorm*") { return $f }
-        }
-    }
+# Registry alias lookup for the GUI dropdown. Single source of truth =
+# C:\llm-serve\models.json (same file set-power-mode.ps1 resolves from); the
+# BigModels key is the registry short key. Read-only, best-effort.
+function Get-RegAlias([string]$Key) {
+    $rp = if ($env:HEXIS_LLM_REGISTRY) { $env:HEXIS_LLM_REGISTRY } else { 'C:\llm-serve\models.json' }
+    if (-not $Key -or -not (Test-Path $rp)) { return $null }
+    try { $r = Get-Content -Raw -Path $rp | ConvertFrom-Json } catch { return $null }
+    $p = $r.PSObject.Properties[$Key]
+    if ($p) { return [string]$p.Value.alias }
     return $null
 }
 
@@ -121,22 +111,13 @@ function Write-Profile([string]$ActiveKey, $TierRows) {
     [void]$sb.AppendLine("    # model = change ActiveBig + re-run set-power-mode prime. NOT a mode.")
     [void]$sb.AppendLine("    BigPort   = $([int]$P.BigPort)")
     [void]$sb.AppendLine("    ActiveBig = $(Quote $ActiveKey)")
+    [void]$sb.AppendLine("    # BigModels values are bare key pointers (@{}). The KEY is the")
+    [void]$sb.AppendLine("    # C:\llm-serve\models.json short key; set-power-mode.ps1 resolves")
+    [void]$sb.AppendLine("    # alias + gguf path + serve tuning from that single registry. A key")
+    [void]$sb.AppendLine("    # with no models.json entry hard-fails cleanly if set as ActiveBig.")
     [void]$sb.AppendLine("    BigModels = @{")
     foreach ($k in ($P.BigModels.Keys | Sort-Object)) {
-        $m = $P.BigModels[$k]
-        $alias = if ($null -eq $m.Alias) { '' } else { [string]$m.Alias }
-        $repo  = if ($null -eq $m.Repo)  { '' } else { [string]$m.Repo }
-        $path  = if ($null -eq $m.Path)  { '' } else { [string]$m.Path }
-        # Fill the chosen ActiveBig entry's Path from disk if it is empty and
-        # the gguf is already cached. Other entries pass through untouched.
-        if ($k -eq $ActiveKey -and [string]::IsNullOrEmpty($path)) {
-            $disk = Resolve-DiskPath $repo $alias $models
-            if ($disk) { $path = $disk }
-        }
-        $parts = @("Alias = $(Quote $alias)")
-        if ($repo) { $parts += "Repo = $(Quote $repo)" }
-        $parts += "Path = $(Quote $path)"
-        [void]$sb.AppendLine("        $(Quote $k) = @{ $($parts -join '; ') }")
+        [void]$sb.AppendLine("        $(Quote $k) = @{}")
     }
     [void]$sb.AppendLine("    }")
     [void]$sb.AppendLine("")
@@ -163,9 +144,9 @@ function Show-LauncherUI {
     $bigKeys  = @($P.BigModels.Keys | Sort-Object)
     $bigDisp  = @()
     foreach ($k in $bigKeys) {
-        $m = $P.BigModels[$k]
-        $src = if ($m.Path) { "on-disk" } elseif ($m.Repo) { "-hf $($m.Repo)" } else { "?" }
-        $bigDisp += "{0}   ->   {1}   [{2}]" -f $k, $m.Alias, $src
+        $a = Get-RegAlias $k
+        $disp = if ($a) { $a } else { "(no models.json entry - will fail if selected)" }
+        $bigDisp += "{0}   ->   {1}   [registry]" -f $k, $disp
     }
 
     $form = New-Object System.Windows.Forms.Form

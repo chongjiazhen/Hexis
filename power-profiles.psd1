@@ -1,8 +1,11 @@
 #
 # power-profiles.psd1 - canonical ECO/PRIME store.
-# AUTO-WRITTEN by hexis-launcher.ps1 on 2026-05-17 15:32. Hand-editable;
-# the launcher's Apply overwrites this file (the GUI is just another editor
-# of the same store). See .local-notes/power-modes.md.
+# Hand-edited 2026-05-19: collapsed to single registry. BigModels values are
+# now bare key pointers (@{}); the KEY is the C:\llm-serve\models.json short
+# key. set-power-mode.ps1 resolves alias + gguf path + serve tuning from that
+# one registry (no more duplicated Alias / frozen snapshot Path here). The
+# launcher's Apply still overwrites this file in the same pointer schema.
+# See .local-notes/power-modes.md.
 #
 @{
     LlamaServer = 'C:\llama.cpp-cuda\llama-server.exe'
@@ -20,13 +23,17 @@
     # model = change ActiveBig + re-run set-power-mode prime. NOT a mode.
     BigPort   = 8080
     ActiveBig = 'q36'
+    # Bare key pointers. KEY = models.json short key; set-power-mode.ps1
+    # resolves alias + gguf + tuning from C:\llm-serve\models.json. A key with
+    # no models.json entry hard-fails cleanly if set as ActiveBig.
     BigModels = @{
-        'cydonia' = @{ Alias = 'cydonia-24b-v4-3-heretic-v4-i1-iq4-xs'; Repo = 'mradermacher/Cydonia-24B-v4.3-heretic-v4-i1-GGUF'; Path = 'C:\Users\User\.cache\huggingface\hub\models--mradermacher--Cydonia-24B-v4.3-heretic-v4-i1-GGUF\snapshots\a0bc01c4723a8a9c4a38f6406a9670b8add0e662\Cydonia-24B-v4.3-heretic-v4.i1-IQ4_XS.gguf' }
-        'q36' = @{ Alias = 'qwen3-6-35b-a3b-uncensored-heretic-i1-iq3-xxs'; Path = 'C:\Users\User\.cache\huggingface\hub\models--mradermacher--Qwen3.6-35B-A3B-uncensored-heretic-i1-GGUF\snapshots\97c91a931dbfd582487e8866bd129a2e8765051d\Qwen3.6-35B-A3B-uncensored-heretic.i1-IQ3_XXS.gguf' }
+        'q36'     = @{}
+        'cydonia' = @{}
         # Retired 2026-05-19 (GGUFs offloaded for disk space, snapshot lifecycle
         # owned by llm-serve): worldsim, pure-soul, sentient-mind, aeon27.
-        # Re-add with a live local Path (NOT bare Repo -> Xet-hang wedge) if any
-        # returns as an ActiveBig. Remaining on disk: q36 (active), cydonia.
+        # Re-add the key here + ensure a live models.json entry (with the gguf
+        # in the HF cache) before setting any of them as ActiveBig. Remaining on
+        # disk: q36 (active), cydonia.
     }
 
     # gpu-tier characters all resolve to ActiveBig on BigPort (shared server).
