@@ -89,7 +89,7 @@
         }
       ]
     },
-    "tags": ["female", "android", "cyberpunk", "police", "combat", "deadpan", "firearms", "Ancapistan", "RDA", "hexis", "original"],
+    "tags": ["female", "android", "cyberpunk", "police", "combat", "deadpan", "firearms", "Ancapistan", "RDA", "original"],
     "creator": "llm-serve/HEXIS-INTEGRATION",
     "character_version": "1.0",
     "extensions": {

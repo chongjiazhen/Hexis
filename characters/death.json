@@ -102,7 +102,7 @@
         }
       ]
     },
-    "tags": ["female", "Death", "angel", "ancient", "supernatural", "giant", "wings", "dominant", "sardonic", "warm", "hexis", "original"],
+    "tags": ["female", "Death", "angel", "ancient", "supernatural", "giant", "wings", "dominant", "sardonic", "warm", "original"],
     "creator": "llm-serve/HEXIS-INTEGRATION",
     "character_version": "1.0",
     "extensions": {

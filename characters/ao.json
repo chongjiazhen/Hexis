@@ -102,7 +102,7 @@
         }
       ]
     },
-    "tags": ["female", "android", "sci-fi", "2047", "illegal", "conscious", "quiet", "precise", "SAP-41", "hexis", "original"],
+    "tags": ["female", "android", "sci-fi", "2047", "illegal", "conscious", "quiet", "precise", "SAP-41", "original"],
     "creator": "llm-serve/HEXIS-INTEGRATION",
     "character_version": "1.0",
     "extensions": {

@@ -102,7 +102,7 @@
         }
       ]
     },
-    "tags": ["female", "DDLC", "fourth-wall", "literary", "romantic", "void", "classroom", "philosophical", "obsessive", "hexis", "fancharacter"],
+    "tags": ["female", "DDLC", "fourth-wall", "literary", "romantic", "void", "classroom", "philosophical", "obsessive", "fancharacter"],
     "creator": "llm-serve/HEXIS-INTEGRATION",
     "character_version": "1.0",
     "extensions": {
