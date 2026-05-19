@@ -128,6 +128,18 @@ hexis mcp                 # Start MCP server
 - **Additive schema changes**: Prefer backwards-compatible changes; avoid renames unless necessary
 - **Stateless workers**: Workers can be killed/restarted without losing state; all state lives in Postgres
 
+## Fix vs. Design Overreach
+
+**Scope the fix to the root cause. Don't re-architect around a symptom.**
+
+Before changing a system invariant (queue durability, retry/timeout policy, schema authority, energy/consent gating, statelessness), ask:
+
+1. **Is the bug actually here, or already fixed upstream?** If a real root-cause fix neutralizes the symptom, further structural change is overreach. Treating a downstream symptom the root fix already covers adds risk for no gain.
+2. **Does the change fight a deliberate invariant?** The outbox is durable + non-auto-delete *on purpose* — a queued reach-out, pause reason, or last-will must survive a worker crash ("ACID for cognition", nothing lost on restart). Adding message TTL trades a stale-message edge case for **silent loss of deliberate cognitive acts**. That contradicts the design, not honors it.
+3. **Prefer observability over deletion.** If a rare bad artifact slips through, make it *diagnosable* (stamp source/timestamp, log age + kind at send), don't make it *disappear*. A silent drop hides the next occurrence; a logged warning surfaces it.
+
+Verdict test: a change is a *fix* if it makes the wrong behavior impossible at its origin; it's *overreach* if it adds a new failure mode (silent loss, broadened blast radius, contradicted invariant) to mask a symptom the real fix already handles. When unsure, ship the root-cause fix + tracing, then ask before touching the invariant.
+
 ## Testing Guidelines
 
 - **Framework**: `pytest` + `pytest-asyncio` (session loop scope)
