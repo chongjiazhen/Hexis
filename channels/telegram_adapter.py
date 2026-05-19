@@ -133,7 +133,11 @@ class TelegramAdapter(ChannelAdapter):
             # Start polling (blocking)
             await application.start()
             await application.updater.start_polling(
-                drop_pending_updates=True,
+                # Keep queued updates across restarts: channel workers are
+                # bounced routinely (model swaps, deploys, power-mode flips).
+                # Dropping pending updates silently loses any user message
+                # that arrived during the restart window.
+                drop_pending_updates=False,
                 allowed_updates=["message"],
             )
 
