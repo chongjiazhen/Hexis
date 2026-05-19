@@ -1,9 +1,12 @@
 # hexis-status.ps1 - one-shot fleet health check.
 #
-# Reads power-profiles.psd1 (source of truth) and reports:
+# Reads power-profiles.psd1 (for ports/power mode) + live `docker ps` and reports:
 #   - current power mode (logs/current-mode.txt marker)
 #   - LLM port liveness + the model each port actually serves
 #   - per-character DB: configured?, consent, and the model llm.chat points at
+#
+# Character roster is enumerated from RUNNING worker containers, NOT the
+# psd1 Characters list (that list is frozen pre-newchars and goes stale).
 #
 # Read-only. Touches nothing. Safe to run any time.
 #
@@ -80,17 +83,55 @@ foreach ($label in $ports.Keys) {
     }
 }
 
-# --- Characters ---
+# --- Characters (live workers, not the frozen psd1 roster) ---
 Write-Host ""
-Write-Host "--- Characters ---"
-Write-Host ("  {0,-8} {1,-14} {2,-5} {3,-10} {4,-9} {5}" -f "NAME","DB","TIER","CONFIG","CONSENT","MODEL (llm.chat)")
-foreach ($ch in $P.Characters) {
-    $cfg = Get-DbConfig $ch.Db
-    $tier = $ch.Prime.Tier
-    $color = "Gray"
-    if ($cfg.configured -eq "true" -and $cfg.consent -eq "consent") { $color = "Green" }
-    elseif ($cfg.model -like "*unreachable*") { $color = "Red" }
-    Write-Host ("  {0,-8} {1,-14} {2,-5} {3,-10} {4,-9} {5}" -f `
-        $ch.Name, $ch.Db, $tier, $cfg.configured, $cfg.consent, $cfg.model) -ForegroundColor $color
+Write-Host "--- Characters (live workers) ---"
+
+# Persona = infix in hexis_<persona>_<role>_worker. Default agent
+# (Sam/hexis_memory) has no infix (hexis_<role>_worker). Infra containers
+# (brain/api/rabbitmq/ui/browser) lack the _worker suffix -> regex skips them.
+$names = & docker ps --filter "name=hexis" --format "{{.Names}}" 2>&1
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "  (docker unreachable - cannot enumerate live fleet)" -ForegroundColor Red
+} else {
+    $fleet = [ordered]@{}
+    foreach ($n in $names) {
+        $n = "$n".Trim()
+        if ($n -match '^hexis_(?:(.+)_)?(heartbeat|channel|maintenance)_worker$') {
+            $persona = if ($Matches[1]) { $Matches[1] } else { '_default' }
+            if (-not $fleet.Contains($persona)) { $fleet[$persona] = @{} }
+            $fleet[$persona][$Matches[2]] = $true
+        }
+    }
+
+    Write-Host ("  {0,-10} {1,-14} {2,-5} {3,-9} {4,-10} {5,-9} {6}" -f `
+        "NAME","DB","TIER","WORKERS","CONFIG","CONSENT","MODEL (llm.chat)")
+
+    $order = $fleet.Keys | Sort-Object { if ($_ -eq '_default') { '' } else { $_ } }
+    foreach ($persona in $order) {
+        if ($persona -eq '_default') { $name = 'Sam'; $db = 'hexis_memory' }
+        else { $name = $persona; $db = "hexis_$persona" }
+
+        $roles = $fleet[$persona]
+        $w = @()
+        if ($roles['heartbeat'])   { $w += 'hb' }
+        if ($roles['channel'])     { $w += 'ch' }
+        if ($roles['maintenance']) { $w += 'mt' }
+        $workers = ($w -join '+')
+
+        $cfg = Get-DbConfig $db
+        $tier = if ($cfg.model -like '*nano*') { 'nano' }
+                elseif ($cfg.model -like '*unreachable*') { '?' }
+                else { 'gpu' }
+
+        $color = "Gray"
+        if ($cfg.configured -eq "true" -and $cfg.consent -eq "consent") { $color = "Green" }
+        elseif ($cfg.model -like "*unreachable*") { $color = "Red" }
+        # channel-only (no heartbeat worker) = onboarding, not yet autonomous
+        elseif (-not $roles['heartbeat']) { $color = "DarkYellow" }
+
+        Write-Host ("  {0,-10} {1,-14} {2,-5} {3,-9} {4,-10} {5,-9} {6}" -f `
+            $name, $db, $tier, $workers, $cfg.configured, $cfg.consent, $cfg.model) -ForegroundColor $color
+    }
 }
 Write-Host ""

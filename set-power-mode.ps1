@@ -206,9 +206,40 @@ function New-LlmCfg([string]$Model, [int]$Port, [string]$EndpointOverride) {
 $instances = @()
 $gpuPortsInUse = @()   # ports that must stay armed in this mode
 
+# Roster = RUNNING worker containers, NOT the frozen psd1 Characters list (that
+# list stales: newchars/onboarding personas are absent from it, so ECO/PRIME
+# never flipped their llm.chat). Persona = infix in hexis_<persona>_<role>_worker;
+# default agent (Sam/hexis_memory) has no infix. Infra containers (brain/api/
+# rabbitmq/ui/browser) lack the _worker suffix -> regex skips them.
+# Tier source: psd1 Characters lookup by Db (keeps Sam/ENI exact); anything not
+# in psd1 (newchars) defaults to gpu - correct for the whole current live fleet.
+# (The only nano-tier psd1 entries are dead - no containers - so never enumerated.)
+$tierByDb = @{}
+foreach ($c in $P.Characters) { $tierByDb[$c.Db] = $c.Prime.Tier }
+
+$names = & docker ps --filter "name=hexis" --format "{{.Names}}" 2>&1
+if ($LASTEXITCODE -ne 0) {
+    throw "docker ps failed - refusing to flip a partial fleet. Output: $names"
+}
+$liveSeen = [ordered]@{}
+foreach ($n in $names) {
+    $n = "$n".Trim()
+    if ($n -match '^hexis_(?:(.+)_)?(heartbeat|channel|maintenance)_worker$') {
+        $persona = if ($Matches[1]) { $Matches[1] } else { '_default' }
+        if (-not $liveSeen.Contains($persona)) {
+            if ($persona -eq '_default') { $cn = 'Sam'; $cdb = 'hexis_memory' }
+            else { $cn = $persona; $cdb = "hexis_$persona" }
+            $ctier = if ($tierByDb.ContainsKey($cdb)) { $tierByDb[$cdb] } else { 'gpu' }
+            $liveSeen[$persona] = @{ Name = $cn; Db = $cdb; Tier = $ctier }
+        }
+    }
+}
+$liveChars = @($liveSeen.Values)
+if ($liveChars.Count -eq 0) { throw "no running hexis worker containers - nothing to flip" }
+
 # Arm the ONE shared ActiveBig server once, if PRIME and any gpu-tier char.
 $bigResolved = $null
-if ($Mode -eq "prime" -and ($P.Characters | Where-Object { $_.Prime.Tier -eq "gpu" })) {
+if ($Mode -eq "prime" -and ($liveChars | Where-Object { $_.Tier -eq "gpu" })) {
     # Single source of truth: alias + gguf + tuning resolved from models.json by
     # ActiveBig key. $big.* (psd1) is only a legacy fallback for un-backfilled keys.
     $bigResolved = Resolve-BigModel $ActiveBig $big.Repo $big.Path $big.Alias
@@ -216,11 +247,10 @@ if ($Mode -eq "prime" -and ($P.Characters | Where-Object { $_.Prime.Tier -eq "gp
     $gpuPortsInUse += $BigPort
 }
 
-foreach ($ch in $P.Characters) {
+foreach ($ch in $liveChars) {
     $name = $ch.Name
     if ($Mode -eq "prime") {
-        $pr = $ch.Prime
-        if ($pr.Tier -eq "gpu") {
+        if ($ch.Tier -eq "gpu") {
             # all gpu personas share the one ActiveBig server on BigPort.
             # Model id = registry-resolved alias (== server --alias) so the
             # char DB and the llama-server advertise the same name.
