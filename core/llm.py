@@ -996,6 +996,11 @@ async def chat_completion(
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
+            # Low-quant local models (IQ3_XXS worldsim/q36) degenerate into
+            # verbatim paragraph loops on long generations with no anti-repeat
+            # pressure. Mild frequency_penalty breaks the loop; benign for
+            # higher-quant and cloud models.
+            "frequency_penalty": 0.4,
             # Qwen3 reasoning models otherwise burn the whole token budget on
             # reasoning_content and return empty `content` via this
             # OpenAI-compatible path. Disable thinking at the chat-template
