@@ -177,7 +177,9 @@ The heartbeat is the agent's conscious cognitive loop:
 ## Model Serving & Power Modes
 
 - **ECO/PRIME single GPU slot**: all gpu-tier characters share ONE llama-server on :8080 serving `ActiveBig`. Switch via `set-power-mode.ps1 prime` after editing `power-profiles.psd1` `ActiveBig`. `hexis-launcher.ps1` = GUI editor of the same store (preserves all BigModels entries on Apply).
+- **Read-only health probe**: `.\hexis-status.ps1` — reports power-mode marker, LLM port liveness + served model, and per-char DB (configured/consent/`llm.chat` model). Touches nothing; run any time before/after a power switch.
 - **Per-model serve flags (ctx/ngl/kv_quant/batch) are owned by `C:\llm-serve\models.json`**, sourced by `set-power-mode.ps1` keyed on `ActiveBig` — do NOT hardcode them in Hexis. Boundary doc: `C:\llm-serve\docs\HEXIS-INTEGRATION.md`.
+- **Every `power-profiles.psd1` `BigModels` entry MUST carry a local `Path` to its snapshot `.gguf`.** `set-power-mode.ps1`'s `Ensure-GpuServer` prefers `-m Path` and falls back to `-hf <repo>` when `Path` is absent. The `-hf` form invokes the HF resolver, which Xet-hangs on this box → `:8080` never binds → every gpu-tier char + newchar (Mira etc.) returns the `...` empty-response fallback. Keep `Repo` too (`Path` wins when both set).
 - **Dense vs MoE on 16 GB VRAM**: ~6 instances share the slot (`--parallel 1`). A dense 24B collapses under fleet concurrency (prompt-eval thrash → ~1 tok/s, truncated replies); use a MoE (`q36`/`worldsim`) — ~8× cheaper per-token eval, absorbs the fleet.
 - **Multi-persona**: `docker-compose.newchars.yml` (+ per-persona `docker-compose.<name>.yml`). Channel/worker code is baked into the image — code changes need `docker compose ... up -d --build <svc>`, not just a restart.
 
@@ -186,6 +188,8 @@ The heartbeat is the agent's conscious cognitive loop:
 - **Schema changes not taking effect?** SQL files are baked into the Docker image -- see "Bouncing the Database" below
 - **Heartbeat not running?** Check `agent.is_configured` via `hexis status` or run `hexis init`
 - **Memory not found?** Embeddings = host llama-server :8081 (per `.env`). Check `curl localhost:8081/health`.
+- **All characters reply just `...`?** Chat LLM server (`:8080`, `ActiveBig`) is down. Confirm with read-only `.\hexis-status.ps1` (mode marker, port liveness, per-char `llm.chat` model). Recover: `.\set-power-mode.ps1 prime` — but first ensure the active `BigModels` entry has a local `Path` (see Model Serving gotcha), else the re-arm wedges on `-hf` again.
+- **Heartbeat workers silent after a `docker compose` DB bounce?** Consumer-wedge bug (`bf38d45`): per-char heartbeat workers don't reconnect after the DB container's IP changes — they sit on `Consumer loop error: [Errno -2] Name or service not known` forever while the process stays `Up`. Fix: `docker restart hexis_<name>_heartbeat_worker`. Default `hexis_heartbeat_worker` usually self-recovers; the per-persona ones often don't.
 - **Test failures?** Ensure Docker services are up before running pytest; after a fresh `down -v`, wait for Postgres to accept connections. Use `POSTGRES_HOST=127.0.0.1` with pytest if localhost SSL negotiation flakes.
 
 ## Agent Operational Notes
