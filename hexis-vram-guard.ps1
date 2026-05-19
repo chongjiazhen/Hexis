@@ -35,7 +35,14 @@ $GameDirs = @(
     'C:\Program Files\Epic Games',
     'C:\Program Files\Steam\steamapps\common',
     'C:\XboxGames',
-    'C:\Program Files (x86)\GOG Galaxy\Games'
+    'C:\Program Files (x86)\GOG Galaxy\Games',
+    'C:\ComfyUI',  # ComfyUI portable: python_embeded\python.exe under here = CUDA hog, treat like a game (one-way PRIME->ECO)
+    'C:\Games',
+    'C:\GOG Games',
+    'D:\Games',
+    'D:\GOG Games',
+    'E:\Games',
+    'E:\GOG Games'
 )
 # 3) nvidia-smi foreign-CUDA fallback (works only where per-proc VRAM is real;
 #    inert on this GeForce - kept for portability, harmless).
@@ -89,7 +96,10 @@ function Get-LlamaPids {
 function Test-GameRunning {
     # (a) exact name match
     foreach ($g in $GameProcs) {
-        if (Get-Process -Name $g -ErrorAction SilentlyContinue) { return $true }
+        if (Get-Process -Name $g -ErrorAction SilentlyContinue) {
+            Log "gameproc match: name=$g"
+            return $true
+        }
     }
     # (b) path match: any process whose exe is under a game dir
     if ($GameDirs.Count -gt 0) {
@@ -99,6 +109,7 @@ function Test-GameRunning {
             if (-not $path) { continue }
             foreach ($d in $GameDirs) {
                 if ($path.StartsWith($d, [System.StringComparison]::OrdinalIgnoreCase)) {
+                    Log "gamedir match: $($proc.ProcessName) [PID $($proc.Id)] $path (under $d)"
                     return $true
                 }
             }
