@@ -15,11 +15,6 @@ from services.agent import run_agent, stream_agent
 logger = logging.getLogger(__name__)
 
 
-ECO_CANNED_REPLY = (
-    "I'm in low-power mode right now — I'll catch up properly when I'm back."
-)
-
-
 async def _read_power_mode(pool: Any | None, dsn: str | None) -> str:
     """
     Return 'eco' or 'prime' from agent.power_mode config. Falls back to
@@ -176,14 +171,16 @@ async def chat_turn(
     normalized = normalize_llm_config(llm_config)
     history = history or []
 
-    # ECO gate: skip the LLM entirely, return canned reply, do NOT write to
-    # memory (a 1B-nano-shaped reply pollutes persona long-term — see
-    # tools/probe-eco for the empirical case). History is NOT advanced; each
-    # ECO turn is independent so a long sleep doesn't pile up sleep-noise into
-    # the next PRIME turn's context.
-    if await _read_power_mode(pool, dsn) == 'eco':
-        logger.info("ECO mode: chat_turn returning canned reply (no LLM, no memory write)")
-        return {"assistant": ECO_CANNED_REPLY, "history": history}
+    # ECO mode policy: run the LLM normally (so the user still gets a real
+    # reply, degraded-1B but real) but SKIP _remember_conversation so the
+    # nano-shaped reply doesn't pollute persona long-term memory. Heartbeats
+    # still skip entirely (autonomous noise has no user-visible benefit).
+    # Per probe-eco, nano post-uptune (ctx 32k + repeat-penalty + mirostat 2)
+    # produces coherent if off-persona replies — interactive enough to keep
+    # the user in the loop without burning the persona's episodic record.
+    is_eco = (await _read_power_mode(pool, dsn) == 'eco')
+    if is_eco:
+        logger.info("ECO mode: chat_turn running LLM but will skip memory write")
 
     # Check if RLM is enabled for chat
     use_rlm = False
@@ -214,21 +211,23 @@ async def chat_turn(
             pool=pool,
         )
         assistant_text = result["response"]
-        # Still form memory from the turn
-        if pool is not None:
-            mem_client = CognitiveMemory(pool)
-            await _remember_conversation(
-                mem_client,
-                user_message=user_message,
-                assistant_message=assistant_text,
-            )
-        else:
-            async with CognitiveMemory.connect(dsn) as mem_client:
+        # Form memory from the turn — UNLESS in ECO, where the nano-shaped
+        # reply would pollute persona long-term memory.
+        if not is_eco:
+            if pool is not None:
+                mem_client = CognitiveMemory(pool)
                 await _remember_conversation(
                     mem_client,
                     user_message=user_message,
                     assistant_message=assistant_text,
                 )
+            else:
+                async with CognitiveMemory.connect(dsn) as mem_client:
+                    await _remember_conversation(
+                        mem_client,
+                        user_message=user_message,
+                        assistant_message=assistant_text,
+                    )
         new_history = list(history)
         new_history.append({"role": "user", "content": user_message})
         new_history.append({"role": "assistant", "content": assistant_text})
@@ -260,8 +259,10 @@ async def chat_turn(
         )
         assistant_text = loop_result.text
 
-        async with CognitiveMemory.connect(dsn) as mem_client:
-            await _remember_conversation(mem_client, user_message=user_message, assistant_message=assistant_text)
+        # Skip memory write in ECO (nano-shaped reply pollutes long-term).
+        if not is_eco:
+            async with CognitiveMemory.connect(dsn) as mem_client:
+                await _remember_conversation(mem_client, user_message=user_message, assistant_message=assistant_text)
 
         new_history = list(history)
         new_history.append({"role": "user", "content": user_message})
@@ -294,12 +295,12 @@ async def stream_chat_turn(
     dsn = dsn or db_dsn_from_env()
     history = history or []
 
-    # ECO gate (mirrors chat_turn): yield canned reply once, skip everything
-    # else (LLM, tools, memory write).
-    if await _read_power_mode(pool, dsn) == 'eco':
-        logger.info("ECO mode: stream_chat_turn yielding canned reply (no LLM, no memory write)")
-        yield ECO_CANNED_REPLY
-        return
+    # ECO mode policy (mirrors chat_turn): run the LLM normally, skip
+    # _remember_conversation. Lets the user keep interacting via a degraded-1B
+    # reply without polluting persona long-term memory with nano-shaped output.
+    is_eco = (await _read_power_mode(pool, dsn) == 'eco')
+    if is_eco:
+        logger.info("ECO mode: stream_chat_turn streaming LLM but will skip memory write")
 
     import asyncpg
 
@@ -331,7 +332,7 @@ async def stream_chat_turn(
                     yield text
 
         full_text = "".join(collected)
-        if full_text:
+        if full_text and not is_eco:
             async with CognitiveMemory.connect(dsn) as mem_client:
                 await _remember_conversation(
                     mem_client,
