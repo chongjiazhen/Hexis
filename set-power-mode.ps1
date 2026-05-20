@@ -202,12 +202,24 @@ function Ensure-NanoServer() {
     }
     if (-not (Test-Path $LlamaServer)) { throw "llama-server not found at $LlamaServer" }
     if (-not $NanoRepo) { throw "power-profiles.psd1: Nano.Repo missing" }
+    # Thread-capped + below-normal priority: pure-CPU inference must NOT saturate
+    # all cores and starve interactive apps (this crashed VS Code).
+    # 8 physical cores -> cap at 4, leave headroom.
     $NanoThreads = 4
     Write-Host "[arm] nano :$NanoPort ($NanoRepo, threads=$NanoThreads, below-normal)"
+    # Tuning rationale (ECO floor; 11 personas serialize on --parallel 1):
+    #   --ctx-size 32768           : prompt bloat headroom (lovesick hit 5735 tok ceiling at 4096)
+    #   --cache-type-k/v q8_0      : halves KV cache; trivial quality loss; pairs w/ bigger ctx
+    #   --repeat-penalty 1.1       : kills echo/loop degeneracy (1B persona-hold weakness)
+    #   --mlock                    : pin weights+KV in RAM, no page-fault stalls mid-stream
+    #   --n-gpu-layers 0           : CPU-only, 0 VRAM (PRIME owns GPU)
     $nanoProc = Start-Process -FilePath $LlamaServer `
         -ArgumentList @("-hf",$NanoRepo,
                         "--host","0.0.0.0","--port","$NanoPort",
-                        "--ctx-size","4096","--n-gpu-layers","0",
+                        "--ctx-size","32768","--n-gpu-layers","0",
+                        "--cache-type-k","q8_0","--cache-type-v","q8_0",
+                        "--repeat-penalty","1.1",
+                        "--mlock",
                         "--parallel","1",
                         "--threads","$NanoThreads","--threads-batch","$NanoThreads",
                         "--alias",$NanoAlias,"--jinja") `
