@@ -1,12 +1,16 @@
 # set-power-mode.ps1 - switch the agent fleet between ECO and PRIME.
 #
-# PRIME: arm each character's assigned GPU model; flip all instance DBs to it.
-# ECO:   kill the GPU model servers (frees VRAM); flip all instance DBs to the
-#        always-on CPU nano (:8082). Optionally point Sam at a heavy model you
-#        already loaded for your own use (vibe-coding / SillyTavern).
+# PRIME: arm the shared ActiveBig GPU model on :8080; flip all instance DBs to
+#        it. Kill nano (:8082) when no live persona is nano-tier - the fleet
+#        runs on :8080 post heartbeat-to-GPU migration (2026-05-20).
+# ECO:   kill the GPU model server (frees VRAM); ensure CPU nano (:8082) is up
+#        + healthy; flip all instance DBs to it. Optionally point Sam at a
+#        heavy model you already loaded for your own use (vibe-coding /
+#        SillyTavern).
 #
-# The always-on nano (:8082) and embed (:8081) are NEVER touched here - they are
-# owned by start.ps1.
+# embed (:8081) is owned by start.ps1; never touched here. Nano was previously
+# also start.ps1-owned ("always-on") - that contract changed 2026-05-20: nano
+# is now ECO-only and this script ensure-launches / kills it.
 #
 # Usage:
 #   .\set-power-mode.ps1 eco
@@ -44,6 +48,7 @@ $Provider    = $P.Provider
 $ApiKeyEnv   = $P.ApiKeyEnv
 $NanoPort    = $P.Nano.Port
 $NanoAlias   = $P.Nano.Alias
+$NanoRepo    = $P.Nano.Repo
 
 # Single shared GPU slot: ActiveBig (1-of-N) on BigPort. Decoupled from
 # persona - all gpu-tier characters ride this one server.
@@ -172,6 +177,49 @@ function Kill-Port([int]$Port, [string]$Label) {
     }
 }
 
+function Wait-PortHealth([string]$Url, [string]$Label, [int]$TimeoutSec = 180) {
+    Write-Host -NoNewline "[wait] $Label "
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $r = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
+            if ($r.StatusCode -eq 200) { Write-Host "OK"; return $true }
+        } catch { }
+        Write-Host -NoNewline "."
+        Start-Sleep -Seconds 2
+    }
+    Write-Host "TIMEOUT"
+    return $false
+}
+
+# ECO floor: launch CPU-1B nano (:8082) if not already up. Mirrors start.ps1's
+# block exactly (same repo, thread cap, priority, args) so either entry point
+# produces a byte-identical server. Idempotent.
+function Ensure-NanoServer() {
+    if (Get-PortPid $NanoPort) {
+        Write-Host "[arm] nano :$NanoPort already up"
+        return
+    }
+    if (-not (Test-Path $LlamaServer)) { throw "llama-server not found at $LlamaServer" }
+    if (-not $NanoRepo) { throw "power-profiles.psd1: Nano.Repo missing" }
+    $NanoThreads = 4
+    Write-Host "[arm] nano :$NanoPort ($NanoRepo, threads=$NanoThreads, below-normal)"
+    $nanoProc = Start-Process -FilePath $LlamaServer `
+        -ArgumentList @("-hf",$NanoRepo,
+                        "--host","0.0.0.0","--port","$NanoPort",
+                        "--ctx-size","4096","--n-gpu-layers","0",
+                        "--parallel","1",
+                        "--threads","$NanoThreads","--threads-batch","$NanoThreads",
+                        "--alias",$NanoAlias,"--jinja") `
+        -WindowStyle Hidden -PassThru
+    try {
+        $nanoProc.PriorityClass = [System.Diagnostics.ProcessPriorityClass]::BelowNormal
+        Write-Host "[arm] nano PID $($nanoProc.Id) priority=BelowNormal"
+    } catch {
+        Write-Host "[warn] could not lower nano priority: $($_.Exception.Message)"
+    }
+}
+
 function Ensure-GpuServer($Resolved, [int]$Port) {
     if (Get-PortPid $Port) {
         Write-Host "[arm] $($Resolved.Alias) :$Port already up"
@@ -278,16 +326,42 @@ foreach ($ch in $liveChars) {
             "llm.chat"         = $cfg
             "llm.heartbeat"    = $cfg
             "llm.subconscious" = $cfg
+            # Power mode is the single flag the workers gate on:
+            #   eco  -> heartbeat skipped, chat returns canned reply, no memory write
+            #   prime -> full LLM behavior (chat + autonomous heartbeats resume)
+            "agent.power_mode" = $Mode
         }
     }
-    Write-Host "[plan] $name ($($ch.Db)) -> $($cfg.model) @ $($cfg.endpoint)"
+    Write-Host "[plan] $name ($($ch.Db)) -> $($cfg.model) @ $($cfg.endpoint) [mode=$Mode]"
 }
 
-# ---- ECO: kill the shared GPU server (free VRAM) ----
+# ---- Nano (:8082) lifecycle ----
+# Pre 2026-05-20 the nano was always-on (owned solely by start.ps1) and this
+# script "never touched :8082". Post heartbeat-to-GPU migration, the live fleet
+# routes at :8080 in PRIME, so nano can be torn down to free ~1.5 GB RAM + 4
+# CPU threads. ECO still hard-depends on nano: every DB flips to its endpoint,
+# so we must ensure it is up AND healthy before letting the asyncpg applier
+# point DBs at it - flipping to a dead endpoint would silently brick the fleet.
 if ($Mode -eq "eco") {
+    Ensure-NanoServer
+    $nanoOk = Wait-PortHealth "http://127.0.0.1:$NanoPort/health" "nano :$NanoPort" 180
+    if (-not $nanoOk) {
+        throw "nano :$NanoPort not healthy - refusing to flip DBs to a dead endpoint. Check llama-server, HF cache (HF_HUB_DISABLE_XET=1), and retry."
+    }
+    # Free the GPU slot.
     Kill-Port $BigPort $ActiveBig
+} else {
+    # PRIME: nano is no longer load-bearing (gpu-tier chars share :8080;
+    # nano-tier psd1 entries are all retired). Only kill if no live nano-tier
+    # persona depends on it, in case the roster grows again later.
+    $liveNano = @($liveChars | Where-Object { $_.Tier -eq "nano" })
+    if ($liveNano.Count -eq 0) {
+        Kill-Port $NanoPort "nano"
+    } else {
+        Write-Host "[keep] nano :$NanoPort (live nano-tier: $($liveNano.Name -join ','))"
+    }
 }
-# Never touch nano (:8082) or embed (:8081).
+# embed (:8081) is owned by start.ps1; never touched here.
 
 # ---- Flip the DBs via the asyncpg applier ----
 $plan = @{
