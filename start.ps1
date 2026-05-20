@@ -6,7 +6,13 @@
 
 param(
     [switch]$Repl,
-    [switch]$Stop
+    [switch]$Stop,
+    # Launch the CPU nano (:8082). Default: only when last set-power-mode was ECO.
+    # Pass -WithNano to force on (e.g. cold box where logs\current-mode.txt absent
+    # but you still want an ECO floor available). PRIME boots skip it now that
+    # the fleet routes heartbeat/chat/subconscious at the GPU :8080.
+    # See .local-notes/migrations/2026-05-20-heartbeat-to-gpu/.
+    [switch]$WithNano
 )
 
 $ErrorActionPreference = "Stop"
@@ -141,28 +147,53 @@ if (Get-PortPid 8081) {
         -WindowStyle Hidden
 }
 
-# 4. Nano CPU-1B llama-server :8082 (always-on; ECO floor). CPU only -> 0 VRAM.
-# Thread-capped + below-normal priority: pure-CPU inference (Rocky+TARS in
-# PRIME, everyone in ECO) must NOT saturate all cores and starve interactive
-# apps (this crashed VS Code). 8 physical cores -> cap at 4, leave headroom.
-$NanoThreads = 4
-if (Get-PortPid 8082) {
-    Write-Host "[start] nano :8082 already running"
+# 4. Nano CPU-1B llama-server :8082 (ECO floor only). CPU -> 0 VRAM.
+# Post 2026-05-20 heartbeat-to-GPU migration, the live fleet routes
+# llm.chat/llm.heartbeat/llm.subconscious at :8080 (q36 MoE), so PRIME no longer
+# needs nano resident. Launch only when:
+#   - -WithNano was passed, OR
+#   - last recorded mode marker is "eco".
+# set-power-mode.ps1 eco should ensure-launch nano (see its sibling patch).
+$markerFile = Join-Path $Root "logs\current-mode.txt"
+$lastMode = $null
+if (Test-Path $markerFile) {
+    $lastMode = ((Get-Content $markerFile -Raw).Trim() -split "`n")[0].Trim().ToLower()
+}
+$wantNano = $WithNano.IsPresent -or ($lastMode -eq "eco")
+if (-not $wantNano) {
+    Write-Host "[skip] nano :8082 (mode=$lastMode; pass -WithNano to force)"
 } else {
-    Write-Host "[start] nano llama-server :8082 ($NanoRepo, threads=$NanoThreads, below-normal)"
-    $nanoProc = Start-Process -FilePath $LlamaServer `
-        -ArgumentList @("-hf",$NanoRepo,
-                        "--host","0.0.0.0","--port","8082",
-                        "--ctx-size","4096","--n-gpu-layers","0",
-                        "--parallel","1",
-                        "--threads","$NanoThreads","--threads-batch","$NanoThreads",
-                        "--alias","nano-imp-1b","--jinja") `
-        -WindowStyle Hidden -PassThru
-    try {
-        $nanoProc.PriorityClass = [System.Diagnostics.ProcessPriorityClass]::BelowNormal
-        Write-Host "[start] nano PID $($nanoProc.Id) priority=BelowNormal"
-    } catch {
-        Write-Host "[warn] could not lower nano priority: $($_.Exception.Message)"
+    # Thread-capped + below-normal priority: pure-CPU inference must NOT saturate
+    # all cores and starve interactive apps (this crashed VS Code).
+    # 8 physical cores -> cap at 4, leave headroom.
+    $NanoThreads = 4
+    if (Get-PortPid 8082) {
+        Write-Host "[start] nano :8082 already running"
+    } else {
+        Write-Host "[start] nano llama-server :8082 ($NanoRepo, threads=$NanoThreads, below-normal)"
+        # Tuning rationale (ECO floor; 11 personas serialize on --parallel 1):
+        #   --ctx-size 32768           : prompt bloat headroom (lovesick hit 5735 tok ceiling at 4096)
+        #   --cache-type-k/v q8_0      : halves KV cache; trivial quality loss; pairs w/ bigger ctx
+        #   --repeat-penalty 1.1       : kills echo/loop degeneracy (1B persona-hold weakness)
+        #   --mlock                    : pin weights+KV in RAM, no page-fault stalls mid-stream
+        #   --n-gpu-layers 0           : CPU-only, 0 VRAM (PRIME owns GPU)
+        $nanoProc = Start-Process -FilePath $LlamaServer `
+            -ArgumentList @("-hf",$NanoRepo,
+                            "--host","0.0.0.0","--port","8082",
+                            "--ctx-size","32768","--n-gpu-layers","0",
+                            "--cache-type-k","q8_0","--cache-type-v","q8_0",
+                            "--repeat-penalty","1.1",
+                            "--mlock",
+                            "--parallel","1",
+                            "--threads","$NanoThreads","--threads-batch","$NanoThreads",
+                            "--alias","nano-imp-1b","--jinja") `
+            -WindowStyle Hidden -PassThru
+        try {
+            $nanoProc.PriorityClass = [System.Diagnostics.ProcessPriorityClass]::BelowNormal
+            Write-Host "[start] nano PID $($nanoProc.Id) priority=BelowNormal"
+        } catch {
+            Write-Host "[warn] could not lower nano priority: $($_.Exception.Message)"
+        }
     }
 }
 
@@ -170,9 +201,11 @@ if (Get-PortPid 8082) {
 #    must not block the stack - characters only fall to it in ECO).
 $chatOk  = Wait-Health "http://127.0.0.1:8080/health"  "chat :8080" 240
 $embedOk = Wait-Health "http://127.0.0.1:8081/health"  "embed :8081" 120
-$nanoOk  = Wait-Health "http://127.0.0.1:8082/health"  "nano :8082" 180
-if (-not $nanoOk) {
-    Write-Host "[warn] nano :8082 not healthy yet - ECO fallback degraded until it loads"
+if ($wantNano) {
+    $nanoOk = Wait-Health "http://127.0.0.1:8082/health" "nano :8082" 180
+    if (-not $nanoOk) {
+        Write-Host "[warn] nano :8082 not healthy yet - ECO fallback degraded until it loads"
+    }
 }
 
 if (-not ($chatOk -and $embedOk)) {
@@ -184,7 +217,11 @@ Write-Host ""
 Write-Host "[ready] Hexis stack up"
 Write-Host "  chat  http://127.0.0.1:8080"
 Write-Host "  embed http://127.0.0.1:8081"
-Write-Host "  nano  http://127.0.0.1:8082  (CPU-1B, ECO floor)"
+if ($wantNano) {
+    Write-Host "  nano  http://127.0.0.1:8082  (CPU-1B, ECO floor)"
+} else {
+    Write-Host "  nano  (not launched; mode=$lastMode)"
+}
 Write-Host "  db    127.0.0.1:43815"
 Write-Host ""
 
