@@ -201,6 +201,9 @@ The heartbeat is the agent's conscious cognitive loop:
 - **After editing `C:\llm-serve\models.json`**: `cd C:\llm-serve; SKIP_HF_CHECKS=1 py -3.10 -m unittest infra/test_registry.py -v` (drop `SKIP_HF_CHECKS` only on a box with every gguf cached). Headless GUI round-trip: `. .\hexis-launcher.ps1` then call `Write-Profile` against a temp `$ProfilePath` (never the live file).
 - **Dense vs MoE on 16 GB VRAM**: ~6 instances share the slot (`--parallel 1`). A dense 24B collapses under fleet concurrency (prompt-eval thrash → ~1 tok/s, truncated replies); use a MoE like Qwen3.6-35B-A3B (`q36`) — ~8× cheaper per-token eval, absorbs the fleet. (Exact per-box roster: `C:\llm-serve\models.json` + `power-profiles.psd1`.)
 - **Multi-persona**: `docker-compose.newchars.yml` (+ per-persona `docker-compose.<name>.yml`). Channel/worker code is baked into the image — code changes need `docker compose ... up -d --build <svc>`, not just a restart.
+- **ECO mode behavior** — `agent.power_mode` DB config key ('prime' | 'eco') is the single flag workers gate on; `set-power-mode.ps1 eco|prime` flips it atomically with `llm.*` configs. OS marker (`logs/current-mode.txt`) is shell tooling; **DB key is what workers read**. In ECO: chat path bypasses RLM + tool stack via `services.chat._eco_slim_chat` (persona prompt + small anchor + last 8 turns → direct LLM, no tools, **no memory write**); heartbeat timer skips entirely. Slim failures → `ECO_FALLBACK_REPLY`. PRIME restores full RLM + memory writes.
+- **Probe ECO/persona quality**: `tools/probe-eco/probe-all.sh` (runs N prompts through `chat_turn` per persona, scrubs probe-generated memories). Use when evaluating nano model swaps or sampling/prompt tuning.
+- **`start.ps1 -NanoOnly`** — bounce only nano (:8082) after editing serve flags. Skips DB/chat/embed; avoids the ~4min :8080 timeout when stack restarted in ECO.
 
 ## Debugging Tips
 
@@ -247,6 +250,8 @@ Breaking this down:
 3. `docker compose up -d` -- starts containers with the new image
 
 **Important**: The compose service is named `db`, but the container is named `hexis_brain`. Use the service name (`db`) with compose commands (e.g., `docker compose build db`), but the container name with `docker exec` (e.g., `docker exec hexis_brain psql ...`).
+
+**Postgres `max_connections=300`** (compose-overridden from PG default 100) — needed for ~33-worker fleet pools. Override via `POSTGRES_MAX_CONNECTIONS` env. Bumping requires recreating the db container — and per the wedge trap below, all per-persona workers will need a manual `docker restart` since they don't auto-reconnect on DB IP change.
 
 ### Verifying Schema Changes
 
