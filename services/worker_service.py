@@ -495,6 +495,12 @@ class MaintenanceWorker:
                     logger.debug("Gateway record failed (non-fatal)", exc_info=True)
 
     async def _run_subconscious_if_due(self) -> None:
+        # WARNING: NOT gated on agent.power_mode='eco'. Safe today only
+        # because maintenance.subconscious_enabled defaults to false. If you
+        # ever flip that to true, add an _is_eco_mode() check here first or
+        # nano-shaped reasoning will pollute persona long-term memory in
+        # ECO. The chat path's ECO branch in services/chat.py is the
+        # canonical pattern; the heartbeat gate is in HeartbeatWorker.run().
         if not self.pool:
             return
         async with self.pool.acquire() as conn:
