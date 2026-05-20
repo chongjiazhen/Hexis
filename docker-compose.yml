@@ -30,6 +30,13 @@ services:
       - app.embedding_service_url=${EMBEDDING_SERVICE_URL:-http://host.docker.internal:11434/api/embed}
       - -c
       - app.embedding_model_id=${EMBEDDING_MODEL_ID:-embeddinggemma:300m-qat-q4_0}
+      # Fleet of ~33 workers (11 personas x 3 worker types), each holding a
+      # 1-5 conn asyncpg pool, plus probes and set-power-mode flips. PG default
+      # max_connections=100 saturates under fleet rebuild + parallel ops
+      # (observed 2026-05-20: ao_maintenance crashed with TooManyConnectionsError).
+      # 300 leaves headroom for growth + manual psql sessions.
+      - -c
+      - max_connections=${POSTGRES_MAX_CONNECTIONS:-300}
     networks:
       - public
       - private
