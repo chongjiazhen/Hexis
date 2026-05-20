@@ -109,7 +109,28 @@ function Test-GameRunning {
             if (-not $path) { continue }
             foreach ($d in $GameDirs) {
                 if ($path.StartsWith($d, [System.StringComparison]::OrdinalIgnoreCase)) {
-                    Log "gamedir match: $($proc.ProcessName) [PID $($proc.Id)] $path (under $d)"
+                    # Diagnostic: capture parent + command line so silent callers
+                    # of e.g. C:\ComfyUI\python_embeded\python.exe are identifiable.
+                    # CIM only on match (slower than Get-Process) - rare path.
+                    $parentDesc = '?'
+                    $cmdLine    = '?'
+                    try {
+                        $cim = Get-CimInstance Win32_Process -Filter "ProcessId=$($proc.Id)" -ErrorAction SilentlyContinue
+                        if ($cim) {
+                            if ($cim.CommandLine) { $cmdLine = $cim.CommandLine }
+                            $ppid = $cim.ParentProcessId
+                            if ($ppid) {
+                                $pp = Get-Process -Id $ppid -ErrorAction SilentlyContinue
+                                if ($pp) {
+                                    $ppPath = $null; try { $ppPath = $pp.Path } catch { }
+                                    $parentDesc = "$($pp.ProcessName)[$ppid]" + $(if ($ppPath) { " $ppPath" } else { '' })
+                                } else {
+                                    $parentDesc = "?[$ppid]"
+                                }
+                            }
+                        }
+                    } catch { }
+                    Log "gamedir match: $($proc.ProcessName) [PID $($proc.Id)] $path (under $d) parent=$parentDesc cmd=$cmdLine"
                     return $true
                 }
             }
