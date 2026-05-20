@@ -20,8 +20,12 @@
 # Source of truth: power-profiles.psd1 (hand-editable; GUI writes it later).
 
 param(
+    # Accepts:
+    #   eco            -> kill GPU, flip all DBs to nano
+    #   prime          -> arm psd1 ActiveBig (back-compat)
+    #   <model key>    -> arm that BigModels key, override psd1 ActiveBig
+    #                     for this run, write marker as the model key
     [Parameter(Mandatory = $true, Position = 0)]
-    [ValidateSet("eco", "prime")]
     [string]$Mode,
 
     [string]$SamEndpoint,
@@ -52,10 +56,27 @@ $NanoRepo    = $P.Nano.Repo
 
 # Single shared GPU slot: ActiveBig (1-of-N) on BigPort. Decoupled from
 # persona - all gpu-tier characters ride this one server.
+#
+# Resolve which big model to arm THIS run:
+#   $Mode == 'eco'     -> ActiveBig irrelevant (no GPU server armed)
+#   $Mode == 'prime'   -> use psd1 ActiveBig (back-compat default)
+#   $Mode == <key>     -> override: arm that BigModels key for this run.
+#                         psd1 ActiveBig stays as the next-default; hand-edit
+#                         the psd1 if you want the override to persist.
 $BigPort   = [int]$P.BigPort
 $ActiveBig = $P.ActiveBig
-$big       = $P.BigModels[$ActiveBig]
-if (-not $big) { throw "ActiveBig '$ActiveBig' not found in BigModels (power-profiles.psd1)" }
+$IsEco     = ($Mode -eq 'eco')
+$IsPrimeAlias = ($Mode -eq 'prime')
+if (-not $IsEco -and -not $IsPrimeAlias) {
+    # Treat $Mode as a BigModels key
+    if (-not $P.BigModels.ContainsKey($Mode)) {
+        $known = ($P.BigModels.Keys | Sort-Object) -join ', '
+        throw "Unknown mode '$Mode'. Valid: eco, prime, or a BigModels key. Known keys: $known"
+    }
+    $ActiveBig = $Mode
+}
+$big = $P.BigModels[$ActiveBig]
+if (-not $IsEco -and -not $big) { throw "ActiveBig '$ActiveBig' not found in BigModels (power-profiles.psd1)" }
 
 # ---- llm-serve registry: single source of truth for per-model serve flags ----
 # C:\llm-serve\models.json owns ctx/ngl/kv_quant/batch/threads per model and is
@@ -300,9 +321,11 @@ foreach ($n in $names) {
 $liveChars = @($liveSeen.Values)
 if ($liveChars.Count -eq 0) { throw "no running hexis worker containers - nothing to flip" }
 
-# Arm the ONE shared ActiveBig server once, if PRIME and any gpu-tier char.
+# Arm the ONE shared ActiveBig server once, if PRIME-like (eco-not) AND any
+# gpu-tier char. PRIME-like = $Mode is 'prime' or any BigModels key — already
+# resolved into $ActiveBig above.
 $bigResolved = $null
-if ($Mode -eq "prime" -and ($liveChars | Where-Object { $_.Tier -eq "gpu" })) {
+if (-not $IsEco -and ($liveChars | Where-Object { $_.Tier -eq "gpu" })) {
     # Single source of truth: alias + gguf + tuning resolved from models.json by
     # ActiveBig key. $big.* (psd1) is only a legacy fallback for un-backfilled keys.
     $bigResolved = Resolve-BigModel $ActiveBig $big.Repo $big.Path $big.Alias
@@ -312,7 +335,7 @@ if ($Mode -eq "prime" -and ($liveChars | Where-Object { $_.Tier -eq "gpu" })) {
 
 foreach ($ch in $liveChars) {
     $name = $ch.Name
-    if ($Mode -eq "prime") {
+    if (-not $IsEco) {
         if ($ch.Tier -eq "gpu") {
             # all gpu personas share the one ActiveBig server on BigPort.
             # Model id = registry-resolved alias (== server --alias) so the

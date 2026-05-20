@@ -76,9 +76,15 @@ if (Test-Path $LockFile) {
 Log "guard started (PID $PID); poll=${PollSeconds}s games=[$($GameProcs -join ',')] minForeignMB=$MinForeignVramMB"
 
 function Get-Mode {
+    # Marker contents (written by set-power-mode.ps1):
+    #   'eco'         -> GPU killed, nano serving
+    #   'prime'       -> back-compat alias, GPU armed via psd1 ActiveBig
+    #   <model key>   -> GPU armed with that specific BigModels key (e.g. 'ablx')
+    # Any non-empty value other than 'eco' means GPU is armed. The trigger
+    # decision below only cares about 'is ECO' vs 'is GPU-armed'.
     if (Test-Path $MarkerFile) {
         $m = (Get-Content $MarkerFile -ErrorAction SilentlyContinue | Select-Object -First 1)
-        if ($m -in 'eco', 'prime') { return $m }
+        if ($m) { return $m.Trim() }
     }
     # No marker: infer from GPU llama ports.
     foreach ($port in 8080, 8083, 8084, 8085) {
@@ -177,8 +183,10 @@ try {
             $hits++
             if ($armed -and $hits -ge $ConsecutiveSamples) {
                 $mode = Get-Mode
-                if ($mode -eq 'prime') {
-                    Log "sustained trigger (game=$game foreignMB=$foreign) mode=prime"
+                # GPU-armed = anything other than 'eco' (prime alias or a
+                # specific BigModels key like 'ablx'/'q36'). All flip to ECO.
+                if ($mode -ne 'eco') {
+                    Log "sustained trigger (game=$game foreignMB=$foreign) mode=$mode"
                     Invoke-Eco
                 } else {
                     Log "trigger but mode=$mode - nothing to do"
