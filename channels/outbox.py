@@ -32,7 +32,18 @@ RABBITMQ_MANAGEMENT_URL = os.getenv("RABBITMQ_MANAGEMENT_URL", "http://rabbitmq:
 RABBITMQ_USER = os.getenv("RABBITMQ_USER", "hexis")
 RABBITMQ_PASSWORD = os.getenv("RABBITMQ_PASSWORD", "hexis_password")
 RABBITMQ_VHOST = os.getenv("RABBITMQ_VHOST", "/")
-RABBITMQ_OUTBOX_QUEUE = os.getenv("RABBITMQ_OUTBOX_QUEUE", "hexis.outbox")
+
+# Per-persona queue isolation: mirrors core/rabbitmq_bridge.py. Each persona
+# channel worker consumes its own queue (hexis.outbox.<persona>) so no other
+# persona's bot can win and deliver under the wrong Telegram token.
+_POSTGRES_DB = os.getenv("POSTGRES_DB", "")
+_PERSONA = (
+    _POSTGRES_DB.removeprefix("hexis_")
+    if _POSTGRES_DB.startswith("hexis_") and _POSTGRES_DB != "hexis_memory"
+    else "memory"
+)
+_PERSONA_SUFFIX = "." + _PERSONA if _PERSONA != "memory" else ""
+RABBITMQ_OUTBOX_QUEUE = os.getenv("RABBITMQ_OUTBOX_QUEUE", f"hexis.outbox{_PERSONA_SUFFIX}")
 POLL_INTERVAL = float(os.getenv("OUTBOX_POLL_INTERVAL", "2.0"))
 
 
@@ -111,6 +122,18 @@ class ChannelOutboxConsumer:
 
     async def _process_message(self, body: dict[str, Any]) -> None:
         """Route an outbox message to the appropriate channel."""
+        # Defense-in-depth: even with per-persona queues, reject any message
+        # whose embedded `agent` stamp does not match this container's persona.
+        # Catches env-misconfig regressions where a worker falls back to a
+        # shared queue. `agent` absent = legacy publisher, allow through.
+        msg_agent = str(body.get("agent") or "")
+        if msg_agent and msg_agent != _PERSONA:
+            logger.warning(
+                "Outbox origin mismatch: msg agent=%r container persona=%r body=%s — dropping",
+                msg_agent, _PERSONA, str(body)[:200],
+            )
+            return
+
         kind = body.get("kind", "")
         payload = body.get("payload", {})
         if isinstance(payload, str):

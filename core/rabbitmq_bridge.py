@@ -16,8 +16,19 @@ RABBITMQ_MANAGEMENT_URL = os.getenv("RABBITMQ_MANAGEMENT_URL", "http://rabbitmq:
 RABBITMQ_USER = os.getenv("RABBITMQ_USER", "hexis")
 RABBITMQ_PASSWORD = os.getenv("RABBITMQ_PASSWORD", "hexis_password")
 RABBITMQ_VHOST = os.getenv("RABBITMQ_VHOST", "/")
-RABBITMQ_OUTBOX_QUEUE = os.getenv("RABBITMQ_OUTBOX_QUEUE", "hexis.outbox")
-RABBITMQ_INBOX_QUEUE = os.getenv("RABBITMQ_INBOX_QUEUE", "hexis.inbox")
+
+# Per-persona queue isolation: derive from POSTGRES_DB so each persona
+# publishes/consumes its own queue and competing-consumer cross-delivery
+# between persona channel workers becomes impossible at the broker.
+# hexis_memory (default/control DB) keeps the legacy queue names.
+_POSTGRES_DB = os.getenv("POSTGRES_DB", "")
+_PERSONA_SUFFIX = (
+    "." + _POSTGRES_DB.removeprefix("hexis_")
+    if _POSTGRES_DB.startswith("hexis_") and _POSTGRES_DB != "hexis_memory"
+    else ""
+)
+RABBITMQ_OUTBOX_QUEUE = os.getenv("RABBITMQ_OUTBOX_QUEUE", f"hexis.outbox{_PERSONA_SUFFIX}")
+RABBITMQ_INBOX_QUEUE = os.getenv("RABBITMQ_INBOX_QUEUE", f"hexis.inbox{_PERSONA_SUFFIX}")
 RABBITMQ_POLL_INBOX_EVERY = float(os.getenv("RABBITMQ_POLL_INBOX_EVERY", 1.0))
 
 
