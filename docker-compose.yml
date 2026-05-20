@@ -95,8 +95,11 @@ services:
       context: .
       dockerfile: ops/Dockerfile.worker
     container_name: hexis_heartbeat_worker
+    # Targets the default hexis_memory DB (Sam). Moved off "active" profile
+    # 2026-05-20 so the persona fleet rebuild does not silently bring Sam
+    # online. Bring Sam up explicitly with --profile legacy-sam.
     profiles:
-      - active
+      - legacy-sam
     command: ["hexis-worker", "--mode", "heartbeat"]
     depends_on:
       db:
@@ -124,13 +127,15 @@ services:
       - private
       - public
 
+  # Targets default hexis_memory DB. Moved off "active" profile 2026-05-20;
+  # see heartbeat_worker comment above. Bring up with --profile legacy-sam.
   maintenance_worker:
     build:
       context: .
       dockerfile: ops/Dockerfile.worker
     container_name: hexis_maintenance_worker
     profiles:
-      - active
+      - legacy-sam
     command: ["hexis-worker", "--mode", "maintenance"]
     depends_on:
       db:
@@ -191,13 +196,15 @@ services:
       - private
       - public
 
+  # Targets default hexis_memory DB. Moved off "active" profile 2026-05-20;
+  # see heartbeat_worker comment above. Bring up with --profile legacy-sam.
   channel_worker:
     build:
       context: .
       dockerfile: ops/Dockerfile.channels
     container_name: hexis_channel_worker
     profiles:
-      - active
+      - legacy-sam
     command: ["hexis-channels"]
     depends_on:
       db:
