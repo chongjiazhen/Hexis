@@ -100,6 +100,18 @@ class HeartbeatWorker:
         logger.info("HeartbeatWorker (timer) starting...")
         await self.connect()
 
+        # Prime self._last_eco from current power_mode so the in-loop
+        # transition log fires only on actual state CHANGE (not on cold-start
+        # None -> True/False). Runtime transitions PRIME<->ECO log correctly;
+        # cold-start state is NOT logged here (a logger.info call at this
+        # exact point silently fails to surface to docker logs for reasons
+        # not yet identified - other logger.info calls in this file work
+        # fine, including the transition logs in the loop body below).
+        try:
+            self._last_eco = await self._is_eco_mode()
+        except Exception:
+            self._last_eco = None
+
         try:
             while self.running:
                 try:
