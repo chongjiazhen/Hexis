@@ -15,6 +15,40 @@ from services.agent import run_agent, stream_agent
 logger = logging.getLogger(__name__)
 
 
+ECO_CANNED_REPLY = (
+    "I'm in low-power mode right now — I'll catch up properly when I'm back."
+)
+
+
+async def _read_power_mode(pool: Any | None, dsn: str | None) -> str:
+    """
+    Return 'eco' or 'prime' from agent.power_mode config. Falls back to
+    'prime' on any error so a missing key or transient DB blip never silently
+    bricks the chat path. Cached at the config-row level by Postgres; cheap to
+    call once per turn.
+    """
+    import asyncpg
+    try:
+        if pool is not None:
+            async with pool.acquire() as conn:
+                val = await conn.fetchval("SELECT get_config('agent.power_mode')")
+        else:
+            conn = await asyncpg.connect(dsn or db_dsn_from_env())
+            try:
+                val = await conn.fetchval("SELECT get_config('agent.power_mode')")
+            finally:
+                await conn.close()
+    except Exception:
+        return 'prime'
+    if val is None:
+        return 'prime'
+    if isinstance(val, str):
+        mode = val.strip().strip('"').lower()
+    else:
+        mode = str(val).lower()
+    return 'eco' if mode == 'eco' else 'prime'
+
+
 async def _build_system_prompt(
     agent_profile: dict[str, Any],
     registry: ToolRegistry | None = None,
@@ -142,6 +176,15 @@ async def chat_turn(
     normalized = normalize_llm_config(llm_config)
     history = history or []
 
+    # ECO gate: skip the LLM entirely, return canned reply, do NOT write to
+    # memory (a 1B-nano-shaped reply pollutes persona long-term — see
+    # tools/probe-eco for the empirical case). History is NOT advanced; each
+    # ECO turn is independent so a long sleep doesn't pile up sleep-noise into
+    # the next PRIME turn's context.
+    if await _read_power_mode(pool, dsn) == 'eco':
+        logger.info("ECO mode: chat_turn returning canned reply (no LLM, no memory write)")
+        return {"assistant": ECO_CANNED_REPLY, "history": history}
+
     # Check if RLM is enabled for chat
     use_rlm = False
     try:
@@ -250,6 +293,13 @@ async def stream_chat_turn(
     """
     dsn = dsn or db_dsn_from_env()
     history = history or []
+
+    # ECO gate (mirrors chat_turn): yield canned reply once, skip everything
+    # else (LLM, tools, memory write).
+    if await _read_power_mode(pool, dsn) == 'eco':
+        logger.info("ECO mode: stream_chat_turn yielding canned reply (no LLM, no memory write)")
+        yield ECO_CANNED_REPLY
+        return
 
     import asyncpg
 

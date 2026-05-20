@@ -59,6 +59,8 @@ class HeartbeatWorker:
         self.instance = instance or os.getenv("HEXIS_INSTANCE")
         self.pool: asyncpg.Pool | None = None
         self.running = False
+        # Track ECO/PRIME so we only log on transition, not every poll tick.
+        self._last_eco: bool | None = None
 
     async def connect(self) -> None:
         self.pool = await asyncpg.create_pool(
@@ -111,6 +113,16 @@ class HeartbeatWorker:
                         logger.debug("Outside active hours; skipping heartbeat.")
                         await asyncio.sleep(POLL_INTERVAL * 10)
                         continue
+                    in_eco = await self._is_eco_mode()
+                    if in_eco != self._last_eco:
+                        if in_eco:
+                            logger.info("ECO mode entered — heartbeat cycles paused (no LLM, no episodic write).")
+                        elif self._last_eco is not None:
+                            logger.info("ECO mode exited — heartbeat cycles resumed.")
+                        self._last_eco = in_eco
+                    if in_eco:
+                        await asyncio.sleep(POLL_INTERVAL * 10)
+                        continue
                     await self._submit_heartbeat_if_due()
                 except Exception as exc:
                     logger.error(f"Heartbeat timer error: {exc}")
@@ -137,6 +149,23 @@ class HeartbeatWorker:
         try:
             async with self.pool.acquire() as conn:
                 return bool(await conn.fetchval("SELECT is_agent_configured() AND is_init_complete()"))
+        except Exception:
+            return False
+
+    async def _is_eco_mode(self) -> bool:
+        """Skip heartbeat cycle entirely when agent.power_mode = 'eco'.
+
+        ECO floor uses nano-imp-1b (1B CPU) which can't follow the Hexis tool
+        prompt template - autonomous heartbeats produce garbage that gets
+        stored as episodic memory and corrupts persona long-term (see
+        tools/probe-eco for empirical case). Skip silently; PRIME flip via
+        set-power-mode.ps1 resumes cycles.
+        """
+        if not self.pool:
+            return False
+        try:
+            async with self.pool.acquire() as conn:
+                return await _is_eco_mode(conn)
         except Exception:
             return False
 
@@ -225,6 +254,23 @@ async def _is_agentic_heartbeat_enabled(conn) -> bool:
         if isinstance(val, str):
             return val.strip().lower() in ("true", "1", "yes", "on")
         return bool(val)
+    except Exception:
+        return False
+
+
+async def _is_eco_mode(conn) -> bool:
+    """
+    Read agent.power_mode. Returns True when 'eco' (heartbeat should skip).
+    Falls back to False (PRIME behavior) on any error so a missing key never
+    silently silences the fleet.
+    """
+    try:
+        val = await conn.fetchval("SELECT get_config('agent.power_mode')")
+        if val is None:
+            return False
+        if isinstance(val, str):
+            return val.strip().strip('"').lower() == 'eco'
+        return str(val).lower() == 'eco'
     except Exception:
         return False
 
