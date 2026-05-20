@@ -22,6 +22,14 @@ ECO_SLIM_ANCHOR = (
     "normal conversation as your persona."
 )
 
+# Fallback for when the slim path fails (nano server dead, persona prompt
+# missing, LLM returns empty content, etc). Better than silence on the user
+# side. Plain text, no persona voice — signals real degradation.
+ECO_FALLBACK_REPLY = (
+    "I'm in low-power mode right now and couldn't generate a reply — try again "
+    "in a moment."
+)
+
 
 async def _load_persona_system_prompt(pool: Any | None, dsn: str | None) -> str:
     """
@@ -264,13 +272,19 @@ async def chat_turn(
     is_eco = (await _read_power_mode(pool, dsn) == 'eco')
     if is_eco:
         logger.info("ECO mode: chat_turn -> slim direct LLM (no RLM, no tools, no memory write)")
-        assistant_text = await _eco_slim_chat(
-            user_message=user_message,
-            history=history,
-            llm_config=normalized,
-            pool=pool,
-            dsn=dsn,
-        )
+        try:
+            assistant_text = await _eco_slim_chat(
+                user_message=user_message,
+                history=history,
+                llm_config=normalized,
+                pool=pool,
+                dsn=dsn,
+            )
+        except Exception as exc:
+            logger.warning(f"ECO slim chat raised, using fallback reply: {exc}")
+            assistant_text = ""
+        if not assistant_text:
+            assistant_text = ECO_FALLBACK_REPLY
         new_history = list(history)
         new_history.append({"role": "user", "content": user_message})
         new_history.append({"role": "assistant", "content": assistant_text})
@@ -392,15 +406,20 @@ async def stream_chat_turn(
     if is_eco:
         logger.info("ECO mode: stream_chat_turn -> slim direct LLM (no stream, single chunk)")
         normalized_cfg = normalize_llm_config(llm_config)
-        text = await _eco_slim_chat(
-            user_message=user_message,
-            history=history,
-            llm_config=normalized_cfg,
-            pool=pool,
-            dsn=dsn,
-        )
-        if text:
-            yield text
+        try:
+            text = await _eco_slim_chat(
+                user_message=user_message,
+                history=history,
+                llm_config=normalized_cfg,
+                pool=pool,
+                dsn=dsn,
+            )
+        except Exception as exc:
+            logger.warning(f"ECO slim chat raised, using fallback reply: {exc}")
+            text = ""
+        if not text:
+            text = ECO_FALLBACK_REPLY
+        yield text
         return
 
     import asyncpg
