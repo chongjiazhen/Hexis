@@ -37,14 +37,12 @@
         # disk: ablx (active), q36, cydonia.
     }
 
-    # gpu-tier characters all resolve to ActiveBig on BigPort (shared server).
-    # nano-tier characters use the always-on CPU nano (:8082).
-    Characters = @(
-        @{ Name='Sam'; Db='hexis_memory'; Prime=@{ Tier='gpu' } }
-        @{ Name='Baymax'; Db='hexis_baymax'; Prime=@{ Tier='nano' } }
-        @{ Name='Rocky'; Db='hexis_rocky'; Prime=@{ Tier='nano' } }
-        @{ Name='TARS'; Db='hexis_tars'; Prime=@{ Tier='nano' } }
-        @{ Name='Warden'; Db='hexis_warden'; Prime=@{ Tier='gpu' } }
-        @{ Name='ENI'; Db='hexis_eni'; Prime=@{ Tier='gpu' } }
-    )
+    # Per-persona Tier overrides. set-power-mode.ps1 defaults any running
+    # persona DB not listed here to 'gpu' (shared ActiveBig on BigPort). All
+    # current live personas (Sam + ENI + 10 newchars) are gpu, so the list
+    # is empty. Add an entry ONLY when a new persona needs to be pinned to
+    # 'nano' (CPU :8082) instead of the GPU slot.
+    # Pruned 2026-05-20: Baymax/Rocky/TARS (frozen 2026-05-19, no containers),
+    # Warden (inactive), Sam/ENI (default tier matches, entries were no-ops).
+    Characters = @()
 }
