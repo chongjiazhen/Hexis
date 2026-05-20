@@ -22,18 +22,19 @@
     # applied by Hexis at the conversation layer, not by the weights. Switch
     # model = change ActiveBig + re-run set-power-mode prime. NOT a mode.
     BigPort   = 8080
-    ActiveBig = 'q36'
+    ActiveBig = 'ablx'
     # Bare key pointers. KEY = models.json short key; set-power-mode.ps1
     # resolves alias + gguf + tuning from C:\llm-serve\models.json. A key with
     # no models.json entry hard-fails cleanly if set as ActiveBig.
     BigModels = @{
+        'ablx'    = @{}   # gemma-4-26B-A4B abliterix V6 (IQ4_XS) - active 2026-05-20
         'q36'     = @{}
         'cydonia' = @{}
         # Retired 2026-05-19 (GGUFs offloaded for disk space, snapshot lifecycle
         # owned by llm-serve): worldsim, pure-soul, sentient-mind, aeon27.
         # Re-add the key here + ensure a live models.json entry (with the gguf
         # in the HF cache) before setting any of them as ActiveBig. Remaining on
-        # disk: q36 (active), cydonia.
+        # disk: ablx (active), q36, cydonia.
     }
 
     # gpu-tier characters all resolve to ActiveBig on BigPort (shared server).
