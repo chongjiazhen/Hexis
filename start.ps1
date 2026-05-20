@@ -79,6 +79,8 @@ function Start-Nano {
     #   --ctx-size 32768           : prompt bloat headroom (lovesick hit 5735 tok ceiling at 4096)
     #   --cache-type-k/v q8_0      : halves KV cache; trivial quality loss; pairs w/ bigger ctx
     #   --repeat-penalty 1.1       : kills echo/loop degeneracy (1B persona-hold weakness)
+    #   --mirostat 2 --mirostat-ent 5.0 : adaptive sampling, self-tunes to target perplexity;
+    #                                     helps 1B stay coherent without killing creativity
     #   --mlock                    : pin weights+KV in RAM, no page-fault stalls mid-stream
     #   --n-gpu-layers 0           : CPU-only, 0 VRAM (PRIME owns GPU)
     $nanoProc = Start-Process -FilePath $LlamaServer `
@@ -87,6 +89,7 @@ function Start-Nano {
                         "--ctx-size","32768","--n-gpu-layers","0",
                         "--cache-type-k","q8_0","--cache-type-v","q8_0",
                         "--repeat-penalty","1.1",
+                        "--mirostat","2","--mirostat-ent","5.0",
                         "--mlock",
                         "--parallel","1",
                         "--threads","$NanoThreads","--threads-batch","$NanoThreads",
