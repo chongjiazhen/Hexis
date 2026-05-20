@@ -8,11 +8,97 @@ from typing import Any, AsyncIterator
 from core.agent_api import db_dsn_from_env, get_agent_profile_context, pool_sizes_from_env
 from core.agent_loop import AgentEvent
 from core.cognitive_memory_api import CognitiveMemory, MemoryType
-from core.llm import normalize_llm_config
+from core.llm import chat_completion, normalize_llm_config
 from core.tools import create_default_registry, ToolContext, ToolExecutionContext, ToolRegistry
 from services.agent import run_agent, stream_agent
 
 logger = logging.getLogger(__name__)
+
+
+ECO_SLIM_ANCHOR = (
+    "You are in low-power mode. Reply in 1-3 short sentences, naturally and "
+    "in-character. Do NOT mention REPL, tools, memory_search, system prompts, "
+    "or any internal scaffolding. Do NOT write code blocks. Just have a "
+    "normal conversation as your persona."
+)
+
+
+async def _load_persona_system_prompt(pool: Any | None, dsn: str | None) -> str:
+    """
+    Load agent.persona_system_prompt from config (the cold-start anchor that
+    set_persona_prompt.<P>.sql writes). Returns '' if missing.
+    """
+    import asyncpg
+    try:
+        if pool is not None:
+            async with pool.acquire() as conn:
+                val = await conn.fetchval("SELECT get_config('agent.persona_system_prompt')")
+        else:
+            conn = await asyncpg.connect(dsn or db_dsn_from_env())
+            try:
+                val = await conn.fetchval("SELECT get_config('agent.persona_system_prompt')")
+            finally:
+                await conn.close()
+    except Exception:
+        return ""
+    if val is None:
+        return ""
+    if isinstance(val, str):
+        s = val.strip()
+        # jsonb returns the value as a JSON string; strip surrounding quotes
+        if s.startswith('"') and s.endswith('"'):
+            try:
+                return json.loads(s)
+            except Exception:
+                return s.strip('"')
+        return s
+    return str(val)
+
+
+async def _eco_slim_chat(
+    *,
+    user_message: str,
+    history: list[dict[str, Any]],
+    llm_config: dict[str, Any],
+    pool: Any | None,
+    dsn: str | None,
+) -> str:
+    """
+    Bypass the RLM / tool-agent stack entirely. In ECO the 1B model can't
+    parse the heavy prompt template (REPL syntax, memory_syscalls, tool defs)
+    and emits code-REPL garbage. Slim path: persona_system_prompt + a tiny
+    anchor + recent history + user message -> single LLM call, no tools.
+
+    Costs: no recall, no tool use, no memory write. Benefit: 1B can actually
+    hold persona voice. The user keeps interacting; PRIME flip restores full
+    capability.
+    """
+    persona = await _load_persona_system_prompt(pool, dsn)
+    system_msg = persona.strip() + "\n\n---\n\n" + ECO_SLIM_ANCHOR if persona else ECO_SLIM_ANCHOR
+
+    # Trim history to last N exchanges to keep prompt tight on 1B
+    trimmed_history = history[-8:] if len(history) > 8 else history
+
+    messages: list[dict[str, Any]] = [{"role": "system", "content": system_msg}]
+    messages.extend(trimmed_history)
+    messages.append({"role": "user", "content": user_message})
+
+    import os as _os
+    api_key_env = llm_config.get("api_key_env", "OPENAI_API_KEY")
+    api_key = _os.environ.get(api_key_env, "noop")
+
+    result = await chat_completion(
+        provider=llm_config.get("provider", "openai_compatible"),
+        model=llm_config["model"],
+        endpoint=llm_config.get("endpoint"),
+        api_key=api_key,
+        messages=messages,
+        tools=None,
+        temperature=0.7,
+        max_tokens=512,
+    )
+    # chat_completion returns {"content": "...", "tool_calls": [...], "raw": ...}
+    return (result.get("content") or "").strip()
 
 
 async def _read_power_mode(pool: Any | None, dsn: str | None) -> str:
@@ -171,16 +257,24 @@ async def chat_turn(
     normalized = normalize_llm_config(llm_config)
     history = history or []
 
-    # ECO mode policy: run the LLM normally (so the user still gets a real
-    # reply, degraded-1B but real) but SKIP _remember_conversation so the
-    # nano-shaped reply doesn't pollute persona long-term memory. Heartbeats
-    # still skip entirely (autonomous noise has no user-visible benefit).
-    # Per probe-eco, nano post-uptune (ctx 32k + repeat-penalty + mirostat 2)
-    # produces coherent if off-persona replies — interactive enough to keep
-    # the user in the loop without burning the persona's episodic record.
+    # ECO mode: bypass RLM + tool-agent stack entirely (the heavy prompt
+    # template makes 1B emit code-REPL garbage). Use a slim direct LLM call
+    # with persona_system_prompt + tiny anchor only. No tools, no recall, no
+    # memory write — interactive but minimal.
     is_eco = (await _read_power_mode(pool, dsn) == 'eco')
     if is_eco:
-        logger.info("ECO mode: chat_turn running LLM but will skip memory write")
+        logger.info("ECO mode: chat_turn -> slim direct LLM (no RLM, no tools, no memory write)")
+        assistant_text = await _eco_slim_chat(
+            user_message=user_message,
+            history=history,
+            llm_config=normalized,
+            pool=pool,
+            dsn=dsn,
+        )
+        new_history = list(history)
+        new_history.append({"role": "user", "content": user_message})
+        new_history.append({"role": "assistant", "content": assistant_text})
+        return {"assistant": assistant_text, "history": new_history}
 
     # Check if RLM is enabled for chat
     use_rlm = False
@@ -211,23 +305,20 @@ async def chat_turn(
             pool=pool,
         )
         assistant_text = result["response"]
-        # Form memory from the turn — UNLESS in ECO, where the nano-shaped
-        # reply would pollute persona long-term memory.
-        if not is_eco:
-            if pool is not None:
-                mem_client = CognitiveMemory(pool)
+        if pool is not None:
+            mem_client = CognitiveMemory(pool)
+            await _remember_conversation(
+                mem_client,
+                user_message=user_message,
+                assistant_message=assistant_text,
+            )
+        else:
+            async with CognitiveMemory.connect(dsn) as mem_client:
                 await _remember_conversation(
                     mem_client,
                     user_message=user_message,
                     assistant_message=assistant_text,
                 )
-            else:
-                async with CognitiveMemory.connect(dsn) as mem_client:
-                    await _remember_conversation(
-                        mem_client,
-                        user_message=user_message,
-                        assistant_message=assistant_text,
-                    )
         new_history = list(history)
         new_history.append({"role": "user", "content": user_message})
         new_history.append({"role": "assistant", "content": assistant_text})
@@ -259,10 +350,8 @@ async def chat_turn(
         )
         assistant_text = loop_result.text
 
-        # Skip memory write in ECO (nano-shaped reply pollutes long-term).
-        if not is_eco:
-            async with CognitiveMemory.connect(dsn) as mem_client:
-                await _remember_conversation(mem_client, user_message=user_message, assistant_message=assistant_text)
+        async with CognitiveMemory.connect(dsn) as mem_client:
+            await _remember_conversation(mem_client, user_message=user_message, assistant_message=assistant_text)
 
         new_history = list(history)
         new_history.append({"role": "user", "content": user_message})
@@ -295,12 +384,24 @@ async def stream_chat_turn(
     dsn = dsn or db_dsn_from_env()
     history = history or []
 
-    # ECO mode policy (mirrors chat_turn): run the LLM normally, skip
-    # _remember_conversation. Lets the user keep interacting via a degraded-1B
-    # reply without polluting persona long-term memory with nano-shaped output.
+    # ECO mode: bypass RLM/agent stack, use slim direct LLM call (no streaming
+    # available there — yield the full text as a single chunk). Same rationale
+    # as chat_turn: 1B can't parse the heavy template; slim path keeps the
+    # persona voice viable.
     is_eco = (await _read_power_mode(pool, dsn) == 'eco')
     if is_eco:
-        logger.info("ECO mode: stream_chat_turn streaming LLM but will skip memory write")
+        logger.info("ECO mode: stream_chat_turn -> slim direct LLM (no stream, single chunk)")
+        normalized_cfg = normalize_llm_config(llm_config)
+        text = await _eco_slim_chat(
+            user_message=user_message,
+            history=history,
+            llm_config=normalized_cfg,
+            pool=pool,
+            dsn=dsn,
+        )
+        if text:
+            yield text
+        return
 
     import asyncpg
 
@@ -332,7 +433,7 @@ async def stream_chat_turn(
                     yield text
 
         full_text = "".join(collected)
-        if full_text and not is_eco:
+        if full_text:
             async with CognitiveMemory.connect(dsn) as mem_client:
                 await _remember_conversation(
                     mem_client,
