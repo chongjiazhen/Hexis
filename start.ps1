@@ -168,8 +168,24 @@ if ($health -ne "healthy") {
     exit 1
 }
 
-# 2. Chat llama-server :8080
-if (Get-PortPid 8080) {
+# Mode marker: read once, gate chat (:8080) + nano (:8082) launches on it.
+# set-power-mode.ps1 owns :8080 in PRIME (q36 ActiveBig per power-profiles.psd1).
+# start.ps1 launching its own Vesper-12B on :8080 in ECO mode is wrong: it
+# wastes ~7 GB VRAM that vram-guard just freed for ComfyUI/games, AND the
+# alias mismatch (Vesper here vs the q36 alias workers expect) causes silent
+# model misrouting if anything later flips configs back to :8080.
+$markerFile = Join-Path $Root "logs\current-mode.txt"
+$lastMode = $null
+if (Test-Path $markerFile) {
+    $lastMode = ((Get-Content $markerFile -Raw).Trim() -split "`n")[0].Trim().ToLower()
+}
+$wantChat = ($lastMode -ne "eco")  # PRIME or unknown -> launch chat
+$wantNano = $WithNano.IsPresent -or ($lastMode -eq "eco")
+
+# 2. Chat llama-server :8080 (PRIME only; ECO = leave GPU free)
+if (-not $wantChat) {
+    Write-Host "[skip] chat :8080 (mode=$lastMode; set-power-mode.ps1 prime owns :8080)"
+} elseif (Get-PortPid 8080) {
     Write-Host "[start] chat :8080 already running"
 } else {
     Write-Host "[start] chat llama-server :8080 ($ChatRepo)"
@@ -204,25 +220,19 @@ if (Get-PortPid 8081) {
 # 4. Nano CPU-1B llama-server :8082 (ECO floor only). CPU -> 0 VRAM.
 # Post 2026-05-20 heartbeat-to-GPU migration, the live fleet routes
 # llm.chat/llm.heartbeat/llm.subconscious at :8080 (q36 MoE), so PRIME no longer
-# needs nano resident. Launch only when:
-#   - -WithNano was passed, OR
-#   - last recorded mode marker is "eco".
-# set-power-mode.ps1 eco should ensure-launch nano (see its sibling patch).
-$markerFile = Join-Path $Root "logs\current-mode.txt"
-$lastMode = $null
-if (Test-Path $markerFile) {
-    $lastMode = ((Get-Content $markerFile -Raw).Trim() -split "`n")[0].Trim().ToLower()
-}
-$wantNano = $WithNano.IsPresent -or ($lastMode -eq "eco")
+# needs nano resident. $wantNano was computed earlier alongside $wantChat.
 if (-not $wantNano) {
     Write-Host "[skip] nano :8082 (mode=$lastMode; pass -WithNano to force)"
 } else {
     Start-Nano
 }
 
-# 5. Wait health. chat + embed are fatal; nano is best-effort (CPU load slower,
-#    must not block the stack - characters only fall to it in ECO).
-$chatOk  = Wait-Health "http://127.0.0.1:8080/health"  "chat :8080" 240
+# 5. Wait health. embed is always fatal; chat is fatal when launched (PRIME);
+#    nano is best-effort (CPU load slower, must not block the stack).
+$chatOk  = $true  # treat as OK in ECO (skipped); only matters if we launched
+if ($wantChat) {
+    $chatOk = Wait-Health "http://127.0.0.1:8080/health"  "chat :8080" 240
+}
 $embedOk = Wait-Health "http://127.0.0.1:8081/health"  "embed :8081" 120
 if ($wantNano) {
     $nanoOk = Wait-Health "http://127.0.0.1:8082/health" "nano :8082" 180
@@ -238,7 +248,11 @@ if (-not ($chatOk -and $embedOk)) {
 
 Write-Host ""
 Write-Host "[ready] Hexis stack up"
-Write-Host "  chat  http://127.0.0.1:8080"
+if ($wantChat) {
+    Write-Host "  chat  http://127.0.0.1:8080"
+} else {
+    Write-Host "  chat  (not launched; mode=$lastMode; use set-power-mode.ps1 prime)"
+}
 Write-Host "  embed http://127.0.0.1:8081"
 if ($wantNano) {
     Write-Host "  nano  http://127.0.0.1:8082  (CPU-1B, ECO floor)"
