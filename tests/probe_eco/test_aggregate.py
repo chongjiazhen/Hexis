@@ -45,3 +45,25 @@ def test_build_matrix_handles_missing_vram(tmp_path):
     }))
     md = build_matrix(probes)
     assert "n/a" in md  # no _vram.txt -> reported as n/a
+
+
+def test_build_matrix_skips_malformed_json(tmp_path):
+    probes = tmp_path / "probes"
+    d = probes / "4b"
+    d.mkdir(parents=True)
+    # A failed `docker exec` leaves error text, not JSON, in the .json file.
+    (d / "broken.json").write_text("Error response from daemon: ...")
+    # A valid sibling must still be scored.
+    (d / "mira.json").write_text(json.dumps({
+        "persona": "mira", "model_label": "4b",
+        "probe": [{"prompt": "p", "reply": "good"}],
+    }))
+    md = build_matrix(probes)
+    assert "| mira |" in md
+    assert "1/1" in md
+
+
+def test_build_matrix_raises_on_missing_probes_dir(tmp_path):
+    import pytest
+    with pytest.raises(ValueError):
+        build_matrix(tmp_path / "does-not-exist")

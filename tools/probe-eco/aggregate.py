@@ -46,6 +46,8 @@ def _score_persona(probe_json: dict) -> dict:
 
 def build_matrix(probes_dir: Path) -> str:
     """Build the markdown matrix from a probes/ directory tree."""
+    if not probes_dir.is_dir():
+        raise ValueError(f"probes dir not found: {probes_dir}")
     model_dirs = sorted(d for d in probes_dir.iterdir() if d.is_dir())
     models = [d.name for d in model_dirs]
 
@@ -55,7 +57,11 @@ def build_matrix(probes_dir: Path) -> str:
     for d in model_dirs:
         vram[d.name] = _read_vram(d)
         for jf in sorted(d.glob("*.json")):
-            data = json.loads(jf.read_text())
+            try:
+                data = json.loads(jf.read_text())
+            except json.JSONDecodeError:
+                print(f"WARN: skipping malformed JSON: {jf}", file=sys.stderr)
+                continue
             persona = data.get("persona", jf.stem)
             cells.setdefault(persona, {})[d.name] = _score_persona(data)
 
