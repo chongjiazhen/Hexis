@@ -361,3 +361,28 @@ services:
     environment:
       <<: *common-env
       POSTGRES_DB: hexis_hazel
+
+  # ── Callisto ───────────────────────────────────────────────────────────────
+  callisto_channel_worker:
+    <<: *channel-base
+    container_name: hexis_callisto_channel_worker
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_callisto
+      CALLISTO_TELEGRAM_BOT_TOKEN: ${CALLISTO_TELEGRAM_BOT_TOKEN:-}
+
+  callisto_heartbeat_worker:
+    <<: *worker-base
+    container_name: hexis_callisto_heartbeat_worker
+    command: ["hexis-worker", "--mode", "heartbeat"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_callisto
+
+  callisto_maintenance_worker:
+    <<: *worker-base
+    container_name: hexis_callisto_maintenance_worker
+    command: ["hexis-worker", "--mode", "maintenance"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_callisto
