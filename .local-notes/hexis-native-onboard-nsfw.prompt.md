@@ -75,14 +75,14 @@ sql = (
     f"ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;"
 )
 
-out_path = f"C:/hexis/set_persona_prompt.{CARD_PATH.split('/')[-1].replace('.json','')}.sql"
+out_path = f"C:/hexis/characters/set_persona_prompt.{CARD_PATH.split('/')[-1].replace('.json','')}.sql"
 open(out_path, "w", encoding="utf-8").write(sql)
 print("Written:", out_path, "| len:", len(sql))
 ```
 
 Then apply it:
 ```
-docker exec -i hexis_brain psql -U hexis_user -d <DB> < set_persona_prompt.<P>.sql
+docker exec -i hexis_brain psql -U hexis_user -d <DB> < characters/set_persona_prompt.<P>.sql
 ```
 
 Verify:

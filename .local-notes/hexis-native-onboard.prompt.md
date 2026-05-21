@@ -88,13 +88,32 @@ MSYS_NO_PATHCONV=1 docker compose -f docker-compose.yml -f docker-compose.newcha
   -v "C:/hexis/characters:/charcards:ro" --entrypoint hexis <P>_channel_worker \
   init --character <P> --provider openai_compatible \
   --endpoint http://host.docker.internal:8080/v1 \
-  --model qwen3-6-35b-a3b-uncensored-heretic-i1-iq3-xxs \
+  --model tier-managed \
   --api-key noop --name "<user-name>" --no-docker --no-pull
 ```
 This sets `llm.{heartbeat,chat,subconscious}` + `init_llm_config`, applies the
 card via `init_from_character_card(extensions_hexis)` (it extracts the
 sub-object itself — do not pre-slice), and runs the **real LLM consent flow**.
 Expect `✔ Character <Name> applied` then `✔ Consent granted`.
+
+**`--model tier-managed` is a deliberate placeholder, not a real model.** For a
+local `openai_compatible` target the `:8080` server ignores the request `model`
+field — `set-power-mode.ps1` is the sole authority for the per-DB
+`llm.{chat,heartbeat,subconscious}` model, resolved from each persona's tier in
+`power-profiles.psd1`. Do NOT hardcode a model alias here: a stale alias (e.g. an
+old `ActiveBig`) just drifts the DB row until the next power-mode flip. The
+literal `tier-managed` string also makes an un-materialized persona obvious in
+`.\hexis-status.ps1`.
+
+**Required final step — materialize the model:**
+1. Register the new persona's tier in `power-profiles.psd1` (`Characters` entry,
+   `Prime.Tier` = `gpu` or `nano`). A persona absent from the file still works —
+   `set-power-mode.ps1` defaults un-registered chars to `gpu` — but a `nano`-tier
+   exception MUST be registered.
+2. Run `.\set-power-mode.ps1 prime` to resolve tier→model and write the real
+   alias into the new DB's `llm.{chat,heartbeat,subconscious}`.
+3. Verify with `.\hexis-status.ps1`: the new persona's `MODEL (llm.chat)` should
+   equal the live `:8080` served model — not `tier-managed`, not a stale alias.
 
 ### 2.4 Consent is a real gate — respect a decline
 The flow calls q36 with `consent.md` + a `sign_consent` tool. The agent **can
@@ -107,17 +126,22 @@ out a q36 fluke. NEVER SQL-override a decline with a canned `init_consent`
 "consent", and never serial-reroll to force it — that coerces a refusal.
 If a reasoned decline persists, the persona stays offline.
 
-### 2.5 Two supplementary steps `hexis init` does NOT do
-Proper init does not set the channel token or emotion bootstrap (the fresh DB
-wiped any prior token). Required:
+### 2.5 Three supplementary steps `hexis init` does NOT do
+Proper init does not set the channel token, the Telegram DM allowlist, or the
+emotion bootstrap (the fresh DB wiped any prior token). Required:
 ```
 docker exec hexis_brain psql -U hexis_user -d <DB> -c \
   "SELECT set_config('channel.telegram.bot_token','\"<U>_TELEGRAM_BOT_TOKEN\"'::jsonb);
+   SELECT set_config('channel.telegram.allowed_users','[\"593307304\"]'::jsonb);
    SELECT ensure_emotion_bootstrap();"
 ```
 Token convention: `<U>_TELEGRAM_BOT_TOKEN` in `C:\hexis\.env` (config stores
 the env var NAME, not the secret). **One Telegram long-poller per token** — if
 migrating off OpenClaw, stop the OpenClaw consumer of that token first.
+`channel.telegram.allowed_users` is the operator DM allowlist — `["593307304"]`
+fleet-wide (the operator's Telegram user ID). It is **fleet-universal but
+`hexis init` never sets it**; omit it and the §2.8 parity diff shows it as a
+Mira-only key. Set it here, not at parity-debug time.
 
 ### 2.5b Purge consent-flow noise (do this — it fixes "flat/generic" voice)
 The real consent flow makes q36 write generic AI-init "memories" ("I am an AI
@@ -145,18 +169,18 @@ persona reaches the model **only via `hydrate()` recall** — thin on the cold
 first turn (fresh DB, nothing to recall yet) → **turn-1 collapses to a generic
 "I'm an AI assistant" reply**, self-correcting from turn 2 as recall warms.
 Every gated persona (Mira/death/nines/joje/cassiel/monika) has this key SET
-(~2.4–4.4 KB) via a per-persona `set_persona_prompt.<P>.sql` at repo root —
+(~2.4–4.4 KB) via a per-persona `characters/set_persona_prompt.<P>.sql` —
 that IS the cold-start identity anchor, not an optional override. `hexis init`
 not setting it is why this step is mandatory and separate.
 
-Author `set_persona_prompt.<P>.sql` mirroring `set_persona_prompt.death.sql`
+Author `characters/set_persona_prompt.<P>.sql` mirroring `characters/set_persona_prompt.death.sql`
 (dollar-quoted with a unique tag, `ON CONFLICT (key) DO UPDATE` =
 idempotent/non-destructive). Value = card `data.system_prompt` + `---` +
 `data.post_history_instructions`, with `{{user}}`→`User` (matches `--name`).
 Apply + verify:
 ```
 docker exec -i hexis_brain psql -U hexis_user -d <DB> -v ON_ERROR_STOP=1 \
-  -f - < /c/hexis/set_persona_prompt.<P>.sql
+  -f - < /c/hexis/characters/set_persona_prompt.<P>.sql
 docker exec hexis_brain psql -U hexis_user -d <DB> -tAc \
  "SELECT length(value::text) FROM config WHERE key='agent.persona_system_prompt';"
 ```
