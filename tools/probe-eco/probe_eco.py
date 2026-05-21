@@ -78,6 +78,9 @@ def build_dsn() -> str:
 async def main() -> None:
     dsn = build_dsn()
     persona = os.environ["POSTGRES_DB"].replace("hexis_", "", 1)
+    # Operator-supplied tier label, passed via `docker exec -e PROBE_MODEL_LABEL`.
+    # Identifies which model tier was served for this sweep (e.g. "1b", "4b").
+    model_label = os.environ.get("PROBE_MODEL_LABEL", "unlabeled")
 
     # Snapshot point for scrub. memories.id is uuid (no MAX), so use NOW() only.
     # Caveat: if a heartbeat fires DURING the probe window, that real memory
@@ -119,7 +122,7 @@ async def main() -> None:
         out.append(
             {
                 "prompt": prompt,
-                "reply": reply[:800],
+                "reply": reply[:4000],
                 "reply_len": len(reply),
                 "broken_markers": looks_broken(reply),
             }
@@ -139,6 +142,7 @@ async def main() -> None:
     broken_count = sum(1 for r in out if r["broken_markers"])
     result = {
         "persona": persona,
+        "model_label": model_label,
         "snap_ts": str(snap_ts),
         "scrubbed": deleted,
         "broken_count": broken_count,
