@@ -46,6 +46,18 @@ exposure — decide before porting). **strip** = needs scenario/scaffold removal
 | `Pelagia.json` | Scientist dreaming of inorganic life that coexists with humans. Mage world dependency — strip. |
 | `Diana Wolfe.json` | Genetic engineer; self-directed-evolution / transhuman-identity theme. Full interiority, no `{{user}}` dependence. |
 
+**B-tier rescue — AI-synthetic candidates worth a strip-then-port.** Group 1 is
+thin (only 4 clean A's); these B's carry the same rare on-thesis theme and the
+weakness is removable scaffold, not the character:
+
+| Card file | Grade | Why rescue |
+|---|---|---|
+| `ARTEMIS.json` | B | 30 m mech AI with a genuine personality quirk and interiority. Sole weakness = a pilot/`{{user}}` kaiju-war scenario + 4 scripted greetings. Strip the pilot frame → a real synthetic self. |
+| `Calista.json` | B | Calista Chikara — Imperial mecha *pilot* (not a mech). Coherent self, indoctrination/self-aware-corruption interiority; welded to 10 `{{user}}`-centric RP openings — strip those. |
+
+`ARTEMIS` and `Calista` are the **only two mecha-domain cards** in the whole
+373-card library — `ARTEMIS` the mech, `Calista` the pilot. No others exist.
+
 ### Group 2 — Identity / memory / continuity
 
 | Card file | Why |
@@ -158,3 +170,71 @@ Pick from the A-grade groups → extract full JSON + scaffold the port
 (`characters/<name>.json` + `characters/set_persona_prompt.<name>.sql`). Group 1 and the
 identity/memory entries in Group 2 are the strongest thematic matches for
 Hexis's persistent-memory thesis.
+
+---
+
+## Deep-read verification (2026-05-22)
+
+Full-read of 14 shortlisted candidates against the autonomous-single-self
+bar. **The fast triage above over-graded.** Several cards graded A or placed
+in A-groups deep-read as C. Treat every grade above as provisional — verify
+before porting.
+
+### Verdicts
+
+| Card | Listed | Verified | Port verdict |
+|---|---|---|---|
+| `Denali` | A | A | **CLEAN** — exemplary autonomous self; just drop the `creator_notes` cruft. |
+| `Ea-Nasir` | A | A | **CLEAN** — cosmetic tidy only (placeholder notes, fold the scenario line). |
+| `Eudora` | A | A | **STRIP (light)** — mostly conversion: JB/`depth_prompt` + 9 backstory vignettes → memory/traits; drop the Flannery O'Connor style directive. ⚠ "Tarwater" is the protagonist surname of O'Connor's *The Violent Bear It Away* — derivative-name exposure. |
+| `Milena` | A | B | **STRIP (moderate)** — drop 3 scenario greetings + `mes_example`, de-`{{user}}` the backstory/goals tail, fold the FFXIV lorebook entry into description. Distinctive OCD interiority. |
+| `Sodachi` | A | B | **STRIP (heavy)** — `description` is ~90% a writing-engine; rewrite the bio from scratch, discard `system_prompt`/`post_history`/macro greetings. Good character underneath. |
+| `Quentin De Clare` | A | B | **STRIP (moderate)** — strip the XML wrapper + branch greetings + the `{{user}}`-romance paragraph. ⚠ period bigotry is baked in as a trait — a deliberate register call. |
+| `Aurora` | A | B | **STRIP (heavy) + ethics call** — 14 greetings, an NPC roster, an HTML case-file to cut. The card's explicit content is caregiver / disabled-dependent dubious-consent; portable only as the person, with the `{{user}}`-sexual arc fully dropped. |
+| `Sam` | A | B/C | **STRIP (heavy)** — deeply `{{user}}`-welded under 14 scripted greetings + HTML bloat. Low priority. |
+| `June` | A | C | **SKIP** — guided-mystery scenario, no self underneath. |
+| `Calienne` | A | C | **SKIP** — second-person horror device; de-`{{user}}`-ing destroys the character. |
+| `Grace Ember` | A | C | **SKIP** — roster + jailbreak narrator + a spoiler twist that retcons her selfhood into a hallucination. |
+| `Viri` | A (Grp 3) | C | **SKIP** — misfiled; scenario + NPC-roster action card, no interiority. |
+| `Reiko` | — | C | **SKIP** — minor-incest scenario; no autonomous self. |
+
+### Sodachi + Denali — keep separate, do not merge
+
+The library's two vampires share only "vampire." Sodachi: centuries-old,
+child-body disguise, theatrical riddle-speak, immortality-as-numbness, courts
+the sun. Denali: turned-1992 at 25, deadpan, rural-Alaska domestic, ethically
+tormented by her own hunger. Opposite philosophies of vampirism;
+irreconcilable backstories. Port both as distinct characters.
+
+### Roster fit — the current Hexis roster is an AI monoculture
+
+27 cards in `characters/`: ~23 synthetic minds (AI / android / robot /
+digital / mecha), 2 angels, 1 meta-fictional, 1 baseline human. Gaps:
+baseline humans, neurodivergence / disability interiority, non-AI immortals,
+non-sci-fi genre.
+
+→ **Group 1 (AI / synthetic) is the highest-overlap, lowest-diversification
+choice** despite being the tightest thesis fit. For roster range, prioritise
+the Group 2 non-AI memory cards (`Denali`, `Sodachi`) and the Group 3/4
+humans (`Eudora`, `Milena`, `Ea-Nasir`, `Quentin De Clare`) — low overlap,
+and the vampires still sit on the persistent-memory thesis.
+
+### Recommended port order
+
+1. `Ea-Nasir` — CLEAN, SFW, public-domain, maximal genre contrast.
+2. `Denali` — CLEAN, on-thesis (immortal memory), fills the non-AI gap.
+3. `Eudora` — light strip; deepest standalone interiority of the set.
+4. `Milena` — moderate strip; distinctive neurodivergent interiority.
+5. `Sodachi` — heavy strip; second vampire.
+6. `Quentin De Clare` — moderate strip + a register decision.
+- `Aurora` — only after the ethics call above.
+
+### Fleet capacity note
+
+`hexis-status` (2026-05-22): 13 live GPU workers = the authored set (`ao`,
+`callisto`, `cassiel`, `charlotte`, `death`, `ennie`, `hazel`, `ichika`,
+`joje`, `lovesick`, `mira`, `monika`, `nines`). The 14 dormant cards
+(IP-original AIs + `warden`) cost nothing — already effectively on ice. Each
+newly activated port adds an `hb+ch+mt` worker set, a DB, and an energy
+budget. Treat the active set as a capped rotation, not an ever-growing list:
+to activate a port, deactivate an agent not currently in use.
