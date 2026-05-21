@@ -201,8 +201,8 @@ not loop on guard tweaks chasing it.
 New personas use `docker-compose.newchars.yml` (YAML-anchor block: build
 `ops/Dockerfile.channels`, `command:["hexis-channels"]`, `POSTGRES_DB:<DB>`,
 `<U>_TELEGRAM_BOT_TOKEN` env, depends_on db+rabbitmq healthy). Add a service
-there per the existing pattern. (Legacy single-instance form:
-`docker-compose.<P>.yml` mirroring `docker-compose.ennie.yml`.)
+there per the existing pattern. All personas live in `docker-compose.newchars.yml`;
+there are no per-persona compose files.
 
 ### 2.7 Start (channel worker only)
 ```
