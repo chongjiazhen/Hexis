@@ -23,6 +23,10 @@ if [ -z "$MODEL_LABEL" ]; then
     echo "ERROR: --model <label> is required (e.g. --model 4b)" >&2
     exit 1
 fi
+if ! printf '%s' "$MODEL_LABEL" | grep -Eq '^[A-Za-z0-9_.-]+$'; then
+    echo "ERROR: --model label must match [A-Za-z0-9_.-]+ (got: '$MODEL_LABEL')" >&2
+    exit 1
+fi
 
 OUT_DIR="$HERE/probes/$MODEL_LABEL"
 mkdir -p "$OUT_DIR"
@@ -69,6 +73,6 @@ for c in "${TARGETS[@]}"; do
     printf '%-12s broken=%s scrubbed=%s -> %s\n' "$c" "$broken" "$scrubbed" "$out"
 done
 
-kill "$SAMPLER_PID" 2>/dev/null
 trap - EXIT
+kill "$SAMPLER_PID" 2>/dev/null
 echo "peak VRAM (MiB): $(cat "$VRAM_FILE")  [$MODEL_LABEL]"
