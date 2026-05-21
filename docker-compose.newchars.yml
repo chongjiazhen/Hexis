@@ -287,9 +287,11 @@ services:
       <<: *common-env
       POSTGRES_DB: hexis_charlotte
 
-  # ── Ao ─────────────────────────────────────────────────────────────────────
+  # ── Ao ── ON ICE 2026-05-22 (AI-type persona overlap; thaw: drop the frozen
+  #          profile override so these rejoin the `active` profile)
   ao_channel_worker:
     <<: *channel-base
+    profiles: ["frozen"]
     container_name: hexis_ao_channel_worker
     environment:
       <<: *common-env
@@ -298,6 +300,7 @@ services:
 
   ao_heartbeat_worker:
     <<: *worker-base
+    profiles: ["frozen"]
     container_name: hexis_ao_heartbeat_worker
     command: ["hexis-worker", "--mode", "heartbeat"]
     environment:
@@ -306,6 +309,7 @@ services:
 
   ao_maintenance_worker:
     <<: *worker-base
+    profiles: ["frozen"]
     container_name: hexis_ao_maintenance_worker
     command: ["hexis-worker", "--mode", "maintenance"]
     environment:
