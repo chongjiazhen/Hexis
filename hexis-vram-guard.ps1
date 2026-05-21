@@ -9,8 +9,9 @@
 #      nvidia-smi compute-apps (catches CUDA apps: img-gen, video AI, training).
 #
 # On trigger, if currently PRIME -> runs set-power-mode.ps1 eco (kills the GPU
-# llama-servers, frees VRAM). NEVER auto-restores PRIME (no flapping) - click
-# "Hexis PRIME" yourself when you are done with GPU work.
+# llama-servers, frees VRAM). When the trigger clears and stays clear for
+# $PrimeRearmMinutes, auto-restores PRIME - but ONLY if this guard caused the
+# ECO (eco flag present). A manual `set-power-mode.ps1 eco` is never overridden.
 #
 # Runs hidden, single-instance, started by start-all.ps1. Edit the config
 # block below by hand (especially $GameProcs).
@@ -50,6 +51,11 @@ $MinForeignVramMB   = 300
 $PollSeconds        = 4
 $ConsecutiveSamples = 2      # need N consecutive hits before acting (debounce)
 $LlamaExeName       = 'llama-server'
+# PRIME re-arm: GPU must be CONTINUOUSLY clear this many minutes before the
+# guard auto-switches back to PRIME. Conservative on purpose - re-arm is QOL,
+# not urgent; cold-start on :8080 is ~4 min on top of this anyway. Any single
+# trigger sample resets the countdown.
+$PrimeRearmMinutes  = 15
 # ------------------------------------------------------
 
 $LogDir = Join-Path $Root "logs"
@@ -57,6 +63,7 @@ if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Force -Path $LogDi
 $GuardLog   = Join-Path $LogDir "vram-guard.log"
 $MarkerFile = Join-Path $LogDir "current-mode.txt"
 $LockFile   = Join-Path $LogDir "vram-guard.lock"
+$EcoFlag    = Join-Path $LogDir "guard-triggered-eco.flag"
 $SetMode    = Join-Path $Root "set-power-mode.ps1"
 
 function Log([string]$m) {
@@ -168,10 +175,35 @@ function Invoke-Eco {
     $proc = Start-Process powershell -ArgumentList $psArgs -WorkingDirectory $Root `
         -WindowStyle Hidden -PassThru -Wait
     Log "set-power-mode eco exited $($proc.ExitCode)"
+    if ($proc.ExitCode -eq 0) {
+        # Stamp: marks this ECO as guard-caused. Only a flagged ECO is later
+        # auto-restored to PRIME - a manual `set-power-mode.ps1 eco` writes no
+        # flag, so the guard never overrides a deliberate manual ECO.
+        [System.IO.File]::WriteAllText($EcoFlag,
+            (Get-Date -Format o), (New-Object System.Text.UTF8Encoding($false)))
+        Log "wrote eco flag ($EcoFlag) - PRIME re-arm enabled"
+    } else {
+        Log "eco exit nonzero - flag NOT written (no auto re-arm for a failed switch)"
+    }
+}
+
+function Invoke-Prime {
+    Log "RE-ARM -> switching to PRIME (set-power-mode.ps1 prime)"
+    $psArgs = @("-NoProfile","-ExecutionPolicy","Bypass","-File","`"$SetMode`"","prime")
+    $proc = Start-Process powershell -ArgumentList $psArgs -WorkingDirectory $Root `
+        -WindowStyle Hidden -PassThru -Wait
+    Log "set-power-mode prime exited $($proc.ExitCode)"
+    if ($proc.ExitCode -eq 0) {
+        Remove-Item $EcoFlag -ErrorAction SilentlyContinue
+        Log "PRIME re-armed; eco flag cleared"
+    } else {
+        Log "prime exit nonzero - flag kept; retry after another clear window"
+    }
 }
 
 $armed = $true
 $hits  = 0
+$clearSince = $null   # timestamp GPU first went clear; $null while triggered
 
 try {
     while ($true) {
@@ -181,6 +213,7 @@ try {
 
         if ($trig) {
             $hits++
+            $clearSince = $null   # any trigger resets the PRIME re-arm countdown
             if ($armed -and $hits -ge $ConsecutiveSamples) {
                 $mode = Get-Mode
                 # GPU-armed = anything other than 'eco' (prime alias or a
@@ -191,13 +224,36 @@ try {
                 } else {
                     Log "trigger but mode=$mode - nothing to do"
                 }
-                $armed = $false   # do not re-fire until trigger clears; never auto-PRIME
+                $armed = $false   # do not re-fire eco until trigger clears
             }
         } else {
             $hits = 0
             if (-not $armed) {
-                Log "trigger cleared - re-armed (still ECO; PRIME is manual)"
+                Log "trigger cleared - re-armed (PRIME re-arm countdown started)"
                 $armed = $true
+            }
+            if (-not $clearSince) { $clearSince = Get-Date }
+
+            # PRIME re-arm: GPU continuously clear >= $PrimeRearmMinutes AND the
+            # current ECO was guard-caused (flag present). Manual ECO has no flag
+            # and is never overridden.
+            $mode = Get-Mode
+            if ($mode -ne 'eco') {
+                # Already GPU-armed (manual PRIME, or our own re-arm) - any flag
+                # is stale; drop it so a future manual ECO is not auto-reverted.
+                if (Test-Path $EcoFlag) {
+                    Remove-Item $EcoFlag -ErrorAction SilentlyContinue
+                    Log "mode=$mode (not eco) - cleared stale eco flag"
+                }
+            } elseif (Test-Path $EcoFlag) {
+                $clearMin = ((Get-Date) - $clearSince).TotalMinutes
+                if ($clearMin -ge $PrimeRearmMinutes) {
+                    Log ("GPU clear {0:N1}m >= {1}m - re-arming PRIME" -f $clearMin, $PrimeRearmMinutes)
+                    Invoke-Prime
+                    # Reset countdown either way: success -> mode!=eco next loop;
+                    # failure -> back off a full window before retrying.
+                    $clearSince = Get-Date
+                }
             }
         }
 
