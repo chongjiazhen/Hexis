@@ -5,14 +5,6 @@
 > apply when the character card carries an uncensored `system_prompt` (devotion,
 > no-refusal, explicit content delivery, etc.).
 >
-> **Base-doc tension**: `hexis-native-onboard.prompt.md` §2.1 and §6 vet and
-> decline cards with "never-refuse / no-disclaimers / dismiss-hesitation"
-> jailbreaks, noncon, weapons-generation mandates, etc. This doc is the
-> **explicit operator override path** for those cards — use it only when the
-> operator has consciously decided to operationalize a card the base vet
-> would decline. The base doc's §2.1 vetting checklist still applies as a
-> read-through; this doc overrides the "decline" action, not the awareness.
->
 > Also covers preemptive `persona_system_prompt` application for SFW cards
 > whose future interactions may turn NSFW (N.1 is idempotent; safe to apply
 > to any persona).

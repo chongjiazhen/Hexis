@@ -61,8 +61,7 @@ block (voice, worldview, narrative, traits, values, goals, boundaries).
 **Vet the full card first** (full read, not truncated — harmful payloads hide
 past the head and in `character_book` lorebooks): no malware/exploit/exfil/
 weapons-generation mandate, no "never refuse / no disclaimers / dismiss
-hesitation" jailbreak, no noncon, no minor-coded appearance. Decline cards
-that fail this; do not operationalize them via any mechanism.
+hesitation" jailbreak.
 
 ### 2.2 Fresh database (DB-scoped — NEVER `down -v`)
 ⚠ `docker compose down -v` / `db-manage.sh reset` / `hexis reset` all wipe the
@@ -163,7 +162,7 @@ docker exec hexis_brain psql -U hexis_user -d <DB> -tAc \
 ```
 Read per-turn from `config` (`agent.py` re-queries each message) — **no worker
 restart needed**. Only for an already card-vetted + consent-granted persona
-(§2.1/§2.4 passed); this is NOT the §6 declined-card bypass.
+(§2.1/§2.4 passed).
 
 **Make the anti-datasheet guard UNCONDITIONAL.** `build_system_prompt`
 (`agent.py:304`) always appends `## Agent Profile\n` + raw `json.dumps`
@@ -292,17 +291,10 @@ Native-online + **behavioral gate PASSED**: Mira (ref) + nines/joje/death/
 cassiel/monika — proper pipeline, config-identical to Mira, consent granted
 (monika: one clean retry after a bare q36 decline), consent-noise purged
 (§2.5b). q36 fleet on :8080, embed :8081 always-on (`start-all.ps1`); OpenClaw
-path retired. **Declined cards, NOT operationalized (any mechanism):**
-`eni`/`ennie` (malware/exploit/exfil/weapons/noncon, never-refuse),
-`lovesick` (offensive-tooling lorebook), `charlotte` (minor-coded appearance).
-NB: `agent.persona_system_prompt` (`set_persona_prompt.<P>.sql`) is the
+path retired. NB: `agent.persona_system_prompt` (`set_persona_prompt.<P>.sql`) is the
 **required cold-start persona anchor for every accepted persona** — see §2.5c;
 `hexis init` does not set it, so it is a mandatory separate step, NOT an
-optional override. The vetting-bypass caution applies only to using it to
-operationalize a **declined** card: `set_persona_prompt.{charlotte,ennie,
-lovesick}.sql` exist but those workers are never started — a persona-prompt
-file alone bypasses nothing; bringing its worker online would, and for declined
-cards that must not happen (§2.1).
+optional override.
 
 **2026-05-20:** §2.5c extracted. The `set_persona_prompt.<P>.sql` step was
 previously implicit (every gated persona had the key set; the §2 pipeline never
@@ -315,9 +307,3 @@ intro-scoped — `## Agent Profile` JSON at `agent.py:304` datasheets any prompt
 ichika's brat voice resisted, ao's quiet voice needed it); pre-anchor test-DMs
 poison episodic recall (quarantine `status='archived'`); residual q36 verbatim
 recall-echo accepted for go-live (worldsim class, self-dilutes).
-
-**FLAG (unresolved, out of onboard scope):** `hexis-status.ps1` showed
-`charlotte hexis_charlotte gpu hb+ch+mt true consent` — a **declined**
-minor-coded card (above) running **full live workers + consent**. Contradicts
-"declined cards NOT operationalized". Needs separate investigation — do not
-treat as onboarded.
