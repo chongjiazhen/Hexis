@@ -143,6 +143,6 @@ agent/account/binding from `openclaw.json`; restart gateway. DB preserved
 (dormant, recoverable). Bot token freed.
 
 ## 6. Current fleet state (2026-05-18)
-Active: **Ennie** only (`eni` agent / @enigmatic_writer_bot / hexis_eni;
+Active: **Ennie** only (`ennie` agent / @enigmatic_writer_bot / hexis_ennie;
 ex ENI-Warden; user-facing name "Ennie"). Frozen: Sam (hexis_memory,
 @samantha_summers_bot), Warden (hexis_warden). 1 gateway, 1 active agent.

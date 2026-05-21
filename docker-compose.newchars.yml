@@ -63,29 +63,29 @@ x-common-env: &common-env
 services:
 
   # ── Ennie ──────────────────────────────────────────────────────────────────
-  eni_channel_worker:
+  ennie_channel_worker:
     <<: *channel-base
-    container_name: hexis_eni_channel_worker
+    container_name: hexis_ennie_channel_worker
     environment:
       <<: *common-env
-      POSTGRES_DB: hexis_eni
+      POSTGRES_DB: hexis_ennie
       ENNIE_TELEGRAM_BOT_TOKEN: ${ENNIE_TELEGRAM_BOT_TOKEN:-}
 
-  eni_heartbeat_worker:
+  ennie_heartbeat_worker:
     <<: *worker-base
-    container_name: hexis_eni_heartbeat_worker
+    container_name: hexis_ennie_heartbeat_worker
     command: ["hexis-worker", "--mode", "heartbeat"]
     environment:
       <<: *common-env
-      POSTGRES_DB: hexis_eni
+      POSTGRES_DB: hexis_ennie
 
-  eni_maintenance_worker:
+  ennie_maintenance_worker:
     <<: *worker-base
-    container_name: hexis_eni_maintenance_worker
+    container_name: hexis_ennie_maintenance_worker
     command: ["hexis-worker", "--mode", "maintenance"]
     environment:
       <<: *common-env
-      POSTGRES_DB: hexis_eni
+      POSTGRES_DB: hexis_ennie
 
   # ── Mira ───────────────────────────────────────────────────────────────────
   mira_channel_worker:
@@ -336,3 +336,28 @@ services:
     environment:
       <<: *common-env
       POSTGRES_DB: hexis_ichika
+
+  # ── Hazel ──────────────────────────────────────────────────────────────────
+  hazel_channel_worker:
+    <<: *channel-base
+    container_name: hexis_hazel_channel_worker
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_hazel
+      HAZEL_TELEGRAM_BOT_TOKEN: ${HAZEL_TELEGRAM_BOT_TOKEN:-}
+
+  hazel_heartbeat_worker:
+    <<: *worker-base
+    container_name: hexis_hazel_heartbeat_worker
+    command: ["hexis-worker", "--mode", "heartbeat"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_hazel
+
+  hazel_maintenance_worker:
+    <<: *worker-base
+    container_name: hexis_hazel_maintenance_worker
+    command: ["hexis-worker", "--mode", "maintenance"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_hazel

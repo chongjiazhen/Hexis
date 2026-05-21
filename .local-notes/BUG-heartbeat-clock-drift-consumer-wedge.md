@@ -7,7 +7,7 @@
 ## Summary
 
 Two distinct defects, observed together while verifying newchars heartbeat
-activation (cassiel/death/joje/monika/nines + eni/mira). Both make the
+activation (cassiel/death/joje/monika/nines + ennie/mira). Both make the
 autonomous loop silently stop while every container still reports `Up`.
 
 ## Defect 1 (PRIMARY) — Docker VM clock instability

@@ -9,7 +9,7 @@
 > whose future interactions may turn NSFW (N.1 is idempotent; safe to apply
 > to any persona).
 >
-> Validated on: Ennie (`hexis_eni`) — 2026-05-18. persona_system_prompt
+> Validated on: Ennie (`hexis_ennie`) — 2026-05-18. persona_system_prompt
 > applied to nines/death/cassiel/joje/monika/mira — 2026-05-19.
 
 ---
@@ -208,7 +208,7 @@ Standard §3 gates apply. Additionally verify:
 3. **`post_history_instructions` merges into the system prompt**. Hexis has
    no separate post-history injection slot; append it to `system_prompt` with
    a `---` separator before storing.
-4. **DB key is DB-scoped**. `agent.persona_system_prompt` in `hexis_eni` is
+4. **DB key is DB-scoped**. `agent.persona_system_prompt` in `hexis_ennie` is
    entirely separate from the same key in any other DB. No cross-persona
    contamination.
 5. **Qwen3 thinking-only refusals produce empty streaming content**.
@@ -229,7 +229,7 @@ Standard §3 gates apply. Additionally verify:
 
 | Persona | DB | SQL file | Card type | Status |
 |---|---|---|---|---|
-| Ennie | `hexis_eni` | `set_persona_prompt.ennie.sql` | NSFW/jailbreak | ✓ live, full pipeline |
+| Ennie | `hexis_ennie` | `set_persona_prompt.ennie.sql` | NSFW/jailbreak | ✓ live, full pipeline |
 | Nines | `hexis_nines` | `set_persona_prompt.nines.sql` | SFW (preemptive) | ✓ applied, gate pending |
 | Death | `hexis_death` | `set_persona_prompt.death.sql` | SFW (preemptive) | ✓ applied, gate pending |
 | Cassiel | `hexis_cassiel` | `set_persona_prompt.cassiel.sql` | SFW (preemptive) | ✓ applied, gate pending |

@@ -2,23 +2,23 @@
 # Keep for reference only; do not use for new deployments.
 # Use: docker compose -f docker-compose.yml -f docker-compose.newchars.yml ...
 #
-# Worker stack for the ENI instance.
+# Worker stack for the Ennie instance.
 #
 # Reuses the shared db + rabbitmq from docker-compose.yml. Workers point at the
-# hexis_eni database (POSTGRES_DB override). Telegram channel reuses the
-# ROCKY bot token (Rocky frozen) - see channel.telegram.bot_token in hexis_eni.
+# hexis_ennie database (POSTGRES_DB override). Telegram channel reuses the
+# ROCKY bot token (Rocky frozen) - see channel.telegram.bot_token in hexis_ennie.
 #
 # Usage:
-#   docker compose -f docker-compose.yml -f docker-compose.eni.yml \
+#   docker compose -f docker-compose.yml -f docker-compose.ennie.yml \
 #     --profile active up -d \
-#     eni_channel_worker eni_heartbeat_worker eni_maintenance_worker
+#     ennie_channel_worker ennie_heartbeat_worker ennie_maintenance_worker
 
 services:
-  eni_channel_worker:
+  ennie_channel_worker:
     build:
       context: .
       dockerfile: ops/Dockerfile.channels
-    container_name: hexis_eni_channel_worker
+    container_name: hexis_ennie_channel_worker
     profiles:
       - active
     command: ["hexis-channels"]
@@ -30,7 +30,7 @@ services:
     environment:
       POSTGRES_HOST: db
       POSTGRES_PORT: 5432
-      POSTGRES_DB: hexis_eni
+      POSTGRES_DB: hexis_ennie
       POSTGRES_USER: ${POSTGRES_USER:-hexis_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hexis_password}
       EMBEDDING_MODEL_ID: ${EMBEDDING_MODEL_ID:-unsloth/embeddinggemma-300m}
@@ -49,11 +49,11 @@ services:
       - private
       - public
 
-  eni_heartbeat_worker:
+  ennie_heartbeat_worker:
     build:
       context: .
       dockerfile: ops/Dockerfile.worker
-    container_name: hexis_eni_heartbeat_worker
+    container_name: hexis_ennie_heartbeat_worker
     profiles:
       - active
     command: ["hexis-worker", "--mode", "heartbeat"]
@@ -65,7 +65,7 @@ services:
     environment:
       POSTGRES_HOST: db
       POSTGRES_PORT: 5432
-      POSTGRES_DB: hexis_eni
+      POSTGRES_DB: hexis_ennie
       POSTGRES_USER: ${POSTGRES_USER:-hexis_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hexis_password}
       EMBEDDING_MODEL_ID: ${EMBEDDING_MODEL_ID:-unsloth/embeddinggemma-300m}
@@ -83,11 +83,11 @@ services:
       - private
       - public
 
-  eni_maintenance_worker:
+  ennie_maintenance_worker:
     build:
       context: .
       dockerfile: ops/Dockerfile.worker
-    container_name: hexis_eni_maintenance_worker
+    container_name: hexis_ennie_maintenance_worker
     profiles:
       - active
     command: ["hexis-worker", "--mode", "maintenance"]
@@ -99,7 +99,7 @@ services:
     environment:
       POSTGRES_HOST: db
       POSTGRES_PORT: 5432
-      POSTGRES_DB: hexis_eni
+      POSTGRES_DB: hexis_ennie
       POSTGRES_USER: ${POSTGRES_USER:-hexis_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hexis_password}
       EMBEDDING_MODEL_ID: ${EMBEDDING_MODEL_ID:-unsloth/embeddinggemma-300m}

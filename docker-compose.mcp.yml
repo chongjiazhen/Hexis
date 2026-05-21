@@ -46,7 +46,7 @@ services:
     environment:
       POSTGRES_HOST: db
       POSTGRES_PORT: 5432
-      POSTGRES_DB: hexis_eni             # ENI
+      POSTGRES_DB: hexis_ennie           # Ennie
       POSTGRES_USER: ${POSTGRES_USER:-hexis_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hexis_password}
     ports:

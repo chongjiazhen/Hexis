@@ -22,7 +22,7 @@ unreliable — under compaction the instruction is exactly what gets stripped.
 
 ## OpenClaw side — ALREADY DONE (do not redo)
 
-`C:\openclaw\data\openclaw.json` agent `eni` tools.deny tightened: only
+`C:\openclaw\data\openclaw.json` agent `ennie` tools.deny tightened: only
 `get_identity`, `recall`, `remember` remain allowed (hydrate, recall_recent,
 get_worldview, get_goals, sense_memory_availability now denied — below the
 recipe's ~8, deliberate for this hardware). Gateway restarted, validated.
@@ -63,7 +63,7 @@ Notes:
   content to ~500 chars at the serialization boundary (`_jsonable` / wherever
   Memory → dict). Confirm typical content length first; only add if needed.
 - Leave `recall_recent`, `hydrate` defaults alone — OpenClaw already denies
-  them for `eni`. If another body re-enables them, give them the same clamp.
+  them for `ennie`. If another body re-enables them, give them the same clamp.
 
 ## Rebuild (caps are baked into the image)
 
@@ -71,18 +71,18 @@ Per onboard recipe / hexis CLAUDE.md, `hexis_mcp_*` runs the code from the
 image — editing the .py on disk does NOT take effect until rebuilt:
 ```
 cd C:\hexis
-docker compose -f docker-compose.yml -f docker-compose.mcp.yml up -d --build hexis_mcp_eni
+docker compose -f docker-compose.yml -f docker-compose.mcp.yml up -d --build hexis_mcp_ennie
 curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8767/sse   # expect 200
 ```
 (Apply to other live bodies' mcp containers too if/when they hit the same
-ceiling — currently only `eni` is the OpenClaw-fronted low-ctx body.)
+ceiling — currently only `ennie` is the OpenClaw-fronted low-ctx body.)
 
 ## Validate (ground truth, not "right answer")
 
-After rebuild + an OpenClaw `eni` turn (identity + a memory question):
+After rebuild + an OpenClaw `ennie` turn (identity + a memory question):
 1. `docker logs --since 5m openclaw-openclaw-gateway-1 | grep -i auto-compaction`
    → **expect ZERO** `reason=threshold` events for the turn.
-2. `docker logs --since 5m hexis_mcp_eni | grep -c CallToolRequest` → > 0
+2. `docker logs --since 5m hexis_mcp_ennie | grep -c CallToolRequest` → > 0
    (recall still firing, just smaller).
 3. Reply stays **in-persona** (Ennie — novelist-companion), correct name,
    no generic "language model" collapse, no 120s stall.

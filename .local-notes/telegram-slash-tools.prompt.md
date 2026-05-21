@@ -16,7 +16,7 @@ as a direct, discoverable entrypoint.
 - `web_search` uses self-hosted SearXNG (`SEARXNG_URL=http://searxng:8080`,
   Tavily fallback). SearXNG container attached to `hexis_private`/`hexis_public`.
 - Running chat instances (own DB each, shared `hexis_brain`): default brain +
-  eni, mira, cassiel, death, joje, monika, nines. Telegram-only.
+  ennie, mira, cassiel, death, joje, monika, nines. Telegram-only.
 - See memory `project-heartbeat-jitter-newchars-activated` for full state.
 
 ## Task
@@ -50,7 +50,7 @@ as a direct, discoverable entrypoint.
 
 - Unit/import: `venv/Scripts/python.exe -m py_compile <changed>` + import.
 - E2E: send `/search test` to one char's Telegram bot, then
-  `docker logs --tail 30 hexis_eni_channel_worker | Select-String "tool_use|web_search"`
+  `docker logs --tail 30 hexis_ennie_channel_worker | Select-String "tool_use|web_search"`
   — expect a successful tool call.
 
 ## Commit

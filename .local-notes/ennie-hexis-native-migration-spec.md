@@ -25,20 +25,20 @@ mira UNTOUCHED throughout (separate agent, shared brain DB + box).
 ## Step 0 — VERIFY before building (do not assume; session burned 5× on assumed premises)
 
 - Confirm hexis-native **conscious/chat path** is production-usable for eni,
-  not just heartbeat. `hexis_eni_*` heartbeat/maintenance workers already run;
+  not just heartbeat. `hexis_ennie_*` heartbeat/maintenance workers already run;
   verify the conversation loop (`services/`/`core/agent_loop.py` /
   `apps/hexis_api.py` SSE / `channels/`) actually serves an eni chat turn
-  end-to-end against `hexis_eni` DB.
+  end-to-end against `hexis_ennie` DB.
 - Confirm DB config already correct: `llm.chat` = q36 @
   host.docker.internal:8080/v1 (verified 2026-05-18 — likely no change).
-- Confirm `characters/eni.json` (chara_card_v2 + extensions.hexis) is the
-  intended persona source and `hexis_eni` identity rows match the Ennie voice
+- Confirm `characters/ennie.json` (chara_card_v2 + extensions.hexis) is the
+  intended persona source and `hexis_ennie` identity rows match the Ennie voice
   (the OpenClaw `SOUL.md` was hand-tuned; native persona derives from card +
   brain — verify voice parity, don't assume identical).
 
 ## Components
 
-1. Persona: `characters/eni.json` + `hexis_eni` identity/worldview rows
+1. Persona: `characters/ennie.json` + `hexis_ennie` identity/worldview rows
    (brain already live — OpenClaw used it via MCP; native uses
    `core/cognitive_memory_api` directly).
 2. LLM: DB `llm.chat` (q36, unchanged).
@@ -81,7 +81,7 @@ A reply that's in-voice but fails turn-to-turn continuity = FAIL.
 - hexis chat-path maturity unknown until Step 0 verified — if conversation
   loop isn't production-ready for eni, that's a build task, surface it early.
 - Persona drift: card/brain-derived voice vs hand-tuned OpenClaw SOUL — verify
-  parity; re-seed `hexis_eni` identity rows if voice regresses (fix at brain,
+  parity; re-seed `hexis_ennie` identity rows if voice regresses (fix at brain,
   per onboard recipe Gotcha #8).
 - Downtime window at cutover — minimize via validate-before-flip.
 - Shared brain DB / box — mira isolation must hold; no schema/global change.
