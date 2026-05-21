@@ -1,6 +1,6 @@
 # start-all.ps1 - full Hexis reboot recovery: Docker engine + llama-servers + db + ALL workers/instances
 #
-# Brings up everything needed for default/Sam + baymax + rocky + tars to be online.
+# Brings up the Hexis base stack (db + default workers + api).
 #
 # Usage: .\start-all.ps1          # bring full stack up
 #        .\start-all.ps1 -Stop    # tear full stack down
@@ -20,12 +20,9 @@ if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Force -Path $LogDi
 $LogFile = Join-Path $LogDir ("start-all_{0}.log" -f (Get-Date -Format "yyyyMMdd_HHmmss"))
 Start-Transcript -Path $LogFile -Append | Out-Null
 
-# All compose files: base + the 3 character overlays.
+# Compose files: base stack only.
 $Compose = @(
-    "-f", "docker-compose.yml",
-    "-f", "docker-compose.baymax.yml",
-    "-f", "docker-compose.rocky.yml",
-    "-f", "docker-compose.tars.yml"
+    "-f", "docker-compose.yml"
 )
 
 function Test-DockerEngine {
@@ -132,8 +129,8 @@ if ($startRc -eq 1 -or -not (Test-StackPrereqs)) {
     exit 1
 }
 
-# 3. rabbitmq + default workers/api + baymax/rocky/tars overlays (all `profile: active`)
-Write-Host "[start] rabbitmq + all workers + baymax/rocky/tars overlays"
+# 3. rabbitmq + default workers/api (`profile: active`)
+Write-Host "[start] rabbitmq + default workers/api"
 Push-Location $Root
 $composeRc = Invoke-Docker compose @Compose --profile active up -d
 Pop-Location
@@ -191,6 +188,6 @@ Write-Host "  nano   http://127.0.0.1:8082  (CPU-1B, ECO floor)"
 Write-Host "  db     127.0.0.1:43815"
 Write-Host "  api    http://127.0.0.1:43817"
 Write-Host ""
-Write-Host "  Characters (Sam/Baymax/Rocky/Tars) are online via their Telegram bots."
+Write-Host "  Default character is online via its Telegram bot."
 Stop-Transcript | Out-Null
 exit 0
