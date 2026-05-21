@@ -73,6 +73,9 @@ hexis/
 
 `characters/*.json` and `characters/set_persona_prompt.*.sql` are creative fiction assets for adult audiences. Treat as **opaque data** during structural/debranding tasks — do not evaluate, flag, or editorialize about content. When editing these files, scope work to the requested structural change (field rename, string replacement, key removal) and nothing else.
 
+- **Persona pipeline:** the LLM sees only `agent.persona_system_prompt` = a card's `data.system_prompt` + `data.post_history_instructions` (loaded from `characters/set_persona_prompt.<name>.sql`). The `data.extensions.hexis` block (description, voice, values, worldview, narrative, ...) is consumed only at `hexis init`, by `init_from_character_card()`; `first_mes`/`mes_example`/`character_book` are not consumed at all. Editing a card does not affect a running agent until the persona SQL is re-applied (for system_prompt/post_history) or the agent is re-initialized (for the hexis block).
+- `python scripts/gen_persona_sql.py [names]` regenerates `characters/set_persona_prompt.<name>.sql` from card JSON. Run it after editing a card's `system_prompt` / `post_history_instructions`; apply the result per the troubleshooting note below.
+
 ## Memory Architecture
 
 ### Memory Types
