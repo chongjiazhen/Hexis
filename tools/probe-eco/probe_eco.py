@@ -33,6 +33,9 @@ PROMPTS = [
 # Markers that strongly indicate the 1B model leaked the structured prompt
 # template back as the reply (the lovesick-style failure) or fell into an echo
 # loop. Used to auto-label probe replies; not exhaustive, refine as we see more.
+# NOTE: keep this list in sync with MARKERS in tools/probe-eco/probe_score.py
+# (host-side scorer) — they are deliberately separate copies because this file
+# is piped into a container with no filesystem siblings, so it cannot import it.
 BROKEN_MARKERS = [
     # Prompt-context leakage (1B regurgitating its structured prompt)
     "[USER MESSAGE]",

@@ -86,13 +86,22 @@ def build_matrix(probes_dir: Path) -> str:
     lines.append("")
     lines.append("| metric | " + " | ".join(models) + " |")
     lines.append("|" + "---|" * (len(models) + 1))
-    lines.append("| peak VRAM (MiB) | " + " | ".join(vram[m] for m in models) + " |")
+    lines.append("| peak board VRAM (MiB) | " + " | ".join(vram[m] for m in models) + " |")
     lines.append("")
     lines.append(f"Failure classes: {', '.join(FAILURE_CLASSES)}.")
     lines.append("")
     lines.append(
         "Floor verdict: the floor model is the largest tier that is clean "
-        "fleet-wide AND has peak VRAM <= ~5500 MiB."
+        "fleet-wide AND fits the 8GB Companion budget."
+    )
+    lines.append("")
+    lines.append(
+        "VRAM caveat: the sampler records `nvidia-smi memory.used` for the "
+        "WHOLE board (desktop + every running model), not the probed tier's "
+        "footprint in isolation. On a 16GB dev box with the fleet up, this "
+        "number is NOT the 8GB-card answer. To size a tier, probe it on a "
+        "clean box, or measure the used-VRAM delta around its serve. Treat "
+        "the column as a coarse upper bound until then."
     )
     return "\n".join(lines) + "\n"
 
