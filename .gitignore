@@ -61,6 +61,15 @@ logs/
 # Docker
 .docker/
 
+# Claude Code local config + runtime
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+
+# SillyTavern card-extraction scratch
+.local-notes/card-full/
+.local-notes/cards-summary.json
+.local-notes/chunks/
+
 # Misc
 .cache/
 .tmp/
