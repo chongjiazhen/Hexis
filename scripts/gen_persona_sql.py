@@ -2,7 +2,7 @@
 """Generate set_persona_prompt.<name>.sql from character card JSON.
 
 The hexis runtime sends the LLM only `agent.persona_system_prompt`, loaded
-from a set_persona_prompt.<name>.sql file at the repo root. That value is the
+from a characters/set_persona_prompt.<name>.sql file. That value is the
 card's `data.system_prompt` + `data.post_history_instructions`, with the
 {{user}} and {{char}} placeholders resolved. The .sql files are not produced
 by any build step, so they drift out of date whenever a card's system_prompt
@@ -16,7 +16,7 @@ This regenerates them from characters/<name>.json.
     python scripts/gen_persona_sql.py monika death     # regenerate only these
                                                       #   (creates the .sql if new)
 
-Output files are written to the repo root. The runtime is NOT touched -- apply
+Output files are written to characters/. The runtime is NOT touched -- apply
 a file to a running instance by executing it against that instance's database
 (e.g. psql / docker exec); it takes effect next turn.
 
@@ -85,18 +85,18 @@ def generate(stem: str) -> Path | None:
         f"to_jsonb({tag}{text}{tag}::text)) "
         f"ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;\n"
     )
-    dest = REPO_ROOT / f"set_persona_prompt.{stem}.sql"
+    dest = CHARACTERS_DIR / f"set_persona_prompt.{stem}.sql"
     dest.write_text(sql, encoding="utf-8", newline="\n")
     print(f"  wrote {dest.name} ({len(text)} chars)")
     return dest
 
 
 def _existing_stems() -> list[str]:
-    """Stems that already have a set_persona_prompt.*.sql at the repo root."""
+    """Stems that already have a characters/set_persona_prompt.*.sql file."""
     prefix, suffix = "set_persona_prompt.", ".sql"
     return sorted(
         p.name[len(prefix):-len(suffix)]
-        for p in REPO_ROOT.glob("set_persona_prompt.*.sql")
+        for p in CHARACTERS_DIR.glob("set_persona_prompt.*.sql")
     )
 
 

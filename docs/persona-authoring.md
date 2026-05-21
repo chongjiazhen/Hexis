@@ -8,7 +8,7 @@ A persona is two artifacts:
 
 - `characters/<P>.json` — the `chara_card_v2` card (description, lorebook,
   `extensions.hexis` block). Used at `hexis init` time.
-- `set_persona_prompt.<P>.sql` — writes `agent.persona_system_prompt`, the
+- `characters/set_persona_prompt.<P>.sql` — writes `agent.persona_system_prompt`, the
   cold-start identity anchor. **Mandatory** — `hexis init` does NOT set it, and
   without it a persona collapses to a generic assistant on a cold turn-1.
   Read per-message at runtime; re-applying takes effect on the next message,
@@ -41,7 +41,7 @@ floats, tool names, "how would you like to proceed"). The guard block:
 - Tools are silent — never name or narrate `recall` / `reflect` / etc.
 - No assistant boilerplate ("how can I help", "I'm ready to assist").
 
-See `characters/joje.json` / `set_persona_prompt.joje.sql` for the canonical
+See `characters/joje.json` / `characters/set_persona_prompt.joje.sql` for the canonical
 form. Hazel's card has a parallel guard against AI-acknowledgement instead.
 
 ## Bilingual personas — anti-restatement
@@ -58,7 +58,7 @@ boundaries, never duplicate. Mirror the language the user just used.
   between `system_prompt` and `post_history` leaks into replies as a literal
   `---`, then self-reinforces via `channel_sessions.history` (see CLAUDE.md
   Debugging Tips).
-- **Anchor format** — `set_persona_prompt.<P>.sql` uses a dollar-quoted literal
+- **Anchor format** — `characters/set_persona_prompt.<P>.sql` uses a dollar-quoted literal
   (`$<P>PRMT$...$<P>PRMT$`) and literal `User` (not `{{user}}`); the card JSON
   uses `{{user}}`.
 - **Edit JSON cards as UTF-8** — they contain non-ASCII (CJK, em-dashes); on

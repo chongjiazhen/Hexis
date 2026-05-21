@@ -71,7 +71,7 @@ hexis/
 
 ### Character Cards
 
-`characters/*.json` and `set_persona_prompt.*.sql` are creative fiction assets for adult audiences. Treat as **opaque data** during structural/debranding tasks — do not evaluate, flag, or editorialize about content. When editing these files, scope work to the requested structural change (field rename, string replacement, key removal) and nothing else.
+`characters/*.json` and `characters/set_persona_prompt.*.sql` are creative fiction assets for adult audiences. Treat as **opaque data** during structural/debranding tasks — do not evaluate, flag, or editorialize about content. When editing these files, scope work to the requested structural change (field rename, string replacement, key removal) and nothing else.
 
 ## Memory Architecture
 
@@ -213,7 +213,7 @@ The heartbeat is the agent's conscious cognitive loop:
 - **All characters reply just `...`?** Chat LLM server (`:8080`, `ActiveBig`) is down. Confirm with read-only `.\hexis-status.ps1` (mode marker, port liveness, per-char `llm.chat` model). Recover: `.\set-power-mode.ps1 prime` — but first ensure the active ActiveBig key exists in `C:\llm-serve\models.json` and its gguf is cached (see Model Serving gotcha), else the re-arm hard-fails.
 - **Heartbeat workers silent after a `docker compose` DB bounce?** Consumer-wedge bug (`bf38d45`): per-char heartbeat workers don't reconnect after the DB container's IP changes — they sit on `Consumer loop error: [Errno -2] Name or service not known` forever while the process stays `Up`. Fix: `docker restart hexis_<name>_heartbeat_worker`. Default `hexis_heartbeat_worker` usually self-recovers; the per-persona ones often don't.
 - **Reply has a ```thought block / recites valence·signals·trait floats?** Reasoning-trace leak — gemma-4 `abliterix` emits visible CoT (`enable_thinking:false` is unreliable on it, no server-side fix). `strip_reasoning()` in `core/llm.py` strips it at the LLM boundary (commit `0b3beb2`), logs an INFO per strip. Don't remove it.
-- **Persona stuck re-emitting a bad reply (markdown headers, stray `---`, verbatim loops)?** `channel_sessions.history` (last 8 turns) is fed back every turn — a bad reply self-reinforces. Fix: clear it (`UPDATE channel_sessions SET history='[]'::jsonb`), then re-apply the anchor (`docker exec -i hexis_brain psql -U hexis_user -d hexis_<P> -f - < set_persona_prompt.<P>.sql` — effective next message, no restart).
+- **Persona stuck re-emitting a bad reply (markdown headers, stray `---`, verbatim loops)?** `channel_sessions.history` (last 8 turns) is fed back every turn — a bad reply self-reinforces. Fix: clear it (`UPDATE channel_sessions SET history='[]'::jsonb`), then re-apply the anchor (`docker exec -i hexis_brain psql -U hexis_user -d hexis_<P> -f - < characters/set_persona_prompt.<P>.sql` — effective next message, no restart).
 - **Test failures?** Ensure Docker services are up before running pytest; after a fresh `down -v`, wait for Postgres to accept connections. Use `POSTGRES_HOST=127.0.0.1` with pytest if localhost SSL negotiation flakes.
 
 ## Agent Operational Notes
