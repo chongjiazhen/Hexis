@@ -4,6 +4,7 @@ import base64
 import json
 import logging
 import os
+import re
 from typing import Any, AsyncIterator
 
 import httpx
@@ -533,6 +534,55 @@ def _extract_responses_result(response: Any) -> dict[str, Any]:
     return {"content": content, "tool_calls": tool_calls, "raw": response}
 
 
+_REASONING_PATTERNS = [
+    # DeepSeek/Qwen-style reasoning tags, if they surface inline in `content`.
+    re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE),
+    # Gemma 4 native reasoning channel — <|channel>thought ... <channel|>.
+    # A well-behaved Gemma 4 emits these special tokens; llama.cpp does not
+    # parse them, so they leak into `content`.
+    re.compile(r"<\|?channel\|?>\s*thought\b.*?<\|?channel\|?>", re.DOTALL | re.IGNORECASE),
+    # Markdown-fenced reasoning block — ```thought ... ``` — the form actually
+    # observed in production: an abliterated Gemma 4 merge degrades special-token
+    # adherence and approximates its thought channel as a plaintext fence.
+    re.compile(r"```(?:thought|thinking|reasoning)\b.*?```", re.DOTALL | re.IGNORECASE),
+]
+
+
+def strip_reasoning(content: str) -> str:
+    """
+    Remove leaked chain-of-thought from model output.
+
+    Some models — abliterated community merges in particular — emit their
+    reasoning trace as visible content instead of through a separate reasoning
+    channel: either ``<think>...</think>`` tags or a ```thought fenced block.
+    Hexis never wants that text in a user-facing reply.
+
+    Model-agnostic and a no-op when the content is already clean, so it is safe
+    to apply unconditionally regardless of which model/provider is configured.
+    """
+    if not content:
+        return content
+    lowered = content.lower()
+    if "```" not in content and "<think>" not in lowered and "channel" not in lowered:
+        return content
+    cleaned = content
+    for pat in _REASONING_PATTERNS:
+        cleaned = pat.sub("", cleaned)
+    cleaned = cleaned.strip()
+    if cleaned == content:
+        return content
+    if not cleaned:
+        logger.warning(
+            "strip_reasoning: model output was entirely reasoning trace, "
+            "nothing left after strip (%d chars removed)", len(content),
+        )
+        return ""
+    logger.info(
+        "strip_reasoning: removed %d chars of leaked reasoning", len(content) - len(cleaned),
+    )
+    return cleaned
+
+
 _PROVIDER_ALIASES: dict[str, str] = {
     "openai_chat_completions_endpoint": "openai-chat-completions-endpoint",
     "openai_codex": "openai-codex",
@@ -996,11 +1046,15 @@ async def chat_completion(
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
-            # Qwen3 reasoning models otherwise burn the whole token budget on
+            # Reasoning models otherwise burn the whole token budget on
             # reasoning_content and return empty `content` via this
-            # OpenAI-compatible path. Disable thinking at the chat-template
-            # level (honored by llama.cpp --jinja; ignored by non-Qwen
-            # templates). See .local-notes/hexis-native-onboard.prompt.md.
+            # OpenAI-compatible path. `enable_thinking` is the correct
+            # chat-template kwarg for both Qwen3 and Gemma 4 — but it is
+            # unreliable on Gemma 4's shipped template (auto-enables thinking
+            # when a system message is present, and the 26B-A4B path has a
+            # known disable bug). It is a best-effort assist, not a guarantee;
+            # strip_reasoning() on the response is the load-bearing backstop.
+            # See .local-notes/hexis-native-onboard.prompt.md.
             "extra_body": {"chat_template_kwargs": {"enable_thinking": False}},
         }
         if tools:
@@ -1012,7 +1066,7 @@ async def chat_completion(
         async def _do_chat_completion():
             response = await client.chat.completions.create(**payload)
             message = response.choices[0].message
-            content = message.content or ""
+            content = strip_reasoning(message.content or "")
             tool_calls = _openai_tool_calls(message.tool_calls or [])
             return {"content": content, "tool_calls": tool_calls, "raw": response}
 
@@ -1271,7 +1325,11 @@ async def stream_chat_completion(
                     logger.debug("Failed to parse tool arguments: %r", raw_args[:200])
                     args = {}
                 tool_calls.append({"id": tc["id"], "name": tc["name"], "arguments": args})
-            return {"content": "".join(content_parts), "tool_calls": tool_calls, "raw": None}
+            return {
+                "content": strip_reasoning("".join(content_parts)),
+                "tool_calls": tool_calls,
+                "raw": None,
+            }
 
         return await _retry_on_transient(_do_stream_completion)
 
