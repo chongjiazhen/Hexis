@@ -105,3 +105,70 @@ async def _get_alert_chat_id(pool: asyncpg.Pool) -> str | None:
             "SELECT get_config_text($1)", "channel.telegram.alert_chat_id"
         )
     return str(val).strip() if val else None
+
+
+async def react_to_pending_alerts(
+    pool: asyncpg.Pool,
+    bridge: Any | None,
+    *,
+    limit: int = 10,
+) -> int:
+    """Heartbeat batch: react to unreacted alert memories from the last 24h.
+
+    Called once per heartbeat. Picks up alert memories left unreacted by the
+    webhook handler (normal-priority alerts), runs one reaction turn each,
+    publishes any non-silent reaction, and marks every scanned memory reacted.
+
+    Returns the number of memories processed.
+    """
+    alert_chat_id = await _get_alert_chat_id(pool)
+    if not alert_chat_id:
+        return 0
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, content, metadata->'context' AS context
+            FROM memories
+            WHERE metadata->'context'->>'kind' = 'alert'
+              AND metadata->'context'->>'reacted' = 'false'
+              AND created_at > CURRENT_TIMESTAMP - INTERVAL '24 hours'
+            ORDER BY created_at
+            LIMIT $1
+            """,
+            limit,
+        )
+    if not rows:
+        return 0
+
+    reacted_ids: list = []
+    for row in rows:
+        ctx = row["context"]
+        if isinstance(ctx, str):
+            try:
+                ctx = json.loads(ctx)
+            except Exception:
+                ctx = {}
+        ctx = ctx or {}
+        alert_text = ctx.get("alert_text") or row["content"]
+        title = ctx.get("title")
+        comment = await generate_alert_reaction(
+            pool, alert_text=alert_text, title=title
+        )
+        if comment and bridge:
+            try:
+                await bridge.publish_outbox_payloads(
+                    [build_alert_outbox_message(comment, alert_chat_id)]
+                )
+            except Exception as exc:
+                logger.warning("Failed to publish batched reaction: %s", exc)
+        reacted_ids.append(row["id"])
+
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE memories "
+            "SET metadata = jsonb_set(metadata, '{context,reacted}', 'true') "
+            "WHERE id = ANY($1::uuid[])",
+            reacted_ids,
+        )
+    return len(reacted_ids)
