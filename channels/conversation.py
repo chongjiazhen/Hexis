@@ -19,11 +19,46 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Maximum conversation turns to keep in session history
+# Fleet-default conversation-history bounds. A persona on a small-context
+# model (e.g. Vera on the 24K-window local model) can override these per-DB
+# via the channel.history.max / channel.history.trim config keys — verbose
+# personas otherwise overflow the model's context window.
 MAX_SESSION_HISTORY = 40
 
 # Trim to this many when we exceed the max
 TRIM_TO_HISTORY = 30
+
+
+async def _resolve_history_limits(conn: "asyncpg.Connection") -> tuple[int, int]:
+    """Return (max, trim) session-history bounds for this persona.
+
+    Defaults are MAX_SESSION_HISTORY / TRIM_TO_HISTORY; the channel.history.max
+    and channel.history.trim config keys override them. trim is clamped below
+    max so trimming always makes progress.
+    """
+    max_n, trim_n = MAX_SESSION_HISTORY, TRIM_TO_HISTORY
+
+    def _as_int(raw: Any, default: int) -> int:
+        try:
+            return int(json.loads(raw) if isinstance(raw, str) else raw)
+        except (TypeError, ValueError):
+            return default
+
+    try:
+        rows = await conn.fetch(
+            "SELECT key, value FROM config "
+            "WHERE key IN ('channel.history.max', 'channel.history.trim')"
+        )
+        cfg = {r["key"]: r["value"] for r in rows}
+        if "channel.history.max" in cfg:
+            max_n = _as_int(cfg["channel.history.max"], max_n)
+        if "channel.history.trim" in cfg:
+            trim_n = _as_int(cfg["channel.history.trim"], trim_n)
+    except Exception:
+        logger.debug("history-limit config lookup failed; using defaults")
+
+    trim_n = max(1, min(trim_n, max_n - 1))
+    return max_n, trim_n
 
 # Default energy cost per channel message (0 = free)
 DEFAULT_CHANNEL_ENERGY_COST = 0.0
@@ -265,14 +300,16 @@ async def _update_session(
 ) -> None:
     """Update session history and last_active timestamp.
 
-    When history exceeds MAX_SESSION_HISTORY, runs a pre-compaction memory
-    flush to preserve important information from the messages being trimmed,
-    then trims to TRIM_TO_HISTORY.
+    When history exceeds the max bound, runs a pre-compaction memory flush to
+    preserve important information from the messages being trimmed, then trims
+    to the trim bound. Bounds come from _resolve_history_limits (per-persona
+    config, fleet defaults otherwise).
     """
-    if len(history) > MAX_SESSION_HISTORY:
+    max_n, trim_n = await _resolve_history_limits(conn)
+    if len(history) > max_n:
         # Messages that will be discarded
-        trimmed = history[:-TRIM_TO_HISTORY]
-        history = history[-TRIM_TO_HISTORY:]
+        trimmed = history[:-trim_n]
+        history = history[-trim_n:]
 
         # Flush trimmed messages to long-term memory (non-blocking best-effort)
         if dsn and trimmed:
