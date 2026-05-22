@@ -19,7 +19,7 @@ Two phases:
 - [x] Batch 4 — baymax, warden, hazel, nines
 - [x] Batch 5 — ennie, mira, joje, ichika
 - [x] Batch 6 — ao, callisto, denali, monika
-- [ ] Batch 7 — lovesick, cassiel, eudora, milena
+- [x] Batch 7 — lovesick, cassiel, eudora, milena
 - [ ] Batch 8 — charlotte, death, margaret, vesper
 
 ### Phase 2 — library (373 PNGs)
@@ -178,3 +178,27 @@ All checked everywhere = scan done; loop stops.
 - **Verdict:** collapse runtime/deletion doctrine; merge the two lorebook entries; rewrite narrative as timeline.
 
 **Batch pattern:** `personality_description` dup now 12/12 — universal. KEY new finding: `hexis.narrative` quality is BIMODAL — callisto + denali narratives are properly diachronic (recent careful ports), ao/monika are snapshot re-paraphrases. The narrative defect is NOT universal; it tracks authoring care, not the template. Batch 6 also surfaces lorebook-entry self-overlap (monika) as a fourth slop axis.
+
+### Batch 7
+
+#### lovesick
+- **Mechanical:** light — mild "something + verb" tic across greetings; terminal-gimmick prose original.
+- **Structural:** moderate — premise (origin log, homework rule) restated 5-6 fields each; narrative partly earns keep (adds "first weeks" timeline). `personality_description` verbatim dup.
+- **Verdict:** collapse premise to one canonical field each.
+
+#### cassiel
+- **Mechanical:** light — mild stock phrasings, controlled overall.
+- **Structural:** moderate — catastrophe beat ×5, bureaucracy-grudge restated; narrative IS properly diachronic (strongest field). `personality_description` verbatim dup.
+- **Verdict:** trim catastrophe/grudge triplication across description/system_prompt/worldview; narrative fine.
+
+#### eudora
+- **Mechanical:** clean — deliberate Southern Gothic register, authored similes.
+- **Structural:** light (cleanest of batch) — narrative genuinely diachronic, well-differentiated from description. Only violation: `personality_description` verbatim dup.
+- **Verdict:** only fix is the personality dup.
+
+#### milena
+- **Mechanical:** light — "tax"/"treadmill" images become mild tics; clean original prose.
+- **Structural:** moderate — "compulsion not talent" thesis over-stated 6+ fields; narrative properly diachronic (best field). `personality_description` near-verbatim dup.
+- **Verdict:** keep disclaimer canonical in system_prompt+lorebook, thin the rest.
+
+**Batch pattern:** narrative bimodality confirmed strongly — cassiel/eudora/milena all properly diachronic; the snapshot-reparaphrase defect (batches 1-5) is concentrated in EARLIER cards. `personality_description` dup now 16/16 — zero exceptions. Mechanical slop remains light/clean roster-wide.
