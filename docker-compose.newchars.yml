@@ -514,3 +514,28 @@ services:
     environment:
       <<: *common-env
       POSTGRES_DB: hexis_eudora
+
+  # ── Esme ── conversation-confidence coach persona
+  esme_channel_worker:
+    <<: *channel-base
+    container_name: hexis_esme_channel_worker
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_esme
+      ESME_TELEGRAM_BOT_TOKEN: ${ESME_TELEGRAM_BOT_TOKEN:-}
+
+  esme_heartbeat_worker:
+    <<: *worker-base
+    container_name: hexis_esme_heartbeat_worker
+    command: ["hexis-worker", "--mode", "heartbeat"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_esme
+
+  esme_maintenance_worker:
+    <<: *worker-base
+    container_name: hexis_esme_maintenance_worker
+    command: ["hexis-worker", "--mode", "maintenance"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_esme
