@@ -20,7 +20,7 @@ Two phases:
 - [x] Batch 5 — ennie, mira, joje, ichika
 - [x] Batch 6 — ao, callisto, denali, monika
 - [x] Batch 7 — lovesick, cassiel, eudora, milena
-- [ ] Batch 8 — charlotte, death, margaret, vesper
+- [x] Batch 8 — charlotte, death, margaret, vesper  ← Phase 1 COMPLETE
 
 ### Phase 2 — library (373 PNGs)
 
@@ -202,3 +202,43 @@ All checked everywhere = scan done; loop stops.
 - **Verdict:** keep disclaimer canonical in system_prompt+lorebook, thin the rest.
 
 **Batch pattern:** narrative bimodality confirmed strongly — cassiel/eudora/milena all properly diachronic; the snapshot-reparaphrase defect (batches 1-5) is concentrated in EARLIER cards. `personality_description` dup now 16/16 — zero exceptions. Mechanical slop remains light/clean roster-wide.
+
+### Batch 8
+
+#### charlotte
+- **Mechanical:** light — "practiced X of someone who" frame ×3; "catch the light" ×4.
+- **Structural:** heavy — narrative re-paraphrases description/lorebook (not diachronic); liquid kink + signature phrases duplicated 3×. `personality_description` verbatim dup.
+- **Verdict:** narrative → timeline; consolidate signature phrases.
+
+#### death
+- **Mechanical:** moderate (worst mechanically in roster) — "smoky" ×4, antithesis frames ×3, stock erotica phrasings in NSFW blocks.
+- **Structural:** heavy (worst of batch) — full sexual-anatomy paragraph triplicated (description/system_prompt/narrative); signature phrases ×3-5. `personality_description` verbatim dup.
+- **Verdict:** dedup anatomy paragraph to one field; narrative → backstory.
+
+#### margaret
+- **Mechanical:** light — deliberate antique register; "went quiet" tic ×3.
+- **Structural:** moderate (best-constructed of batch) — narrative genuinely diachronic, well-differentiated. Unmaking premise restated 4×. `personality_description` verbatim dup.
+- **Verdict:** fix personality dup; trim unmaking-premise to one field.
+
+#### vesper
+- **Mechanical:** light — controlled stylistic device by design; card self-instructs against repetition.
+- **Structural:** moderate — NOTE: vesper uses `hexis.personality_summary` (NOT `personality_description`) — does NOT duplicate `data.personality`. The ONLY card without that dup. Spec-triplication across description/system_prompt/lorebook; narrative back-half drifts to snapshot.
+- **Verdict:** tighten narrative back-half; one field owns each spec. ⚠ vesper.json still on disk despite being scrapped in favor of callisto earlier — flag for user.
+
+---
+
+## Phase 1 summary (32 hexis cards, batches 1-8)
+
+**Mechanical slop:** light/clean roster-wide. Only `death` reaches moderate (smoky ×4, stock erotica phrasings). No card is mechanically heavy. The hexis roster is NOT a mechanical-slop problem.
+
+**Structural slop — four systemic axes:**
+1. **`personality_description` == `data.personality` verbatim** — 31/32 cards. Universal except `vesper`, which correctly uses `hexis.personality_summary` instead. **vesper is the fix template.**
+2. **`hexis.narrative` re-paraphrasing `description`** instead of being diachronic — BIMODAL. Earlier cards (ava/cortana/david/glados/hexis/jarvis/joi/samantha/baymax/warden/nines/ao/monika/charlotte/death) are snapshot-reprints; recent cards (callisto/denali/cassiel/eudora/milena/margaret) are properly diachronic. Tracks authoring care, not template.
+3. **Signature-phrase saturation** — load-bearing phrases canonicalized across 4-7 fields. Worst: ichika, mira, death, monika.
+4. **Lorebook-entry self-overlap + lorebook↔system_prompt echo** — monika ("The Void"/"The Runtime"), vesper (spec triplication), warden (lorebook echoes system_prompt).
+
+**Recommended fix order (cheap → structural):**
+- Cull all 31 `personality_description` fields → adopt `personality_summary` per vesper. Mechanical, scriptable.
+- Rewrite the ~15 snapshot narratives as diachronic timelines.
+- Per-card signature-phrase dedup (each phrase → one canonical field).
+- Merge overlapping lorebook entries; stop lorebook echoing system_prompt.
