@@ -126,7 +126,7 @@ Expected: `wrote set_persona_prompt.vera.sql (NNNN chars)` then `done: 1/1 file(
 - [ ] **Step 2: Verify the SQL targets the right config key**
 
 Run: `python -X utf8 -c "t=open('characters/set_persona_prompt.vera.sql',encoding='utf-8').read(); assert 'agent.persona_system_prompt' in t; assert 'ON CONFLICT' in t; print('ok', len(t))"`
-Expected: `ok` plus a length (~4000-5000).
+Expected: `ok` plus a non-zero length (the generated file is ~5.7 KB — Vera's system prompt is long).
 
 - [ ] **Step 3: Commit**
 
@@ -175,7 +175,8 @@ Add this block after the last persona block (after `callisto_maintenance_worker`
 
 - [ ] **Step 2: Validate compose parses**
 
-Run: `docker compose -f docker-compose.yml -f docker-compose.newchars.yml config --services | findstr vera`
+Run: `docker compose -f docker-compose.yml -f docker-compose.newchars.yml --profile active config --services | findstr vera`
+(`--profile active` is required — all worker services are gated behind `profiles: [active]`; without it `config --services` lists only `db`.)
 Expected: three lines — `vera_channel_worker`, `vera_heartbeat_worker`, `vera_maintenance_worker`.
 
 - [ ] **Step 3: Commit**
@@ -279,7 +280,7 @@ Per RUNBOOK §2.5c: apply the file against `hexis_vera`.
 - [ ] **Step 2: Verify the anchor is set**
 
 Per RUNBOOK §2.5c: `SELECT length(value::text) FROM config WHERE key='agent.persona_system_prompt'`.
-Expected: a non-zero length (~4000-5000), matching Task 2 Step 2.
+Expected: a non-zero length matching the generated file from Task 2 Step 2 (~5.7 KB).
 
 No commit — database state; the file was committed in Task 2.
 

@@ -269,11 +269,20 @@ function Ensure-GpuServer($Resolved, [int]$Port) {
     # IQ3_XXS). Hexis-orchestration sampler choice, not serve tuning - stays
     # here, NOT in models.json (the kobold/SillyTavern consumer must not inherit
     # it). Applies to every ActiveBig the fleet arms.
-    Start-Process -FilePath $LlamaServer `
+    #
+    # stderr -> serve-<port>-stderr.log: llama-server launches detached + hidden,
+    # so a crash mid-load (classically CUDA OOM when a just-killed server's VRAM
+    # is not yet released - see the eco->prime race) is otherwise invisible. The
+    # capture pairs with the Wait-PortHealth gate at the call site: together they
+    # turn a silent dead :8080 into a loud, diagnosable script failure.
+    $errLog = Join-Path $LogDir "serve-$Port-stderr.log"
+    $proc = Start-Process -FilePath $LlamaServer `
         -ArgumentList ($Resolved.ModelArgs + @("--host","0.0.0.0","--port","$Port") + $Resolved.Tuning +
                         @("--alias",$Resolved.Alias,"--jinja","--reasoning-budget","0",
                           "--repeat-penalty","1.1","--repeat-last-n","256")) `
-        -WindowStyle Hidden
+        -RedirectStandardError $errLog `
+        -WindowStyle Hidden -PassThru
+    Write-Host "[arm] $($Resolved.Alias) PID $($proc.Id) (stderr -> $errLog)"
 }
 
 function New-LlmCfg([string]$Model, [int]$Port, [string]$EndpointOverride) {
@@ -330,6 +339,13 @@ if (-not $IsEco -and ($liveChars | Where-Object { $_.Tier -eq "gpu" })) {
     # ActiveBig key. $big.* (psd1) is only a legacy fallback for un-backfilled keys.
     $bigResolved = Resolve-BigModel $ActiveBig $big.Repo $big.Path $big.Alias
     Ensure-GpuServer $bigResolved $BigPort
+    # Gate: never report "armed" / flip DBs to :8080 until it answers /health.
+    # Mirrors the ECO/nano gate (below) - flipping the gpu-tier fleet to a dead
+    # endpoint silently bricks chat + heartbeat ("..." replies, no error).
+    $gpuOk = Wait-PortHealth "http://127.0.0.1:$BigPort/health" "$ActiveBig :$BigPort" 180
+    if (-not $gpuOk) {
+        throw "GPU server :$BigPort ($ActiveBig) not healthy after launch - check $LogDir\serve-$BigPort-stderr.log (likely CUDA OOM if a just-killed server's VRAM was not yet freed; retry the re-arm). Refusing to flip DBs to a dead endpoint."
+    }
     $gpuPortsInUse += $BigPort
 }
 
