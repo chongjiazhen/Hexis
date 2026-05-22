@@ -170,9 +170,11 @@ services:
       <<: *common-env
       POSTGRES_DB: hexis_joje
 
-  # ── Nines ──────────────────────────────────────────────────────────────────
+  # ── Nines ── ON ICE 2026-05-22 (superseded by unified android character;
+  #           DB hexis_nines preserved; thaw: drop the frozen profile override)
   nines_channel_worker:
     <<: *channel-base
+    profiles: ["frozen"]
     container_name: hexis_nines_channel_worker
     environment:
       <<: *common-env
@@ -181,6 +183,7 @@ services:
 
   nines_heartbeat_worker:
     <<: *worker-base
+    profiles: ["frozen"]
     container_name: hexis_nines_heartbeat_worker
     command: ["hexis-worker", "--mode", "heartbeat"]
     environment:
@@ -189,6 +192,7 @@ services:
 
   nines_maintenance_worker:
     <<: *worker-base
+    profiles: ["frozen"]
     container_name: hexis_nines_maintenance_worker
     command: ["hexis-worker", "--mode", "maintenance"]
     environment:
@@ -274,9 +278,11 @@ services:
       <<: *common-env
       POSTGRES_DB: hexis_lovesick
 
-  # ── Charlotte ──────────────────────────────────────────────────────────────
+  # ── Charlotte ── ON ICE 2026-05-22 (superseded by unified android character;
+  #               DB hexis_charlotte preserved; thaw: drop the frozen profile override)
   charlotte_channel_worker:
     <<: *channel-base
+    profiles: ["frozen"]
     container_name: hexis_charlotte_channel_worker
     environment:
       <<: *common-env
@@ -285,6 +291,7 @@ services:
 
   charlotte_heartbeat_worker:
     <<: *worker-base
+    profiles: ["frozen"]
     container_name: hexis_charlotte_heartbeat_worker
     command: ["hexis-worker", "--mode", "heartbeat"]
     environment:
@@ -293,6 +300,7 @@ services:
 
   charlotte_maintenance_worker:
     <<: *worker-base
+    profiles: ["frozen"]
     container_name: hexis_charlotte_maintenance_worker
     command: ["hexis-worker", "--mode", "maintenance"]
     environment:
