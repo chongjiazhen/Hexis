@@ -323,6 +323,14 @@ def create_heartbeat_handler(
         if isinstance(outbox_messages, list):
             await _publish_outbox(outbox_messages)
 
+        # Batched alert reactions: comment on normal-priority alerts that
+        # arrived since the last heartbeat. The heartbeat timer skips entirely
+        # in ECO, so no explicit ECO guard is needed here.
+        try:
+            await react_to_pending_alerts(pool, bridge)
+        except Exception as exc:
+            logger.warning("Batched alert reaction failed: %s", exc)
+
         async with pool.acquire() as conn:
             # Agentic heartbeat path
             if await _is_agentic_heartbeat_enabled(conn) and tool_registry:
@@ -784,7 +792,10 @@ async def _amain(mode: str, instance: str | None = None) -> None:
         stop_callback=_stop_all,
     )
     consumer.register(EventSource.HEARTBEAT, heartbeat_handler)
-    consumer.register(EventSource.WEBHOOK, create_webhook_handler(pool=consumer_pool))
+    consumer.register(
+        EventSource.WEBHOOK,
+        create_webhook_handler(pool=consumer_pool, bridge=bridge),
+    )
 
     import signal
 
