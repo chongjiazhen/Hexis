@@ -528,28 +528,23 @@ async def stream_chat_turn(
                 text = event.data.get("text", "")
                 if text:
                     collected.append(text)
-                    yield text
 
         full_text = "".join(collected)
-        # KNOWN GAP — Vera session-assessment capture on the streaming path.
-        # This path does NOT run _capture_session_assessment (chat_turn does).
-        # Because tokens are yielded live to the channel, a block emitted by
-        # Vera is already on-screen before it could be stripped. Deferred fix
-        # (parked 2026-05-22, see docs/superpowers/specs/
-        # 2026-05-22-comms-trainer-persona-design.md §9 "Option 1"):
-        #   - buffer the full reply here before yielding (cost: no live
-        #     token streaming — Telegram coalesces anyway, web-UI SSE loses it)
-        #   - run _capture_session_assessment on full_text
-        #   - make _extract_session_assessment tolerant of the local model
-        #     dropping brackets/underscores ("session-assessment",
-        #     "observationvsevaluation") — anchor on a looser pattern.
+        # Session-assessment capture needs the COMPLETE reply: a coach
+        # persona's <<SESSION-ASSESSMENT>> block can only be detected and
+        # stripped once the reply is fully buffered, so this path buffers
+        # rather than yielding deltas live. Telegram's StreamCoalescer
+        # batches anyway; web-UI SSE receives the reply as a single chunk.
         if full_text:
             async with CognitiveMemory.connect(dsn) as mem_client:
+                full_text = await _capture_session_assessment(mem_client, full_text)
                 await _remember_conversation(
                     mem_client,
                     user_message=user_message,
                     assistant_message=full_text,
                 )
+        if full_text:
+            yield full_text
     finally:
         if own_pool:
             await pool.close()
