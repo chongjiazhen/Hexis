@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator
 
@@ -193,6 +194,69 @@ def _extract_allowed_tools(raw_tools: Any) -> list[str] | None:
     return names
 
 
+_ASSESSMENT_RE = re.compile(
+    r"<<SESSION-ASSESSMENT>>(.*?)<</SESSION-ASSESSMENT>>",
+    re.DOTALL,
+)
+
+
+def _extract_session_assessment(text: str) -> tuple[str, str | None]:
+    """Pull a Vera ``[session-assessment]`` block out of a reply.
+
+    Vera (the comms-trainer persona) emits her rubric assessment wrapped in
+    ``<<SESSION-ASSESSMENT>>`` markers because the local model will not
+    reliably tool-call ``remember``. The block is captured here, stored as a
+    strategic memory by the caller, and stripped from the user-visible reply.
+
+    Returns ``(cleaned_text, assessment_or_None)``. Only a complete marker
+    pair is acted on; a malformed/partial block is left untouched.
+    """
+    if not text:
+        return text, None
+    match = _ASSESSMENT_RE.search(text)
+    if match is None:
+        return text, None
+    assessment = match.group(1).strip()
+    cleaned = (text[: match.start()] + text[match.end():]).strip()
+    return cleaned, (assessment or None)
+
+
+async def _capture_session_assessment(
+    mem_client: CognitiveMemory, assistant_text: str
+) -> str:
+    """Store any ``<<SESSION-ASSESSMENT>>`` block as a strategic memory.
+
+    Returns the reply with the block stripped. A no-op for replies without
+    the marker (i.e. every persona other than Vera). On a storage failure the
+    block is still stripped — leaking raw rubric markers to the user is worse
+    than a lost write.
+    """
+    cleaned, assessment = _extract_session_assessment(assistant_text)
+    if assessment is None:
+        return assistant_text
+    try:
+        await mem_client.remember(
+            assessment,
+            type=MemoryType.STRATEGIC,
+            importance=0.7,
+            emotional_valence=0.0,
+            context={"type": "session_assessment"},
+            source_attribution={
+                "kind": "session_assessment",
+                "ref": "vera_rubric",
+                "label": "communication-skills rubric assessment",
+                "observed_at": datetime.now(timezone.utc).isoformat(),
+                "trust": 0.9,
+            },
+            source_references=None,
+            trust_level=0.9,
+        )
+        logger.info("Captured session-assessment block -> strategic memory")
+    except Exception as exc:
+        logger.warning(f"Failed to store session-assessment: {exc}")
+    return cleaned
+
+
 async def _remember_conversation(
     mem_client: CognitiveMemory,
     *,
@@ -321,6 +385,7 @@ async def chat_turn(
         assistant_text = result["response"]
         if pool is not None:
             mem_client = CognitiveMemory(pool)
+            assistant_text = await _capture_session_assessment(mem_client, assistant_text)
             await _remember_conversation(
                 mem_client,
                 user_message=user_message,
@@ -328,6 +393,7 @@ async def chat_turn(
             )
         else:
             async with CognitiveMemory.connect(dsn) as mem_client:
+                assistant_text = await _capture_session_assessment(mem_client, assistant_text)
                 await _remember_conversation(
                     mem_client,
                     user_message=user_message,
@@ -365,6 +431,7 @@ async def chat_turn(
         assistant_text = loop_result.text
 
         async with CognitiveMemory.connect(dsn) as mem_client:
+            assistant_text = await _capture_session_assessment(mem_client, assistant_text)
             await _remember_conversation(mem_client, user_message=user_message, assistant_message=assistant_text)
 
         new_history = list(history)
