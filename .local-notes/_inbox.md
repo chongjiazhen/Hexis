@@ -72,6 +72,29 @@ Last updated: 2026-05-22
   conversation.py`), now config-overridable via `channel.history.max` /
   `channel.history.trim`. Fix the CLAUDE.md line when convenient.
 
+### 5. Per-user memory — one persona, many DM partners (DESIGN, undecided)
+- **Question:** can a single Vera DMing several people remember each one
+  individually?
+- **Today — half:** `channel_sessions` is keyed by `sender_id` → recent
+  conversation history IS per-partner. But the `memories` table has NO
+  sender/subject column — one shared pool per `hexis_vera` DB.
+  `_remember_conversation` writes untagged; `hydrate`/`fast_recall` query
+  DB-wide. So the persistent layer (episodic/semantic/strategic — Vera's
+  actual value) is NOT per-user: recalling for Alice can surface Bob's
+  memories. Hexis is architecturally single-self / single-relationship
+  (one `agent` row, one identity, one memory pool).
+- **Two paths to multi-client:**
+  - **A. DB per client** (`hexis_vera_alice`, …) — zero new code, but N DBs +
+    N channel workers, not "one Vera" (N clones, no shared Vera-growth),
+    doesn't scale.
+  - **B. Per-subject scoping in one DB** — tag each memory with `sender_id`
+    (column or `metadata`), scope `hydrate`/`fast_recall` to the current
+    sender. One Vera, one identity, per-client memory partition. Correct
+    model. Real work: schema + hot-path `fast_recall` (`db/*.sql`) + memory
+    API + thread `sender_id` through the chat path. Fleet-wide schema change.
+- **Next:** no code. Genuine architecture project, not a tweak. If pursued,
+  write a `.local-notes/` RFC (B is the right design; cost is the question).
+
 ---
 
 ## LOW PRIORITY / NOTES
