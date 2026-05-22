@@ -234,6 +234,48 @@ Standard newchars persona pipeline. **No `down -v`** (live SQL migrate).
   improvised by the LLM each time. Deferred until that mode is proven
   popular.
 
+## 9a. Assessment-capture — build log + parked decision (2026-05-22)
+
+The structured `[session-assessment]` capture fought us across ~8 gate runs.
+Build log, for whoever picks this up:
+
+1. **Tool-call (`remember`)** — the local model (gemma-4 abliterix) will not
+   reliably tool-call. Two scenario transitions, explicit instruction, zero
+   calls. Abandoned.
+2. **Emit-in-text + `<<SESSION-ASSESSMENT>>` markers** — model emits the
+   block but mistypes the markers (`<<SESSION-ASSESSMENT>` single `>`), drops
+   brackets (`session-assessment`) and underscores (`observationvsevaluation`).
+3. **Content-anchored regex** — `_extract_session_assessment` anchors on
+   `[session-assessment]` … `focus_next:`. Still too strict — the model drops
+   the brackets/underscores those literals require.
+4. **Streaming-path gap (the real blocker)** — `_capture_session_assessment`
+   was only wired into `chat_turn`; Telegram uses `stream_chat_turn`, which
+   never ran it. And streaming yields tokens live — a block cannot be
+   stripped after it is on-screen.
+
+**Parked 2026-05-22.** Decision: do NOT keep iterating the chat-reply path.
+Let Vera run live for a few days with heartbeat + maintenance enabled, and
+observe whether the existing maintenance worker (`run_subconscious_maintenance`
+— consolidation, clustering) naturally produces useful longitudinal tracking
+memories without a bespoke assessment feature. Re-decide after that window.
+
+**Option 1 (deferred, documented for pickup)** — *buffer `stream_chat_turn`
++ tolerant regex*:
+- In `services/chat.py` `stream_chat_turn`: collect the full reply, run
+  `_capture_session_assessment` on it, then yield the cleaned text. Cost:
+  replies arrive as one message, not token-streamed (Telegram's
+  `StreamCoalescer` already batches, so minor there; web-UI SSE loses smooth
+  streaming).
+- Make `_extract_session_assessment` tolerant: optional brackets
+  (`\[?session-assessment\]?`), optional underscores in field names.
+- A `KNOWN GAP` comment at the code site (`stream_chat_turn`) points here.
+
+**Option 3 (the alternative being observed)** — server-side assessment in
+the maintenance worker: periodically review recent episodic conversation
+memories and write the strategic `[session-assessment]`. No streaming
+conflict. Cleanest, but a new subsystem. The "watch it sit" period is to
+judge whether this is even needed.
+
 ## 10. Open Items for Implementation Plan
 
 - Author the actual NVC + conflict content prose for the system prompt
