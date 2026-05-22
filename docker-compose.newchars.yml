@@ -414,3 +414,103 @@ services:
     environment:
       <<: *common-env
       POSTGRES_DB: hexis_callisto
+
+  # ── Vera ── communication-skills trainer persona
+  vera_channel_worker:
+    <<: *channel-base
+    container_name: hexis_vera_channel_worker
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_vera
+      VERA_TELEGRAM_BOT_TOKEN: ${VERA_TELEGRAM_BOT_TOKEN:-}
+
+  vera_heartbeat_worker:
+    <<: *worker-base
+    container_name: hexis_vera_heartbeat_worker
+    command: ["hexis-worker", "--mode", "heartbeat"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_vera
+
+  vera_maintenance_worker:
+    <<: *worker-base
+    container_name: hexis_vera_maintenance_worker
+    command: ["hexis-worker", "--mode", "maintenance"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_vera
+
+  # ── Denali ─────────────────────────────────────────────────────────────────
+  denali_channel_worker:
+    <<: *channel-base
+    container_name: hexis_denali_channel_worker
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_denali
+      DENALI_TELEGRAM_BOT_TOKEN: ${DENALI_TELEGRAM_BOT_TOKEN:-}
+
+  denali_heartbeat_worker:
+    <<: *worker-base
+    container_name: hexis_denali_heartbeat_worker
+    command: ["hexis-worker", "--mode", "heartbeat"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_denali
+
+  denali_maintenance_worker:
+    <<: *worker-base
+    container_name: hexis_denali_maintenance_worker
+    command: ["hexis-worker", "--mode", "maintenance"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_denali
+
+  # ── Vesper ─────────────────────────────────────────────────────────────────
+  vesper_channel_worker:
+    <<: *channel-base
+    container_name: hexis_vesper_channel_worker
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_vesper
+      VESPER_TELEGRAM_BOT_TOKEN: ${VESPER_TELEGRAM_BOT_TOKEN:-}
+
+  vesper_heartbeat_worker:
+    <<: *worker-base
+    container_name: hexis_vesper_heartbeat_worker
+    command: ["hexis-worker", "--mode", "heartbeat"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_vesper
+
+  vesper_maintenance_worker:
+    <<: *worker-base
+    container_name: hexis_vesper_maintenance_worker
+    command: ["hexis-worker", "--mode", "maintenance"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_vesper
+
+  # ── Eudora ─────────────────────────────────────────────────────────────────
+  eudora_channel_worker:
+    <<: *channel-base
+    container_name: hexis_eudora_channel_worker
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_eudora
+      EUDORA_TELEGRAM_BOT_TOKEN: ${EUDORA_TELEGRAM_BOT_TOKEN:-}
+
+  eudora_heartbeat_worker:
+    <<: *worker-base
+    container_name: hexis_eudora_heartbeat_worker
+    command: ["hexis-worker", "--mode", "heartbeat"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_eudora
+
+  eudora_maintenance_worker:
+    <<: *worker-base
+    container_name: hexis_eudora_maintenance_worker
+    command: ["hexis-worker", "--mode", "maintenance"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_eudora
