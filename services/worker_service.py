@@ -23,6 +23,12 @@ from core.state import (
     run_scheduled_tasks,
     should_run_subconscious_decider,
 )
+from services.alert_reaction import (
+    build_alert_outbox_message,
+    generate_alert_reaction,
+    react_to_pending_alerts,
+    _get_alert_chat_id,
+)
 from services.external_calls import ExternalCallProcessor
 from services.heartbeat_agentic import finalize_heartbeat, run_agentic_heartbeat
 from services.heartbeat_runner import execute_heartbeat_decision
@@ -575,11 +581,116 @@ class MaintenanceWorker:
 # ---------------------------------------------------------------------------
 
 
-def create_webhook_handler(*, pool: asyncpg.Pool):
+async def _handle_alert_webhook(
+    pool: asyncpg.Pool,
+    bridge: RabbitMQBridge | None,
+    event: GatewayEvent,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Handle a source=alert webhook: raw delivery, memory, tiered reaction.
+
+    Raises ValueError (→ gateway marks the event failed) on a missing alert
+    body or an unconfigured alert chat — both are surfaced, not silent.
+    """
+    text = str(payload.get("text") or "").strip()
+    if not text:
+        raise ValueError("alert webhook payload missing 'text'")
+
+    priority = str(payload.get("priority") or "normal").lower()
+    if priority not in ("high", "normal"):
+        priority = "normal"
+    title = payload.get("title")
+    tags = payload.get("tags") if isinstance(payload.get("tags"), list) else []
+
+    alert_chat_id = await _get_alert_chat_id(pool)
+    if not alert_chat_id:
+        raise ValueError("channel.telegram.alert_chat_id is not configured")
+
+    # 1. Raw delivery — verbatim, no LLM. Runs first and unconditionally.
+    if bridge:
+        await bridge.publish_outbox_payloads(
+            [build_alert_outbox_message(text, alert_chat_id)]
+        )
+
+    # 2. Memory. Importance keyed to priority. reacted=false for the heartbeat
+    #    batch to find it (the high-priority branch flips it below).
+    context = {
+        "type": "alert",
+        "kind": "alert",
+        "source": "alert",
+        "priority": priority,
+        "title": title,
+        "tags": tags,
+        "alert_text": text,
+        "reacted": False,
+    }
+    importance = 0.7 if priority == "high" else 0.4
+    memory_id = None
+    try:
+        async with pool.acquire() as conn:
+            memory_id = await conn.fetchval(
+                """
+                SELECT create_episodic_memory(
+                    p_content := $1,
+                    p_importance := $2,
+                    p_emotional_valence := 0.0,
+                    p_context := $3::jsonb,
+                    p_source_attribution := $4::jsonb,
+                    p_trust_level := 0.8
+                )
+                """,
+                f"Alert ({priority}): {text}",
+                importance,
+                json.dumps(context),
+                json.dumps({
+                    "kind": "alert",
+                    "ref": str(event.correlation_id),
+                    "label": "webhook:alert",
+                    "trust": 0.8,
+                }),
+            )
+    except Exception as exc:
+        logger.warning("Failed to record alert memory: %s", exc)
+
+    # 3. Reaction routing.
+    #    high  -> immediate: react now (skipped in ECO), mark reacted either way
+    #             so the heartbeat never produces a stale late reaction.
+    #    normal -> leave reacted=false; the heartbeat batch picks it up.
+    reacted = False
+    if priority == "high":
+        reacted = True
+        async with pool.acquire() as conn:
+            eco = await _is_eco_mode(conn)
+        if not eco:
+            comment = await generate_alert_reaction(
+                pool, alert_text=text, title=title
+            )
+            if comment and bridge:
+                await bridge.publish_outbox_payloads(
+                    [build_alert_outbox_message(comment, alert_chat_id)]
+                )
+
+    if reacted and memory_id:
+        try:
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE memories SET metadata = "
+                    "jsonb_set(metadata, '{context,reacted}', 'true') WHERE id = $1",
+                    memory_id,
+                )
+        except Exception as exc:
+            logger.warning("Failed to mark alert memory reacted: %s", exc)
+
+    return {"source": "alert", "priority": priority,
+            "delivered": True, "reacted": reacted}
+
+
+def create_webhook_handler(*, pool: asyncpg.Pool, bridge: RabbitMQBridge | None = None):
     """Factory that returns a webhook event handler for the GatewayConsumer.
 
-    Webhook events are recorded as episodic memories so the agent
-    is aware that an external system sent a notification.
+    source=alert events go through the full alert pipeline (raw delivery +
+    memory + tiered reaction). Every other webhook source keeps the legacy
+    behavior: recorded as an episodic memory so the agent is aware of it.
     """
 
     async def handle_webhook(event: GatewayEvent) -> dict[str, Any] | None:
@@ -587,7 +698,10 @@ def create_webhook_handler(*, pool: asyncpg.Pool):
         source_name = event.session_key.removeprefix("webhook:")
         logger.info("Processing webhook event: %s (id=%d)", source_name, event.id)
 
-        # Record the webhook as an episodic memory
+        if source_name == "alert":
+            return await _handle_alert_webhook(pool, bridge, event, payload)
+
+        # Legacy path: record the webhook as an episodic memory.
         try:
             async with pool.acquire() as conn:
                 summary = json.dumps(payload)[:500] if payload else "{}"

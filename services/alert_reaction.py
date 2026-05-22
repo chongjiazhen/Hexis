@@ -104,7 +104,12 @@ async def _get_alert_chat_id(pool: asyncpg.Pool) -> str | None:
         val = await conn.fetchval(
             "SELECT get_config_text($1)", "channel.telegram.alert_chat_id"
         )
-    return str(val).strip() if val else None
+    chat_id = str(val).strip() if val else ""
+    # get_config_text() flattens a JSON null config value to the text "null";
+    # treat that (and an empty string) as unconfigured.
+    if not chat_id or chat_id.lower() == "null":
+        return None
+    return chat_id
 
 
 async def react_to_pending_alerts(
