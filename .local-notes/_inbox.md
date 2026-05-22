@@ -100,9 +100,10 @@ Last updated: 2026-05-22
 ## LOW PRIORITY / NOTES
 
 ### Vera bot identity
-- Vera runs as Telegram `@industrious_incisors_bot` (TARS's old bot — token
-  reuse, operator-confirmed intentional). Recommend renaming the bot's
-  display name/handle to "Vera" in BotFather. Cosmetic.
+- Vera runs as Telegram `@conflict_coach_bot` (own bot, ID 8920538668, set
+  2026-05-22). Handle is role-based (`<domain>_coach_bot` fleet convention,
+  cf. esme=`convo_coach_bot`, sable=`intimacy_coach_bot`) → survives a future
+  persona rename. Old `@industrious_incisors_bot` (TARS's) token now unused.
 
 ### Vera scenario recycling
 - Minor glitch: Vera reused an earlier scenario verbatim (Sam/spreadsheet)
@@ -130,3 +131,5 @@ Last updated: 2026-05-22
 - **Unified AI-type character** — to supersede Lovesick/Monika/Joje/Ichika.
   Not started; awaiting design.
 - **Unified android character** — to supersede Nines/Charlotte. Not started.
+
+text-to-speech, speech-to-text
