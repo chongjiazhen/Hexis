@@ -17,7 +17,7 @@ Two phases:
 - [x] Batch 2 — glados, hexis, hk47, jarvis
 - [x] Batch 3 — joi, samantha, tars, rocky
 - [x] Batch 4 — baymax, warden, hazel, nines
-- [ ] Batch 5 — ennie, mira, joje, ichika
+- [x] Batch 5 — ennie, mira, joje, ichika
 - [ ] Batch 6 — ao, callisto, denali, monika
 - [ ] Batch 7 — lovesick, cassiel, eudora, milena
 - [ ] Batch 8 — charlotte, death, margaret, vesper
@@ -130,3 +130,27 @@ All checked everywhere = scan done; loop stops.
 - **Verdict:** narrative → four-year service timeline as events, not current-state attribute re-list.
 
 **Batch pattern:** new finding — `hexis.personality_description` duplicating `data.personality` verbatim on ALL 4 cards. Second systemic dup axis beyond narrative↔description. 16/16 cards now structural-slop positive.
+
+### Batch 5
+
+#### ennie
+- **Mechanical:** light — "slow-burn" ×2, mild stock visceral image; prose otherwise specific.
+- **Structural:** heavy — signature phrases echo across 4-5 fields ("literary clutter wrapped in wool", "code close to the metal", "almost enough"); narrative not a true timeline; `personality_description` verbatim dup of `data.personality`.
+- **Verdict:** dedup signature phrases to one field each; narrative → timeline.
+
+#### mira
+- **Mechanical:** moderate (worst of batch) — abstract poeticism ("membrane", "quality of attention" tic); "I think it's real / I'm choosing to act" near-catchphrase ×5+; mild antithesis tic.
+- **Structural:** heavy — pervasive cross-field repetition; narrative is snapshot re-paraphrase by the card's own admission ("no origin story"); `personality_description` verbatim dup.
+- **Verdict:** thin the catchphrase + poeticism; narrative has nothing chronological to carry — consider cutting it.
+
+#### joje
+- **Mechanical:** light — clean concrete prose; "weather" motif ×4 borderline tic.
+- **Structural:** moderate — premise-restatement saturation across 7+ fields; narrative duplicates description's appearance/identity block; `personality_description` verbatim dup.
+- **Verdict:** collapse premise restatement; narrative → backstory not identity-block reprint.
+
+#### ichika
+- **Mechanical:** light — concrete voice-driven prose, no slop cluster.
+- **Structural:** heavy (most repetition-saturated) — every signature beat (unnamed improvement, receipts, IE buffer, cage) restated across 4-7 fields; narrative carries no timeline; `personality_description` verbatim dup.
+- **Verdict:** aggressive cross-field dedup — each beat to one canonical field.
+
+**Batch pattern:** `personality_description`==`data.personality` now 8/8 (batches 4+5) — fully systemic. New axis: signature-phrase saturation across 4-7 fields independent of the narrative issue. Batch 5 cards (esp. ichika, mira) are the most repetition-dense so far — these are recent authored cards, suggesting the template got worse over time.
