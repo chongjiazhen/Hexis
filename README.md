@@ -134,6 +134,41 @@ cp .env.local .env
 hexis up
 ```
 
+## Consolidated Alerts via the Persona's Telegram Bot
+
+A hexis persona can act as your consolidated Telegram alert bot. Point your
+alert scripts at the persona's webhook instead of the Telegram API directly:
+
+```bash
+curl -X POST http://localhost:43817/api/webhook/alert \
+  -H 'Content-Type: application/json' \
+  -d '{"text": "BTC crossed 70k", "priority": "high", "title": "price-alert"}'
+```
+
+Payload fields:
+
+- `text` (required) — the alert body. Delivered to your Telegram chat verbatim,
+  no LLM in the path: numbers, tickers, and links are untouched.
+- `priority` — `high` or `normal` (default `normal`). `high` → the persona
+  reacts immediately (one short in-character remark, or silence). `normal` →
+  the persona may comment on its next heartbeat, batched.
+- `title`, `tags` — optional metadata stored on the alert memory.
+
+Configure the destination chat once:
+
+```sql
+SELECT set_config('channel.telegram.alert_chat_id', '"<your-chat-id>"'::jsonb);
+```
+
+Every alert is also recorded as an episodic memory, so the persona can recall
+and discuss it in chat.
+
+**Scheduled rituals.** The persona already has the `manage_schedule` tool — ask
+it in chat (e.g. "send me a 7am overnight digest") and it creates a recurring
+scheduled task delivered to the alert chat. No extra setup.
+
+In ECO power mode, raw alerts are still delivered; persona reactions are skipped.
+
 ## Testing
 
 ```bash
