@@ -34,7 +34,39 @@ Last updated: 2026-05-22
 - **Heartbeat/maintenance images do NOT need rebuilding** — the fix is
   chat-mode only; heartbeat assembly was deliberately left unchanged.
 
-### 3. CLAUDE.md staleness
+### 3. Persona pipeline — `.sql` files vs native `data.*` consumption (DESIGN, undecided)
+- **Origin:** `characters/set_persona_prompt.<name>.sql` is fork-only. Upstream
+  (QuixiAI/Hexis) has no `agent.persona_system_prompt` key AT ALL — confirmed
+  `git grep` on `origin/main` finds it in zero `*.py`/`*.sql`. No GitHub issue
+  on persona collapse either; upstream genuinely doesn't hit it.
+- **Why we diverged:** upstream builds the system prompt per-turn from a
+  generic base + `agent_profile` JSON + hydrated identity/worldview memories
+  (`build_system_prompt`, `services/agent.py:234`). Adequate for a mild
+  assistant persona. Our ST RP/NSFW cards carry their character in
+  `data.system_prompt` / `data.post_history_instructions` — fields upstream's
+  pipeline NEVER reads (only `extensions.hexis` consumed at init). Flattened
+  to a JSON profile → generic-assistant collapse on cold turns.
+- **The `.sql` file does TWO jobs:** (1) translate card prose → the config
+  row; (2) live re-apply to a running DB without destructive `hexis init` /
+  `down -v` (idempotent `INSERT ON CONFLICT DO UPDATE`, effect next turn).
+- **Proposed alt:** patch `init_from_character_card()` to set
+  `persona_system_prompt` from `data.system_prompt`+`data.post_history_instructions`
+  natively + add `hexis persona apply <name>` CLI for job (2); delete the 16
+  `.sql` files + `gen_persona_sql.py`.
+- **Why NOT light:** this is a fork-vs-upstream architecture call, not a
+  refactor. (a) Deepens divergence from upstream's "persona emergent from
+  memory" invariant — every future rebase pays. (b) QuixiAI won't take the
+  patch → permanent maintenance tax, chosen on purpose. (c) Touches a DB
+  function + CLI + 16 live DBs → fleet migration, worst-first, signoff-gated.
+- **Real decision:** keep `.sql` (ugly, working, rebase-cheap) vs invest in
+  the fork (cleaner, single source of truth, permanently parted from upstream
+  on persona architecture). Picking the latter = admitting the fork has
+  already left upstream — which, given NSFW pipeline / power modes /
+  per-persona outbox / ECO gate, it arguably has.
+- **Next:** no code. When ready to decide, write a `.local-notes/` RFC
+  stating options + costs + the divergence question plainly.
+
+### 4. CLAUDE.md staleness
 - Debugging section says `channel_sessions.history` = "last 8 turns". Wrong:
   actual cap is `MAX_SESSION_HISTORY=40` → trim to `30` (`channels/
   conversation.py`), now config-overridable via `channel.history.max` /
