@@ -194,30 +194,42 @@ def _extract_allowed_tools(raw_tools: Any) -> list[str] | None:
     return names
 
 
-_ASSESSMENT_RE = re.compile(
-    r"<<SESSION-ASSESSMENT>>(.*?)<</SESSION-ASSESSMENT>>",
-    re.DOTALL,
+# The block body is anchored on content the local model reproduces reliably:
+# the "[session-assessment]" header through the end of the "focus_next:" line.
+# The <<SESSION-ASSESSMENT>> wrapper markers are stripped if present but are
+# NOT relied on for detection — the model mistypes them (e.g. a single ">").
+_ASSESSMENT_BODY_RE = re.compile(
+    r"\[session-assessment\].*?\bfocus_next:[^\n]*",
+    re.DOTALL | re.IGNORECASE,
+)
+_ASSESSMENT_MARKER_RE = re.compile(
+    r"<<+\s*/?\s*SESSION-ASSESSMENT\s*>+",
+    re.IGNORECASE,
 )
 
 
 def _extract_session_assessment(text: str) -> tuple[str, str | None]:
     """Pull a Vera ``[session-assessment]`` block out of a reply.
 
-    Vera (the comms-trainer persona) emits her rubric assessment wrapped in
-    ``<<SESSION-ASSESSMENT>>`` markers because the local model will not
-    reliably tool-call ``remember``. The block is captured here, stored as a
-    strategic memory by the caller, and stripped from the user-visible reply.
+    Vera (the comms-trainer persona) emits her rubric assessment as text
+    because the local model will not reliably tool-call ``remember``. The
+    block is captured here, stored as a strategic memory by the caller, and
+    stripped from the user-visible reply.
 
-    Returns ``(cleaned_text, assessment_or_None)``. Only a complete marker
-    pair is acted on; a malformed/partial block is left untouched.
+    Detection anchors on the block's content (``[session-assessment]`` header
+    through the ``focus_next:`` line), not on the ``<<SESSION-ASSESSMENT>>``
+    wrapper markers — the local model mistypes those. Wrapper markers, if
+    present, are stripped too. Returns ``(cleaned_text, assessment_or_None)``.
     """
     if not text:
         return text, None
-    match = _ASSESSMENT_RE.search(text)
+    match = _ASSESSMENT_BODY_RE.search(text)
     if match is None:
         return text, None
-    assessment = match.group(1).strip()
-    cleaned = (text[: match.start()] + text[match.end():]).strip()
+    assessment = match.group(0).strip()
+    cleaned = text[: match.start()] + text[match.end():]
+    cleaned = _ASSESSMENT_MARKER_RE.sub("", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
     return cleaned, (assessment or None)
 
 
