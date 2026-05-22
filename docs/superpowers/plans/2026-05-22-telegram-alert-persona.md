@@ -23,6 +23,7 @@ This is an existing codebase. Key facts:
 - **LLM call:** `core.llm.chat_completion(provider=, model=, endpoint=, api_key=, messages=, tools=None, temperature=, max_tokens=)` (async) returns `{"content": str, "tool_calls": [...], "raw": ...}`.
 - **ECO mode:** `_is_eco_mode(conn)` exists at `services/worker_service.py:273`. In ECO the heartbeat timer skips entirely, so batched reactions pause automatically; the only explicit ECO guard needed is in the immediate (high-priority) path.
 - **Config setter (tests):** `SELECT set_config('key', '<json>'::jsonb)`. Reader: `SELECT get_config_text('key')`.
+- **Memory `context` lives under `metadata`.** The `memories` table has no bare `context` column. `create_episodic_memory(p_context := ...)` nests the value at `metadata->'context'` (see `db/05_functions_provenance_trust.sql`). All queries against the alert context flag use `metadata->'context'->>'kind'` / `->>'reacted'`, and the reacted-flag update is `jsonb_set(metadata, '{context,reacted}', 'true')`.
 - **Test conventions:** async tests using the `db_pool` fixture (defined `tests/conftest.py:110`) must declare `pytestmark = [pytest.mark.asyncio(loop_scope="session")]`. Run pytest with Docker services up.
 
 **File structure after this plan:**
@@ -371,7 +372,7 @@ async def test_react_to_pending_alerts_marks_reacted(db_pool, monkeypatch):
 
     async with db_pool.acquire() as conn:
         ctx = await conn.fetchval(
-            "SELECT context FROM memories WHERE id = $1", memory_id
+            "SELECT metadata->'context' FROM memories WHERE id = $1", memory_id
         )
     ctx = json.loads(ctx) if isinstance(ctx, str) else ctx
     assert ctx["reacted"] is True
@@ -414,10 +415,10 @@ async def react_to_pending_alerts(
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT id, content, context
+            SELECT id, content, metadata->'context' AS context
             FROM memories
-            WHERE context->>'kind' = 'alert'
-              AND context->>'reacted' = 'false'
+            WHERE metadata->'context'->>'kind' = 'alert'
+              AND metadata->'context'->>'reacted' = 'false'
               AND created_at > CURRENT_TIMESTAMP - INTERVAL '24 hours'
             ORDER BY created_at
             LIMIT $1
@@ -452,7 +453,8 @@ async def react_to_pending_alerts(
 
     async with pool.acquire() as conn:
         await conn.execute(
-            "UPDATE memories SET context = jsonb_set(context, '{reacted}', 'true') "
+            "UPDATE memories SET metadata = "
+            "jsonb_set(metadata, '{context,reacted}', 'true') "
             "WHERE id = ANY($1::uuid[])",
             reacted_ids,
         )
@@ -548,8 +550,8 @@ async def test_alert_webhook_normal_delivers_and_records(db_pool):
 
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT importance, context FROM memories "
-            "WHERE context->>'kind' = 'alert' "
+            "SELECT importance, metadata->'context' AS context FROM memories "
+            "WHERE metadata->'context'->>'kind' = 'alert' "
             "ORDER BY created_at DESC LIMIT 1"
         )
     assert abs(row["importance"] - 0.4) < 0.001
@@ -559,7 +561,7 @@ async def test_alert_webhook_normal_delivers_and_records(db_pool):
 
     async with db_pool.acquire() as conn:
         await conn.execute(
-            "DELETE FROM memories WHERE context->>'kind' = 'alert'"
+            "DELETE FROM memories WHERE metadata->'context'->>'kind' = 'alert'"
         )
 
 
@@ -587,8 +589,8 @@ async def test_alert_webhook_high_priority_reacts(db_pool, monkeypatch):
 
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT importance, context FROM memories "
-            "WHERE context->>'kind' = 'alert' "
+            "SELECT importance, metadata->'context' AS context FROM memories "
+            "WHERE metadata->'context'->>'kind' = 'alert' "
             "ORDER BY created_at DESC LIMIT 1"
         )
     assert abs(row["importance"] - 0.7) < 0.001
@@ -597,7 +599,7 @@ async def test_alert_webhook_high_priority_reacts(db_pool, monkeypatch):
 
     async with db_pool.acquire() as conn:
         await conn.execute(
-            "DELETE FROM memories WHERE context->>'kind' = 'alert'"
+            "DELETE FROM memories WHERE metadata->'context'->>'kind' = 'alert'"
         )
 ```
 
@@ -715,8 +717,8 @@ async def _handle_alert_webhook(
         try:
             async with pool.acquire() as conn:
                 await conn.execute(
-                    "UPDATE memories SET context = "
-                    "jsonb_set(context, '{reacted}', 'true') WHERE id = $1",
+                    "UPDATE memories SET metadata = "
+                    "jsonb_set(metadata, '{context,reacted}', 'true') WHERE id = $1",
                     memory_id,
                 )
         except Exception as exc:
