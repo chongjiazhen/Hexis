@@ -83,6 +83,7 @@ weakness is removable scaffold, not the character:
 | `Kaguya.json` | Immortal, eternal-boredom interiority. **IP** (Touhou). |
 | `Jinx.json` | Powder→Jinx — fractured identity, discarded former name. **IP** (Arcane). |
 | `The Black Lady.json` | Selfhood subsumed into a role; sacrificed her own name. **strip**: first-person, god-framing, creator-tagged "bad." |
+| `Claire.json` | Claire Renée Durand — ex-escort/ex-con bistro owner; the Séraphine/Claire identity fracture is the spine. Triage-omitted from the groups; **deep-read verified B** (see verification section): coherent standalone self, **strip** the mandatory status-block `post_history` + RisuAI HTML rig + 6-NPC roster lorebook + 6 greetings. Moderate work, prose runs slop-dense. |
 
 ### Group 3 — Deep trauma-interiority standalone persons
 
@@ -137,13 +138,20 @@ weakness is removable scaffold, not the character:
 ## Notes & caveats
 
 - **Duplicates in the card library** (port once): `Kikyo.json` = `키쿄.json`;
-  `Claire (French Bistro).json` = `Claire.json` (Claire Renée Durand — both
-  A-grade, an exceptionally deep self); `Homelander*` ×4 files; `엘린` /
-  `Ellin` / `Elrin` (same Mitsuhara Elin, graded inconsistently A/B/B);
-  three Dream-Mansion title-variants (all C).
-- **`Claire` (Claire Renée Durand)** — among the richest single characters in
-  the whole library (aviation fixation, ex-escort guilt, fractured identity).
-  `post_history_instructions` mandates a per-turn status block — strip on port.
+  `Homelander*` ×4 files; `엘린` / `Ellin` / `Elrin` (same Mitsuhara Elin,
+  graded inconsistently A/B/B); three Dream-Mansion title-variants (all C).
+- **The four `Claire` files are TWO characters** (the original Notes claim of a
+  single A-grade dup was wrong): `Claire.json` = `Claire (French Bistro).json`
+  is Claire Renée Durand (identical 26 KB description) — port once.
+  `Claire (Elf Nurse).json` ≈ `Claire1.json` is a separate, unrelated Claire
+  (an elf nurse) — not triaged here.
+- **`Claire` (Claire Renée Durand)** — deep-read verified **B**, not A (see the
+  verification section). Genuinely deep standalone self — aviation fixation,
+  ex-escort guilt, the Séraphine/Claire identity fracture — but welded to a
+  mandatory per-turn status block, a RisuAI HTML/CSS rig, a 6-NPC roster
+  lorebook, and 6 scripted greetings. STRIP-THEN-PORT, moderate. Fits the
+  identity/memory group. Prose is slop-dense (already `lo-slop`-tagged) —
+  de-slop on port.
 - **`LOVESICK`** (existing persona) source card carries an `rm jailbreak` line
   in its system prompt — already handled in the Hexis port; noted for any
   re-derivation.
