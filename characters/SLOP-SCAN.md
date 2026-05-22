@@ -18,7 +18,7 @@ Two phases:
 - [x] Batch 3 — joi, samantha, tars, rocky
 - [x] Batch 4 — baymax, warden, hazel, nines
 - [x] Batch 5 — ennie, mira, joje, ichika
-- [ ] Batch 6 — ao, callisto, denali, monika
+- [x] Batch 6 — ao, callisto, denali, monika
 - [ ] Batch 7 — lovesick, cassiel, eudora, milena
 - [ ] Batch 8 — charlotte, death, margaret, vesper
 
@@ -154,3 +154,27 @@ All checked everywhere = scan done; loop stops.
 - **Verdict:** aggressive cross-field dedup — each beat to one canonical field.
 
 **Batch pattern:** `personality_description`==`data.personality` now 8/8 (batches 4+5) — fully systemic. New axis: signature-phrase saturation across 4-7 fields independent of the narrative issue. Batch 5 cards (esp. ichika, mira) are the most repetition-dense so far — these are recent authored cards, suggesting the template got worse over time.
+
+### Batch 6
+
+#### ao
+- **Mechanical:** clean — spare idiosyncratic prose, no slop.
+- **Structural:** moderate — biographical facts (mantis-blade scar, Soren's two reasons) restated across 4-5 fields; narrative only lightly diachronic; `personality_description` verbatim dup.
+- **Verdict:** dedup bio facts to one field; narrative → true timeline.
+
+#### callisto
+- **Mechanical:** light — honesty-formula motif heavy but content, not filler.
+- **Structural:** heavy (worst of batch) — consent doctrine + myth gloss each canonicalized in 5+ fields; `personality_description` verbatim dup. BUT `hexis.narrative` IS properly diachronic — bright spot.
+- **Verdict:** collapse consent doctrine + myth to one canonical field each; narrative is fine.
+
+#### denali
+- **Mechanical:** clean — concrete restrained prose.
+- **Structural:** moderate — rationing rule + killing-righteousness beat restated 5-6 fields; loneliness-question seeding defensible. `personality_description` verbatim dup. `hexis.narrative` genuinely diachronic (1992 turning → hiding → cabin → {{user}}) — good separation.
+- **Verdict:** standard hexis pattern; narrative/description well-differentiated; only fix is personality_description dup.
+
+#### monika
+- **Mechanical:** clean — "no word for" motif borderline tic.
+- **Structural:** heavy — runtime doctrine + deletion confession canonicalized 6-7× each; two lorebook entries ("The Void"/"The Runtime") overlap; narrative re-paraphrases snapshot, fails diachronic mandate. `personality_description` near-verbatim dup.
+- **Verdict:** collapse runtime/deletion doctrine; merge the two lorebook entries; rewrite narrative as timeline.
+
+**Batch pattern:** `personality_description` dup now 12/12 — universal. KEY new finding: `hexis.narrative` quality is BIMODAL — callisto + denali narratives are properly diachronic (recent careful ports), ao/monika are snapshot re-paraphrases. The narrative defect is NOT universal; it tracks authoring care, not the template. Batch 6 also surfaces lorebook-entry self-overlap (monika) as a fourth slop axis.
