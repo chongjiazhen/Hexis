@@ -124,6 +124,31 @@ def format_subconscious_signals(output: SubconsciousOutput) -> str:
     return "\n".join(parts)
 
 
+def attach_chat_context(
+    system_prompt: str,
+    subconscious_output: SubconsciousOutput,
+    memory_context: str | None,
+) -> str:
+    """Fold per-turn hydrated context into the SYSTEM prompt for chat mode.
+
+    Subconscious signals and recalled memory context (Relevant Memories,
+    Identity, Beliefs) are the agent's own private context, not user input.
+    Concatenating them into the user message made leak-prone local models
+    echo them back and misattribute them to the user ("you provided me with
+    my Subconscious Signals..."). Placing them in the system role keeps that
+    boundary clear. Returns the system prompt with the context appended.
+    """
+    context_parts: list[str] = []
+    sub_signals = format_subconscious_signals(subconscious_output)
+    if sub_signals:
+        context_parts.append(sub_signals)
+    if memory_context:
+        context_parts.append(memory_context)
+    if not context_parts:
+        return system_prompt
+    return system_prompt + "\n\n" + "\n\n".join(context_parts)
+
+
 # ---------------------------------------------------------------------------
 # Subconscious pre-phase
 # ---------------------------------------------------------------------------
@@ -435,25 +460,26 @@ async def run_agent(
         persona_system_prompt=persona_system_prompt,
     )
 
-    # 5. Build enriched user message
-    enriched_parts: list[str] = []
-
-    # Add subconscious signals
-    sub_signals = format_subconscious_signals(subconscious_output)
-    if sub_signals:
-        enriched_parts.append(sub_signals)
-
-    # Add memory context (chat mode)
-    if memory_context:
-        enriched_parts.append(memory_context)
-
-    # Add the actual user message
+    # 5. Build enriched user message.
+    #    Chat mode: hydrated context (subconscious signals + recalled memory)
+    #    folds into the SYSTEM prompt — see attach_chat_context. It must not
+    #    sit in the user turn, or leak-prone models echo it back as if the
+    #    user wrote it. Heartbeat keeps context in the turn message (no human
+    #    reads a heartbeat turn, and its assembly is left unchanged).
     if mode == "chat":
-        enriched_parts.append(f"[USER MESSAGE]\n{user_message}")
+        system_prompt = attach_chat_context(
+            system_prompt, subconscious_output, memory_context
+        )
+        enriched_user_message = user_message
     else:
+        enriched_parts: list[str] = []
+        sub_signals = format_subconscious_signals(subconscious_output)
+        if sub_signals:
+            enriched_parts.append(sub_signals)
+        if memory_context:
+            enriched_parts.append(memory_context)
         enriched_parts.append(user_message)
-
-    enriched_user_message = "\n\n".join(enriched_parts) if enriched_parts else user_message
+        enriched_user_message = "\n\n".join(enriched_parts) if enriched_parts else user_message
 
     # 6. Configure AgentLoop with mode-specific defaults
     if mode == "chat":
@@ -623,15 +649,12 @@ async def stream_agent(
         persona_system_prompt=persona_system_prompt,
     )
 
-    # Build enriched user message
-    enriched_parts: list[str] = []
-    sub_signals = format_subconscious_signals(subconscious_output)
-    if sub_signals:
-        enriched_parts.append(sub_signals)
-    if memory_context:
-        enriched_parts.append(memory_context)
-    enriched_parts.append(f"[USER MESSAGE]\n{user_message}")
-    enriched_user_message = "\n\n".join(enriched_parts)
+    # Build enriched user message — chat context folds into the system
+    # prompt (see attach_chat_context), keeping it out of the user turn.
+    system_prompt = attach_chat_context(
+        system_prompt, subconscious_output, memory_context
+    )
+    enriched_user_message = user_message
 
     # Configure loop
     effective_timeout = timeout_seconds or 120.0
