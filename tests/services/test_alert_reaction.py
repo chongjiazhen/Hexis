@@ -27,10 +27,6 @@ import services.alert_reaction as ar
 pytestmark_db = pytest.mark.asyncio(loop_scope="session")
 
 
-class _FakeResult(dict):
-    pass
-
-
 @pytest.mark.asyncio
 async def test_generate_alert_reaction_returns_comment(monkeypatch):
     async def fake_persona(pool, dsn):
@@ -121,6 +117,58 @@ async def test_react_to_pending_alerts_marks_reacted(db_pool, monkeypatch):
     assert ctx["reacted"] is True
 
     # Clean up so re-runs stay deterministic.
+    async with db_pool.acquire() as conn:
+        await conn.execute("DELETE FROM memories WHERE id = $1", memory_id)
+
+
+class _FailBridge:
+    """An outbox bridge whose publish always fails (routes nothing)."""
+
+    async def publish_outbox_payloads(self, messages):
+        return 0
+
+
+@pytestmark_db
+async def test_react_to_pending_alerts_keeps_unreacted_on_publish_failure(
+    db_pool, monkeypatch
+):
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            "SELECT set_config('channel.telegram.alert_chat_id', '\"-100777\"'::jsonb)"
+        )
+        memory_id = await conn.fetchval(
+            """
+            SELECT create_episodic_memory(
+                p_content := 'Alert (normal): publish-fail body',
+                p_importance := 0.4,
+                p_emotional_valence := 0.0,
+                p_context := $1::jsonb,
+                p_source_attribution := '{}'::jsonb,
+                p_trust_level := 0.8)
+            """,
+            json.dumps({
+                "kind": "alert", "priority": "normal",
+                "alert_text": "publish-fail body", "title": "t", "reacted": False,
+            }),
+        )
+
+    # Persona produces a comment, but the outbox publish fails. The reaction
+    # must NOT be lost: the memory stays unreacted for the next heartbeat.
+    async def fake_reaction(pool, *, alert_text, title=None):
+        return "a comment that will fail to send"
+
+    monkeypatch.setattr(ar, "generate_alert_reaction", fake_reaction)
+
+    count = await ar.react_to_pending_alerts(db_pool, _FailBridge())
+    assert count == 0
+
+    async with db_pool.acquire() as conn:
+        ctx = await conn.fetchval(
+            "SELECT metadata->'context' FROM memories WHERE id = $1", memory_id
+        )
+    ctx = json.loads(ctx) if isinstance(ctx, str) else ctx
+    assert ctx["reacted"] is False
+
     async with db_pool.acquire() as conn:
         await conn.execute("DELETE FROM memories WHERE id = $1", memory_id)
 

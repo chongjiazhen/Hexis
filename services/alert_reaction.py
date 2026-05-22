@@ -121,10 +121,13 @@ async def react_to_pending_alerts(
     """Heartbeat batch: react to unreacted alert memories from the last 24h.
 
     Called once per heartbeat. Picks up alert memories left unreacted by the
-    webhook handler (normal-priority alerts), runs one reaction turn each,
-    publishes any non-silent reaction, and marks every scanned memory reacted.
+    webhook handler (normal-priority alerts), runs one reaction turn each, and
+    publishes any non-silent reaction. A memory is marked reacted only when its
+    reaction was delivered (or the persona passed on it) — a reaction that
+    fails to publish is left unreacted so the next heartbeat retries it, rather
+    than silently dropping a cognitive act.
 
-    Returns the number of memories processed.
+    Returns the number of memories marked reacted.
     """
     alert_chat_id = await _get_alert_chat_id(pool)
     if not alert_chat_id:
@@ -160,15 +163,29 @@ async def react_to_pending_alerts(
         comment = await generate_alert_reaction(
             pool, alert_text=alert_text, title=title
         )
+        # Default True covers the silence case (no comment to publish — the
+        # alert was genuinely processed). A comment that fails to publish is
+        # NOT marked reacted, so the next heartbeat retries it.
+        published_ok = True
         if comment and bridge:
             try:
-                await bridge.publish_outbox_payloads(
+                sent = await bridge.publish_outbox_payloads(
                     [build_alert_outbox_message(comment, alert_chat_id)]
                 )
+                published_ok = bool(sent)
             except Exception as exc:
                 logger.warning("Failed to publish batched reaction: %s", exc)
-        reacted_ids.append(row["id"])
+                published_ok = False
+        if published_ok:
+            reacted_ids.append(row["id"])
+        else:
+            logger.warning(
+                "Alert memory %s reaction publish failed; leaving unreacted "
+                "for the next heartbeat to retry", row["id"],
+            )
 
+    if not reacted_ids:
+        return 0
     async with pool.acquire() as conn:
         await conn.execute(
             "UPDATE memories "

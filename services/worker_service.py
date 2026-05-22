@@ -615,10 +615,16 @@ async def _handle_alert_webhook(
         raise ValueError("channel.telegram.alert_chat_id is not configured")
 
     # 1. Raw delivery — verbatim, no LLM. Runs first and unconditionally.
+    #    A publish failure is raised so the gateway marks the event failed —
+    #    a lost alert must be visible, never silently dropped.
     if bridge:
-        await bridge.publish_outbox_payloads(
+        sent = await bridge.publish_outbox_payloads(
             [build_alert_outbox_message(text, alert_chat_id)]
         )
+        if not sent:
+            raise RuntimeError(
+                "alert raw delivery failed: outbox publish not routed"
+            )
 
     # 2. Memory. Importance keyed to priority. reacted=false for the heartbeat
     #    batch to find it (the high-priority branch flips it below).
@@ -661,8 +667,11 @@ async def _handle_alert_webhook(
         logger.warning("Failed to record alert memory: %s", exc)
 
     # 3. Reaction routing.
-    #    high  -> immediate: react now (skipped in ECO), mark reacted either way
-    #             so the heartbeat never produces a stale late reaction.
+    #    high  -> immediate: react now (skipped in ECO). reacted=True marks the
+    #             immediate tier handled — eco-skip and persona silence both
+    #             count. But a reaction that fails to publish leaves
+    #             reacted=false so the heartbeat batch retries it instead of
+    #             silently dropping the reaction.
     #    normal -> leave reacted=false; the heartbeat batch picks it up.
     reacted = False
     if priority == "high":
@@ -674,9 +683,15 @@ async def _handle_alert_webhook(
                 pool, alert_text=text, title=title
             )
             if comment and bridge:
-                await bridge.publish_outbox_payloads(
+                sent = await bridge.publish_outbox_payloads(
                     [build_alert_outbox_message(comment, alert_chat_id)]
                 )
+                if not sent:
+                    logger.warning(
+                        "High-priority alert reaction publish failed; leaving "
+                        "unreacted for the heartbeat batch to retry"
+                    )
+                    reacted = False
 
     if reacted and memory_id:
         try:
