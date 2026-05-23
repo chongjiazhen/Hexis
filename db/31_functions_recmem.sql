@@ -922,12 +922,17 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Adding p_current_sender + source_identity/confidentiality columns is a signature
+-- change; DROP first so the CREATE doesn't fail with "cannot change return type".
+DROP FUNCTION IF EXISTS recmem_recall_context(TEXT, INT, INT, INT, UUID);
+
 CREATE OR REPLACE FUNCTION recmem_recall_context(
     p_query TEXT,
     p_k_sub INT DEFAULT 10,
     p_k_epi INT DEFAULT 5,
     p_k_sem INT DEFAULT 10,
-    p_session_id UUID DEFAULT NULL
+    p_session_id UUID DEFAULT NULL,
+    p_current_sender TEXT DEFAULT NULL
 ) RETURNS TABLE (
     tier TEXT,
     item_id UUID,
@@ -937,7 +942,9 @@ CREATE OR REPLACE FUNCTION recmem_recall_context(
     source_unit_ids UUID[],
     source_attribution JSONB,
     created_at TIMESTAMPTZ,
-    trust_level FLOAT
+    trust_level FLOAT,
+    source_identity TEXT,
+    confidentiality TEXT
 ) AS $$
 DECLARE
     query_embedding vector;
@@ -951,11 +958,15 @@ BEGIN
             s.id AS item_id,
             s.content,
             NULL::text AS memory_type,
-            (1 - (s.embedding <=> query_embedding))::float AS score,
+            ((1 - (s.embedding <=> query_embedding))
+              + CASE WHEN p_current_sender IS NOT NULL
+                          AND s.source_identity = p_current_sender
+                     THEN 0.1 ELSE 0 END)::float AS score,
             ARRAY[s.id]::uuid[] AS source_unit_ids,
             s.source_attribution,
             s.created_at,
-            s.trust_level
+            s.trust_level,
+            s.source_identity AS source_identity
         FROM subconscious_units s
         WHERE s.status = 'active'
           AND s.embedding_status = 'embedded'
@@ -969,11 +980,15 @@ BEGIN
             s.id AS item_id,
             s.content,
             NULL::text AS memory_type,
-            0.2::float AS score,
+            (0.2
+              + CASE WHEN p_current_sender IS NOT NULL
+                          AND s.source_identity = p_current_sender
+                     THEN 0.1 ELSE 0 END)::float AS score,
             ARRAY[s.id]::uuid[] AS source_unit_ids,
             s.source_attribution,
             s.created_at,
-            s.trust_level
+            s.trust_level,
+            s.source_identity AS source_identity
         FROM subconscious_units s
         WHERE p_session_id IS NOT NULL
           AND s.session_id = p_session_id
@@ -988,13 +1003,26 @@ BEGIN
             m.id AS item_id,
             m.content,
             m.type::text AS memory_type,
-            (1 - (m.embedding <=> query_embedding))::float AS score,
+            ((1 - (m.embedding <=> query_embedding))
+              + CASE WHEN p_current_sender IS NOT NULL
+                          AND COALESCE(m.sender_id,
+                                       mode() WITHIN GROUP (ORDER BY su.source_identity))
+                              = p_current_sender
+                     THEN 0.1 ELSE 0 END)::float AS score,
             COALESCE(array_agg(msu.subconscious_unit_id) FILTER (WHERE msu.subconscious_unit_id IS NOT NULL), '{}'::uuid[]) AS source_unit_ids,
             m.source_attribution,
             m.created_at,
-            m.trust_level
+            m.trust_level,
+            -- Prefer the derived memory's own sender_id (set by PR-B at apply time);
+            -- fall back to most common source_identity across linked raw units for
+            -- memories created before PR-B started propagating.
+            COALESCE(m.sender_id,
+                     mode() WITHIN GROUP (ORDER BY su.source_identity)) AS source_identity
         FROM memories m
         LEFT JOIN memory_source_units msu ON msu.memory_id = m.id
+        LEFT JOIN subconscious_units su
+               ON su.id = msu.subconscious_unit_id
+              AND su.source_identity IS NOT NULL
         WHERE m.status = 'active'
           AND (m.valid_until IS NULL OR m.valid_until > CURRENT_TIMESTAMP)
           AND m.type = 'episodic'
@@ -1008,28 +1036,58 @@ BEGIN
             m.id AS item_id,
             m.content,
             m.type::text AS memory_type,
-            (1 - (m.embedding <=> query_embedding))::float AS score,
+            ((1 - (m.embedding <=> query_embedding))
+              + CASE WHEN p_current_sender IS NOT NULL
+                          AND COALESCE(m.sender_id,
+                                       mode() WITHIN GROUP (ORDER BY su.source_identity))
+                              = p_current_sender
+                     THEN 0.1 ELSE 0 END)::float AS score,
             COALESCE(array_agg(msu.subconscious_unit_id) FILTER (WHERE msu.subconscious_unit_id IS NOT NULL), '{}'::uuid[]) AS source_unit_ids,
             m.source_attribution,
             m.created_at,
-            m.trust_level
+            m.trust_level,
+            COALESCE(m.sender_id,
+                     mode() WITHIN GROUP (ORDER BY su.source_identity)) AS source_identity
         FROM memories m
         LEFT JOIN memory_source_units msu ON msu.memory_id = m.id
+        LEFT JOIN subconscious_units su
+               ON su.id = msu.subconscious_unit_id
+              AND su.source_identity IS NOT NULL
         WHERE m.status = 'active'
           AND (m.valid_until IS NULL OR m.valid_until > CURRENT_TIMESTAMP)
           AND m.type = 'semantic'
         GROUP BY m.id
         ORDER BY m.embedding <=> query_embedding
         LIMIT GREATEST(COALESCE(p_k_sem, 10), 0)
+    ),
+    all_hits AS (
+        SELECT * FROM raw_hits
+        UNION ALL
+        SELECT * FROM recent_unembedded
+        UNION ALL
+        SELECT * FROM epi_hits
+        UNION ALL
+        SELECT * FROM sem_hits
     )
-    SELECT * FROM raw_hits
-    UNION ALL
-    SELECT * FROM recent_unembedded
-    UNION ALL
-    SELECT * FROM epi_hits
-    UNION ALL
-    SELECT * FROM sem_hits
-    ORDER BY tier, score DESC, created_at DESC;
+    SELECT
+        h.tier,
+        h.item_id,
+        h.content,
+        h.memory_type,
+        h.score,
+        h.source_unit_ids,
+        h.source_attribution,
+        h.created_at,
+        h.trust_level,
+        h.source_identity,
+        CASE
+            WHEN p_current_sender IS NULL THEN NULL
+            WHEN h.source_identity IS NULL THEN NULL
+            WHEN h.source_identity = p_current_sender THEN 'own'
+            ELSE 'cross_partner'
+        END::text AS confidentiality
+    FROM all_hits h
+    ORDER BY h.tier, h.score DESC, h.created_at DESC;
 END;
 $$ LANGUAGE plpgsql;
 
