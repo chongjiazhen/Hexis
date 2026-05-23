@@ -27,13 +27,219 @@ def _resolve_token(config: dict[str, Any]) -> str | None:
 
 _FENCE_LANG_RE = re.compile(r"^```[A-Za-z0-9_+\-]+\s*$", re.MULTILINE)
 
+# MarkdownV2 specials per Telegram Bot API docs:
+# https://core.telegram.org/bots/api#markdownv2-style
+# In normal text context, all of these must be backslash-escaped unless they
+# form a recognized formatting construct (bold *...*, italic _..._, inline
+# code `...`, fenced code ```...```, link [text](url)).
+_MDV2_SPECIALS = r"_*[]()~`>#+-=|{}.!\\"
+# Pre-built translation table for fast text-context escaping.
+_MDV2_TEXT_ESCAPE = str.maketrans({c: "\\" + c for c in _MDV2_SPECIALS})
+
+# Inside inline code and fenced code, only ` and \ need escaping.
+_MDV2_CODE_ESCAPE = str.maketrans({"`": "\\`", "\\": "\\\\"})
+
+# Inside the URL portion of a link, only ) and \ need escaping per the
+# MarkdownV2 spec (other specials within the URL are interpreted literally
+# by Telegram once the link form is recognized).
+_MDV2_URL_ESCAPE = str.maketrans({")": "\\)", "\\": "\\\\"})
+
+
+def _escape_text(text: str) -> str:
+    """Escape every MarkdownV2 special in a plain-text run."""
+    return text.translate(_MDV2_TEXT_ESCAPE)
+
+
+def _escape_code(text: str) -> str:
+    """Escape only ` and \\ inside code spans / fenced blocks."""
+    return text.translate(_MDV2_CODE_ESCAPE)
+
+
+def _escape_url(url: str) -> str:
+    """Escape only ) and \\ inside a MarkdownV2 link URL."""
+    return url.translate(_MDV2_URL_ESCAPE)
+
+
+# Tokenizer: walk the input and recognize a small set of intentional Markdown
+# constructs. Anything we cannot match cleanly becomes a literal text token so
+# the escape step makes it safe — guaranteeing no MarkdownV2 parse error from
+# malformed model output (lone *, lone `, unbalanced markers, etc.).
+#
+# Token kinds:
+#   ("text", content)         — escape-all-specials
+#   ("inline_code", content)  — wrap in `...`, escape ` and \ inside
+#   ("fenced_code", content)  — wrap in ```...```, escape ` and \ inside,
+#                               language hint already stripped at parse time
+#   ("bold", content)         — wrap in *...*, content re-tokenized as text-only
+#   ("italic", content)       — wrap in _..._, content re-tokenized as text-only
+#   ("link", (label, url))    — wrap as [label](url); label escaped as text,
+#                               url escaped per URL rules
+_FENCED_OPEN_RE = re.compile(r"```([A-Za-z0-9_+\-]*)\n?")
+_LINK_RE = re.compile(r"\[([^\[\]\n]*)\]\(([^()\s]+)\)")
+
+
+def _tokenize_for_mdv2(text: str) -> list[tuple]:
+    """Tokenize text into a flat list of MarkdownV2 tokens.
+
+    Tokenization is intentionally simple and forgiving: anything that doesn't
+    cleanly match a recognized construct (fenced code, inline code, bold,
+    italic, link) is emitted as a literal text token.
+    """
+    tokens: list[tuple] = []
+    i = 0
+    n = len(text)
+    buf: list[str] = []
+
+    def flush_text() -> None:
+        if buf:
+            tokens.append(("text", "".join(buf)))
+            buf.clear()
+
+    while i < n:
+        ch = text[i]
+
+        # Fenced code block: ```[lang]\n...\n```
+        if text.startswith("```", i):
+            open_match = _FENCED_OPEN_RE.match(text, i)
+            if open_match:
+                close_idx = text.find("```", open_match.end())
+                if close_idx != -1:
+                    inner = text[open_match.end():close_idx]
+                    # Trim a single trailing newline so the closing fence
+                    # renders cleanly. Language hint already discarded by
+                    # the regex capture group (we never re-emit it).
+                    if inner.endswith("\n"):
+                        inner = inner[:-1]
+                    flush_text()
+                    tokens.append(("fenced_code", inner))
+                    i = close_idx + 3
+                    continue
+            # Unterminated fence: treat the ``` as literal text.
+            buf.append(ch)
+            i += 1
+            continue
+
+        # Inline code: `...` (single backtick, no newline inside)
+        if ch == "`":
+            close_idx = text.find("`", i + 1)
+            if close_idx != -1 and "\n" not in text[i + 1:close_idx]:
+                inner = text[i + 1:close_idx]
+                flush_text()
+                tokens.append(("inline_code", inner))
+                i = close_idx + 1
+                continue
+            # Lone backtick: literal.
+            buf.append(ch)
+            i += 1
+            continue
+
+        # Link: [label](url)
+        if ch == "[":
+            link_match = _LINK_RE.match(text, i)
+            if link_match:
+                label = link_match.group(1)
+                url = link_match.group(2)
+                flush_text()
+                tokens.append(("link", (label, url)))
+                i = link_match.end()
+                continue
+            buf.append(ch)
+            i += 1
+            continue
+
+        # Bold: *...* — paired single asterisks, no newline inside, non-empty
+        # content. We require the closing * to NOT be immediately followed by
+        # another * (so we don't eat ** runs as malformed bold).
+        if ch == "*":
+            close_idx = text.find("*", i + 1)
+            if (
+                close_idx != -1
+                and close_idx > i + 1
+                and "\n" not in text[i + 1:close_idx]
+            ):
+                inner = text[i + 1:close_idx]
+                flush_text()
+                tokens.append(("bold", inner))
+                i = close_idx + 1
+                continue
+            buf.append(ch)
+            i += 1
+            continue
+
+        # Italic: _..._ — paired single underscores, no newline, non-empty.
+        if ch == "_":
+            close_idx = text.find("_", i + 1)
+            if (
+                close_idx != -1
+                and close_idx > i + 1
+                and "\n" not in text[i + 1:close_idx]
+            ):
+                inner = text[i + 1:close_idx]
+                flush_text()
+                tokens.append(("italic", inner))
+                i = close_idx + 1
+                continue
+            buf.append(ch)
+            i += 1
+            continue
+
+        buf.append(ch)
+        i += 1
+
+    flush_text()
+    return tokens
+
+
+def _render_tokens_mdv2(tokens: list[tuple]) -> str:
+    """Render a token list to MarkdownV2-safe text."""
+    out: list[str] = []
+    for tok in tokens:
+        kind = tok[0]
+        if kind == "text":
+            out.append(_escape_text(tok[1]))
+        elif kind == "inline_code":
+            out.append("`" + _escape_code(tok[1]) + "`")
+        elif kind == "fenced_code":
+            # Always emit bare fences (no language hint) — matches the prior
+            # legacy-Markdown sanitizer behavior and keeps Telegram happy.
+            out.append("```\n" + _escape_code(tok[1]) + "\n```")
+        elif kind == "bold":
+            inner_tokens = _tokenize_for_mdv2(tok[1])
+            out.append("*" + _render_tokens_mdv2(inner_tokens) + "*")
+        elif kind == "italic":
+            inner_tokens = _tokenize_for_mdv2(tok[1])
+            out.append("_" + _render_tokens_mdv2(inner_tokens) + "_")
+        elif kind == "link":
+            label, url = tok[1]
+            label_tokens = _tokenize_for_mdv2(label)
+            out.append(
+                "[" + _render_tokens_mdv2(label_tokens) + "](" + _escape_url(url) + ")"
+            )
+        else:  # pragma: no cover — defensive
+            out.append(_escape_text(str(tok[1])))
+    return "".join(out)
+
+
+def _escape_for_markdown_v2(text: str) -> str:
+    """Convert arbitrary model output into MarkdownV2-safe text.
+
+    Preserves intentional formatting (bold, italic, inline code, fenced code,
+    links). Escapes every other MarkdownV2 special so malformed model output
+    (lone `*`, stray `_`, unbalanced backticks, etc.) cannot cause a parse
+    error on Telegram's side.
+    """
+    if not text:
+        return text
+    return _render_tokens_mdv2(_tokenize_for_mdv2(text))
+
 
 def _sanitize_for_telegram_markdown(text: str) -> str:
-    # Legacy Telegram `Markdown` parse_mode rejects language hints on fenced
-    # code blocks (```bash, ```markdown, ...) and aborts the whole message
-    # with a parse error, which the fallback then sends as plain text. Strip
-    # the language token; the fence still renders as a code block.
-    return _FENCE_LANG_RE.sub("```", text)
+    """Backwards-compat shim — delegates to MarkdownV2 escaper.
+
+    Kept so any external caller (or future re-introduction of the legacy
+    `Markdown` parse_mode for fallback) sees the same name.
+    """
+    return _escape_for_markdown_v2(text)
 
 
 class TelegramAdapter(ChannelAdapter):
@@ -296,8 +502,8 @@ class TelegramAdapter(ChannelAdapter):
         try:
             kwargs: dict[str, Any] = {
                 "chat_id": int(channel_id),
-                "text": _sanitize_for_telegram_markdown(text),
-                "parse_mode": "Markdown",
+                "text": _escape_for_markdown_v2(text),
+                "parse_mode": "MarkdownV2",
             }
             if reply_to:
                 kwargs["reply_to_message_id"] = int(reply_to)
@@ -309,11 +515,11 @@ class TelegramAdapter(ChannelAdapter):
             return str(sent.message_id)
 
         except Exception:
-            # Retry without Markdown in case of parse errors. Log the original
+            # Retry without parse_mode in case of parse errors. Log the original
             # parse error so the regression class (which char, which fence, etc.)
             # is diagnosable instead of silently degrading to plain text.
             logger.warning(
-                "Telegram Markdown parse failed for %s, retrying plain-text",
+                "Telegram MarkdownV2 parse failed for %s, retrying plain-text",
                 channel_id,
                 exc_info=True,
             )
@@ -346,12 +552,18 @@ class TelegramAdapter(ChannelAdapter):
             await self._application.bot.edit_message_text(
                 chat_id=int(channel_id),
                 message_id=int(message_id),
-                text=text,
-                parse_mode="Markdown",
+                text=_escape_for_markdown_v2(text),
+                parse_mode="MarkdownV2",
             )
             return True
         except Exception:
-            # Retry without Markdown
+            # Retry without parse_mode. Log so MarkdownV2-escape regressions
+            # are diagnosable instead of silently degrading to plain text.
+            logger.warning(
+                "Telegram MarkdownV2 edit_message parse failed for %s, retrying plain-text",
+                channel_id,
+                exc_info=True,
+            )
             try:
                 await self._application.bot.edit_message_text(
                     chat_id=int(channel_id),
