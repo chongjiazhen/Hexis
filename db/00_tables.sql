@@ -187,7 +187,11 @@ CREATE TABLE memories (
     access_count INTEGER DEFAULT 0,
     last_accessed TIMESTAMPTZ,
     decay_rate FLOAT DEFAULT 0.01,
-    metadata JSONB NOT NULL DEFAULT '{}'::jsonb
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    -- Multi-client scoping: which DM partner this memory came from.
+    -- NULL = global (identity/worldview/goal, coaching knowledge) — always recallable.
+    -- Non-NULL = a specific sender's conversation-derived episodic/semantic memory.
+    sender_id TEXT
 );
 CREATE UNLOGGED TABLE working_memory (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -466,7 +470,7 @@ INSERT INTO config (key, value, description) VALUES
     ('heartbeat.cost_hybrid_ingest', '3'::jsonb, 'Hybrid ingestion - fast pass then slow on high-signal chunks')
 ON CONFLICT (key) DO NOTHING;
 INSERT INTO config (key, value, description) VALUES
-    ('agent.tools', '["recall","sense_memory_availability","request_background_search","recall_recent","recall_episode","explore_concept","explore_cluster","get_procedures","get_strategies","list_recent_episodes","create_goal","schedule_task","list_scheduled_tasks","update_scheduled_task","delete_scheduled_task","queue_user_message"]'::jsonb, 'Allowed tool names for agent tool use'),
+    ('agent.tools', '["recall","sense_memory_availability","explore_concept","get_procedures","get_strategies","remember","manage_goals","manage_schedule","manage_backlog","aggregate_signals"]'::jsonb, 'Allowed tool names for chat-context tool use. Names MUST match the ToolHandlers registered in core/tools/ — services.agent applies this list as the chat allowlist via _allowed_tools_for_mode. Heartbeat keeps the full registry. Update this seed when registry names change; otherwise the chat path silently drops missing names.'),
     ('agent.power_mode', '"prime"'::jsonb, 'Power mode: prime (full LLM behavior) or eco (canned chat reply, heartbeat skipped, no memory writes). Flipped by set-power-mode.ps1.')
 ON CONFLICT (key) DO NOTHING;
 INSERT INTO config (key, value, description) VALUES
