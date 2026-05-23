@@ -3,11 +3,62 @@
 Centralized "what's on our plate" so nothing gets dropped. Newest context at
 top of each item. Untracked scratch (lives in `.local-notes/`).
 
-Last updated: 2026-05-22
+Last updated: 2026-05-23
 
 ---
 
 ## ACTIVE — needs a decision or action
+
+### 0. Vera — beta-tester approval gate (NOT BUILT)
+
+- **State 2026-05-23:** per-user memory + confidentiality privilege shipped.
+  Schema migrated on `hexis_vera`, workers recreated, persona prompt
+  re-applied. `channel.telegram.allowed_users` flipped to `"*"` — Vera now
+  accepts inbound from any Telegram user. **No second-layer gate yet.**
+- **Exposure:** every inbound DM (incl. randos) currently hits `chat_turn`
+  → GPU + memory write. Fine short-term; risky if bot @handle leaks.
+- **Idea — two-layer gate:**
+  - `channel.telegram.allowed_users = "*"` — accept inbound (already set).
+  - NEW `channel.telegram.approved_users` (JSON list) — gates `chat_turn`.
+  - Approved sender → full Vera. Unapproved → canned reply with their
+    `sender_id`: *"Send this ID to <@owner> to request access."* No LLM
+    call, no memory write, log to `channel_messages` with
+    `metadata.pending=true`.
+- **Verification flow:** capture `from_user.username` (the `@handle`) into
+  `msg.metadata` — currently `sender_name = full_name or username or id`
+  so the `@handle` is lost when display name is set. With it, owner can
+  cross-check against own Telegram contacts and decide to approve.
+- **Approve query (once gate exists):**
+  ```sql
+  UPDATE config
+  SET value = (
+    SELECT jsonb_agg(DISTINCT v)
+    FROM jsonb_array_elements_text(value || '["NEW_ID"]'::jsonb) v
+  )
+  WHERE key='channel.telegram.approved_users';
+  ```
+- **Implementation footprint (~1h):**
+  - `channels/telegram_adapter.py` — stash `from_user.username` in
+    `msg.metadata['username']` (separate from `sender_name`).
+  - `channels/conversation.py` — add `_check_user_approved()` between
+    `_check_user_allowed` and `chat_turn`; canned-reply branch with
+    per-sender rate limit (1 canned reply / hour / sender to dodge spam
+    floods).
+  - Seed default `set_config('channel.telegram.approved_users','[]'::jsonb)`.
+- **Pre-existing `hexis_vera` memories** still have `sender_id = NULL` →
+  treated as global → surface untagged for every friend. If you want them
+  scoped to your own ID:
+  ```sql
+  UPDATE memories SET sender_id = '593307304'
+  WHERE sender_id IS NULL AND type IN ('episodic','semantic')
+    AND source_attribution->>'kind' IN ('conversation','compaction_flush');
+  ```
+  Decide at gate-build time; not required for correctness.
+- **Until gate ships:** if randos start DMing, flip back to A:
+  ```bash
+  docker exec hexis_brain psql -U hexis_user -d hexis_vera -c \
+    "SELECT set_config('channel.telegram.allowed_users', '[\"593307304\"]'::jsonb)"
+  ```
 
 ### 1. Vera — assessment capture (PARKED, watching)
 - **State:** parked 2026-05-22 after ~8 gate runs. Vera (comms-trainer
