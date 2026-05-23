@@ -165,14 +165,27 @@ class ToolRegistry:
         self,
         context: ToolContext,
         config: ToolsConfig | None = None,
+        *,
+        allowed_names: list[str] | None = None,
     ) -> list[ToolHandler]:
-        """Get tools enabled for a specific context."""
+        """Get tools enabled for a specific context.
+
+        If ``allowed_names`` is provided, the returned handlers are further
+        filtered to only those whose name appears in the list. Used to apply
+        per-persona tool allowlists (e.g. ``agent.tools`` config key) to cut
+        tool-schema context cost on the chat path. ``None`` = no filtering,
+        ``[]`` = no tools.
+        """
         if config is None:
             config = await self.get_config()
+
+        allowed: set[str] | None = set(allowed_names) if allowed_names is not None else None
 
         enabled = []
         for handler in self.list_all():
             spec = handler.spec
+            if allowed is not None and spec.name not in allowed:
+                continue
             # Skip optional tools unless explicitly allowlisted
             if spec.optional and not config.is_optional_allowed(spec.name, spec.category):
                 continue
@@ -186,18 +199,22 @@ class ToolRegistry:
         self,
         context: ToolContext,
         config: ToolsConfig | None = None,
+        *,
+        allowed_names: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Get OpenAI function specs for enabled tools."""
-        handlers = await self.get_enabled_tools(context, config)
+        handlers = await self.get_enabled_tools(context, config, allowed_names=allowed_names)
         return [h.spec.to_openai_function() for h in handlers]
 
     async def get_mcp_tools(
         self,
         context: ToolContext,
         config: ToolsConfig | None = None,
+        *,
+        allowed_names: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Get MCP tool specs for enabled tools."""
-        handlers = await self.get_enabled_tools(context, config)
+        handlers = await self.get_enabled_tools(context, config, allowed_names=allowed_names)
         return [h.spec.to_mcp_tool() for h in handlers]
 
     # =========================================================================

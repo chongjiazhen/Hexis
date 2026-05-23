@@ -256,6 +256,29 @@ async def run_subconscious_appraisal(
 # ---------------------------------------------------------------------------
 
 
+def _allowed_tools_for_mode(
+    agent_profile: dict[str, Any] | None,
+    mode: Literal["chat", "heartbeat"],
+) -> list[str] | None:
+    """Per-persona chat tool allowlist from ``agent_profile['tools']``.
+
+    Chat mode: returns the curated tool-name list from the persona's
+    ``agent.tools`` config (read via ``get_agent_profile_context()``).
+    Filtering the 42-tool registry down to the persona's ~16-tool set cuts
+    roughly 5K tokens of tool schema from every chat turn. Heartbeat mode:
+    returns ``None`` (full registry preserved — the autonomous loop needs
+    the broader toolset including planning / scheduling).
+
+    Returns ``None`` when there is no profile, no ``tools`` field, or the
+    list is empty (safe default — no filtering, current behavior preserved).
+    """
+    if mode != "chat" or not agent_profile:
+        return None
+    from services.chat import _extract_allowed_tools  # lazy to avoid cycle
+    names = _extract_allowed_tools(agent_profile.get("tools"))
+    return names or None
+
+
 async def build_system_prompt(
     mode: Literal["chat", "heartbeat"],
     registry: "ToolRegistry | None",
@@ -265,8 +288,16 @@ async def build_system_prompt(
     has_backlog_tasks: bool = False,
     is_group: bool = False,
     persona_system_prompt: str = "",
+    allowed_tool_names: list[str] | None = None,
 ) -> str:
-    """Build the system prompt for either chat or heartbeat mode."""
+    """Build the system prompt for either chat or heartbeat mode.
+
+    ``allowed_tool_names``, when provided, filters the tool descriptions
+    embedded in the prompt to match the per-persona allowlist applied
+    elsewhere (``AgentLoopConfig.allowed_tool_names``). Keeping the
+    prompt-text tool list in sync with the API ``tools`` param prevents
+    the model from "seeing" tools it can't actually call.
+    """
 
     # Persona system prompt (character card override) takes priority — prepend first
     if persona_system_prompt:
@@ -286,7 +317,11 @@ async def build_system_prompt(
     # Add dynamic tool descriptions
     tool_context = ToolContext.CHAT if mode == "chat" else ToolContext.HEARTBEAT
     try:
-        specs = await registry.get_specs(tool_context) if registry else []
+        specs = (
+            await registry.get_specs(tool_context, allowed_names=allowed_tool_names)
+            if registry
+            else []
+        )
         if specs:
             if mode == "chat":
                 tool_lines = []
@@ -358,6 +393,7 @@ async def run_agent(
     timeout_seconds: float | None = None,
     max_tokens: int | None = None,
     max_iterations: int | None = None,
+    sender_id: str | None = None,
 ) -> "AgentLoopResult":
     """
     Unified entry point for both chat and heartbeat agent invocations.
@@ -450,6 +486,7 @@ async def run_agent(
             logger.warning("Subconscious pre-phase failed: %s", exc)
 
     # 4. Build system prompt
+    allowed_tool_names = _allowed_tools_for_mode(agent_profile, mode)
     system_prompt = await build_system_prompt(
         mode,
         registry,
@@ -458,6 +495,7 @@ async def run_agent(
         has_backlog_tasks=has_backlog_tasks,
         is_group=is_group,
         persona_system_prompt=persona_system_prompt,
+        allowed_tool_names=allowed_tool_names,
     )
 
     # 5. Build enriched user message.
@@ -491,6 +529,7 @@ async def run_agent(
             llm_config=llm_config,
             registry=registry,
             pool=pool,
+            allowed_tool_names=allowed_tool_names,
             energy_budget=energy_budget,  # None = unlimited for chat
             max_iterations=max_iterations,  # None = timeout-based only
             timeout_seconds=effective_timeout,
@@ -554,6 +593,7 @@ async def stream_agent(
     has_backlog_tasks: bool = False,
     timeout_seconds: float | None = None,
     max_tokens: int | None = None,
+    sender_id: str | None = None,
 ) -> AsyncIterator[AgentEventData]:
     """
     Streaming variant of run_agent(). Yields AgentEventData as they happen.
@@ -605,10 +645,13 @@ async def stream_agent(
                     include_emotional_state=True,
                     include_goals=True,
                     include_drives=True,
+                    current_sender=sender_id,
                 )
                 if context.memories:
                     await mem_client.touch_memories([m.id for m in context.memories])
-                memory_context = format_context_for_prompt(context, max_memories=10)
+                memory_context = format_context_for_prompt(
+                    context, max_memories=10, current_sender=sender_id
+                )
 
                 yield AgentEventData(
                     event=AgentEvent.PHASE_CHANGE,
@@ -639,6 +682,7 @@ async def stream_agent(
             logger.warning("Subconscious pre-phase failed: %s", exc)
 
     # Build system prompt
+    allowed_tool_names = _allowed_tools_for_mode(agent_profile, mode)
     system_prompt = await build_system_prompt(
         mode,
         registry,
@@ -647,6 +691,7 @@ async def stream_agent(
         has_backlog_tasks=has_backlog_tasks,
         is_group=is_group,
         persona_system_prompt=persona_system_prompt,
+        allowed_tool_names=allowed_tool_names,
     )
 
     # Build enriched user message — chat context folds into the system
@@ -665,6 +710,7 @@ async def stream_agent(
         llm_config=llm_config,
         registry=registry,
         pool=pool,
+        allowed_tool_names=allowed_tool_names,
         energy_budget=energy_budget,
         max_iterations=None,
         timeout_seconds=effective_timeout,
