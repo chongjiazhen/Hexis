@@ -203,7 +203,7 @@ _ASSESSMENT_BODY_RE = re.compile(
     re.DOTALL | re.IGNORECASE,
 )
 _ASSESSMENT_MARKER_RE = re.compile(
-    r"<<+\s*/?\s*SESSION-ASSESSMENT\s*>+",
+    r"<+\s*/?\s*SESSION-ASSESSMENT\s*>+",
     re.IGNORECASE,
 )
 
