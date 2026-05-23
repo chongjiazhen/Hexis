@@ -611,6 +611,7 @@ DECLARE
     new_embedding vector;
     unit_id UUID;
     queue_max INT := COALESCE(get_config_int('memory.recmem_queue_max'), 5000);
+    v_primary_sender TEXT;  -- PR-B: identity to backfill onto target memory if NULL
 BEGIN
     SELECT * INTO task
     FROM recmem_consolidation_tasks
@@ -657,9 +658,19 @@ BEGIN
 
     new_embedding := (get_embedding(ARRAY[COALESCE(NULLIF(p_merged_content, ''), old_content)]))[1];
 
+    -- PR-B: compute primary sender across the NEW units being merged in. Only
+    -- backfill on the target memory when its sender_id is NULL (conservative;
+    -- never overwrites an established identity). Multi-sender merge results in
+    -- the most-common sender from the incoming batch.
+    SELECT mode() WITHIN GROUP (ORDER BY source_identity)
+    INTO v_primary_sender
+    FROM subconscious_units
+    WHERE id = ANY(task.source_unit_ids) AND source_identity IS NOT NULL;
+
     UPDATE memories
     SET content = COALESCE(NULLIF(p_merged_content, ''), old_content),
         embedding = new_embedding,
+        sender_id = COALESCE(sender_id, v_primary_sender),
         metadata = COALESCE(metadata, '{}'::jsonb)
             || jsonb_build_object(
                 'recmem',
@@ -734,6 +745,7 @@ DECLARE
     unit_id UUID;
     source_attr JSONB;
     queue_max INT := COALESCE(get_config_int('memory.recmem_queue_max'), 5000);
+    v_primary_sender TEXT;  -- PR-B: identity stamped onto each created episode
 BEGIN
     SELECT * INTO task
     FROM recmem_consolidation_tasks
@@ -752,6 +764,14 @@ BEGIN
         'trust', 0.9
     );
 
+    -- PR-B: derived episodes inherit the most-common sender_id across their
+    -- raw source units. Mixed-sender consolidations fall back to NULL (treated
+    -- as global by sender-scoped recall).
+    SELECT mode() WITHIN GROUP (ORDER BY source_identity)
+    INTO v_primary_sender
+    FROM subconscious_units
+    WHERE id = ANY(task.source_unit_ids) AND source_identity IS NOT NULL;
+
     FOR item IN SELECT value FROM jsonb_array_elements(COALESCE(p_episodes, '[]'::jsonb))
     LOOP
         episode_content := COALESCE(item->>'content', item->>'episode', item#>>'{}');
@@ -767,7 +787,8 @@ BEGIN
             COALESCE(NULLIF(item->>'importance', '')::float, 0.6),
             source_attr,
             0.9,
-            jsonb_build_object('recmem', jsonb_build_object('task_id', task.id, 'source_unit_ids', task.source_unit_ids))
+            jsonb_build_object('recmem', jsonb_build_object('task_id', task.id, 'source_unit_ids', task.source_unit_ids)),
+            v_primary_sender
         );
         created_ids := created_ids || memory_id;
 
@@ -853,6 +874,7 @@ DECLARE
     memory_id UUID;
     created_ids UUID[] := ARRAY[]::UUID[];
     unit_id UUID;
+    v_primary_sender TEXT;  -- PR-B: identity stamped onto each created fact
 BEGIN
     SELECT * INTO task
     FROM recmem_consolidation_tasks
@@ -862,6 +884,12 @@ BEGIN
     IF NOT FOUND THEN
         RETURN jsonb_build_object('task_id', p_task_id, 'status', 'missing');
     END IF;
+
+    -- PR-B: see apply_recmem_episode_create for rationale.
+    SELECT mode() WITHIN GROUP (ORDER BY source_identity)
+    INTO v_primary_sender
+    FROM subconscious_units
+    WHERE id = ANY(task.source_unit_ids) AND source_identity IS NOT NULL;
 
     FOR item IN SELECT value FROM jsonb_array_elements(COALESCE(p_facts, '[]'::jsonb))
     LOOP
@@ -898,7 +926,8 @@ BEGIN
                 'trust', 0.85
             ),
             0.85,
-            jsonb_build_object('recmem', jsonb_build_object('task_id', task.id, 'episode_id', task.target_memory_id, 'source_unit_ids', task.source_unit_ids))
+            jsonb_build_object('recmem', jsonb_build_object('task_id', task.id, 'episode_id', task.target_memory_id, 'source_unit_ids', task.source_unit_ids)),
+            v_primary_sender
         );
         created_ids := created_ids || memory_id;
 

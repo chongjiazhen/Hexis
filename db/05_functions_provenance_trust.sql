@@ -1378,6 +1378,8 @@ BEGIN
     RETURN ids;
 END;
 $$ LANGUAGE plpgsql;
+-- PR-B: add p_sender_id at the end. Signature still backwards-compatible for
+-- callers that pass positional args 1..7; new param has default NULL.
 CREATE OR REPLACE FUNCTION create_memory_with_embedding(
     p_type memory_type,
     p_content TEXT,
@@ -1385,7 +1387,8 @@ CREATE OR REPLACE FUNCTION create_memory_with_embedding(
     p_importance FLOAT DEFAULT 0.5,
     p_source_attribution JSONB DEFAULT NULL,
     p_trust_level FLOAT DEFAULT NULL,
-    p_metadata JSONB DEFAULT '{}'::jsonb
+    p_metadata JSONB DEFAULT '{}'::jsonb,
+    p_sender_id TEXT DEFAULT NULL
 ) RETURNS UUID AS $$
 DECLARE
     new_memory_id UUID;
@@ -1420,8 +1423,8 @@ BEGIN
     END IF;
     effective_trust := LEAST(1.0, GREATEST(0.0, effective_trust));
 
-    INSERT INTO memories (type, content, embedding, importance, source_attribution, trust_level, trust_updated_at, metadata)
-    VALUES (p_type, p_content, p_embedding, p_importance, normalized_source, effective_trust, CURRENT_TIMESTAMP, COALESCE(p_metadata, '{}'::jsonb))
+    INSERT INTO memories (type, content, embedding, importance, source_attribution, trust_level, trust_updated_at, metadata, sender_id)
+    VALUES (p_type, p_content, p_embedding, p_importance, normalized_source, effective_trust, CURRENT_TIMESTAMP, COALESCE(p_metadata, '{}'::jsonb), p_sender_id)
     RETURNING id INTO new_memory_id;
 
     EXECUTE format(
