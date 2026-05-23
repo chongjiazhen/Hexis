@@ -11,6 +11,7 @@ import asyncio
 import logging
 import os
 import random
+import re
 from typing import Any, Callable, Awaitable
 
 from .base import ChannelAdapter, ChannelCapabilities, ChannelMessage, parse_allowlist, resolve_channel_token
@@ -22,6 +23,17 @@ logger = logging.getLogger(__name__)
 def _resolve_token(config: dict[str, Any]) -> str | None:
     """Resolve Telegram bot token from config (env var name) or environment."""
     return resolve_channel_token(config, "bot_token", "TELEGRAM_BOT_TOKEN")
+
+
+_FENCE_LANG_RE = re.compile(r"^```[A-Za-z0-9_+\-]+\s*$", re.MULTILINE)
+
+
+def _sanitize_for_telegram_markdown(text: str) -> str:
+    # Legacy Telegram `Markdown` parse_mode rejects language hints on fenced
+    # code blocks (```bash, ```markdown, ...) and aborts the whole message
+    # with a parse error, which the fallback then sends as plain text. Strip
+    # the language token; the fence still renders as a code block.
+    return _FENCE_LANG_RE.sub("```", text)
 
 
 class TelegramAdapter(ChannelAdapter):
@@ -284,7 +296,7 @@ class TelegramAdapter(ChannelAdapter):
         try:
             kwargs: dict[str, Any] = {
                 "chat_id": int(channel_id),
-                "text": text,
+                "text": _sanitize_for_telegram_markdown(text),
                 "parse_mode": "Markdown",
             }
             if reply_to:
@@ -297,9 +309,17 @@ class TelegramAdapter(ChannelAdapter):
             return str(sent.message_id)
 
         except Exception:
-            # Retry without Markdown in case of parse errors
+            # Retry without Markdown in case of parse errors. Log the original
+            # parse error so the regression class (which char, which fence, etc.)
+            # is diagnosable instead of silently degrading to plain text.
+            logger.warning(
+                "Telegram Markdown parse failed for %s, retrying plain-text",
+                channel_id,
+                exc_info=True,
+            )
             try:
                 kwargs.pop("parse_mode", None)
+                kwargs["text"] = text  # raw, un-sanitized for plain-text retry
                 sent = await self._application.bot.send_message(**kwargs)
                 return str(sent.message_id)
             except Exception:
