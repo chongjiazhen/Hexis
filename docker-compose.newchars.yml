@@ -597,3 +597,28 @@ services:
     environment:
       <<: *common-env
       POSTGRES_DB: hexis_trump
+
+  # ── Null ── unified android persona (supersedes Nines + Charlotte, both frozen 2026-05-22)
+  null_channel_worker:
+    <<: *channel-base
+    container_name: hexis_null_channel_worker
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_null
+      NULL_TELEGRAM_BOT_TOKEN: ${NULL_TELEGRAM_BOT_TOKEN:-}
+
+  null_heartbeat_worker:
+    <<: *worker-base
+    container_name: hexis_null_heartbeat_worker
+    command: ["hexis-worker", "--mode", "heartbeat"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_null
+
+  null_maintenance_worker:
+    <<: *worker-base
+    container_name: hexis_null_maintenance_worker
+    command: ["hexis-worker", "--mode", "maintenance"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_null
