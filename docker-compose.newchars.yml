@@ -87,9 +87,11 @@ services:
       <<: *common-env
       POSTGRES_DB: hexis_ennie
 
-  # ── Mira ───────────────────────────────────────────────────────────────────
+  # ── Mira ── ON ICE 2026-05-22 (RAM pressure, host constantly at 97%;
+  #          DB hexis_mira preserved; thaw: drop the frozen profile override)
   mira_channel_worker:
     <<: *channel-base
+    profiles: ["frozen"]
     container_name: hexis_mira_channel_worker
     environment:
       <<: *common-env
@@ -98,6 +100,7 @@ services:
 
   mira_heartbeat_worker:
     <<: *worker-base
+    profiles: ["frozen"]
     container_name: hexis_mira_heartbeat_worker
     command: ["hexis-worker", "--mode", "heartbeat"]
     environment:
@@ -106,6 +109,7 @@ services:
 
   mira_maintenance_worker:
     <<: *worker-base
+    profiles: ["frozen"]
     container_name: hexis_mira_maintenance_worker
     command: ["hexis-worker", "--mode", "maintenance"]
     environment:
@@ -490,9 +494,11 @@ services:
       <<: *common-env
       POSTGRES_DB: hexis_vesper
 
-  # ── Eudora ─────────────────────────────────────────────────────────────────
+  # ── Eudora ── ON ICE 2026-05-22 (RAM pressure, host constantly at 97%;
+  #             DB hexis_eudora preserved; thaw: drop the frozen profile override)
   eudora_channel_worker:
     <<: *channel-base
+    profiles: ["frozen"]
     container_name: hexis_eudora_channel_worker
     environment:
       <<: *common-env
@@ -501,6 +507,7 @@ services:
 
   eudora_heartbeat_worker:
     <<: *worker-base
+    profiles: ["frozen"]
     container_name: hexis_eudora_heartbeat_worker
     command: ["hexis-worker", "--mode", "heartbeat"]
     environment:
@@ -509,6 +516,7 @@ services:
 
   eudora_maintenance_worker:
     <<: *worker-base
+    profiles: ["frozen"]
     container_name: hexis_eudora_maintenance_worker
     command: ["hexis-worker", "--mode", "maintenance"]
     environment:
@@ -564,3 +572,28 @@ services:
     environment:
       <<: *common-env
       POSTGRES_DB: hexis_sable
+
+  # ── Trump ── satirical political persona
+  trump_channel_worker:
+    <<: *channel-base
+    container_name: hexis_trump_channel_worker
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_trump
+      TRUMP_TELEGRAM_BOT_TOKEN: ${TRUMP_TELEGRAM_BOT_TOKEN:-}
+
+  trump_heartbeat_worker:
+    <<: *worker-base
+    container_name: hexis_trump_heartbeat_worker
+    command: ["hexis-worker", "--mode", "heartbeat"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_trump
+
+  trump_maintenance_worker:
+    <<: *worker-base
+    container_name: hexis_trump_maintenance_worker
+    command: ["hexis-worker", "--mode", "maintenance"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_trump
