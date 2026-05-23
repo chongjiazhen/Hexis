@@ -69,15 +69,20 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+-- Signature changes (new output column + new param) require a DROP first;
+-- CREATE OR REPLACE cannot alter a function's return type.
+DROP FUNCTION IF EXISTS fast_recall(TEXT, INT);
 CREATE OR REPLACE FUNCTION fast_recall(
     p_query_text TEXT,
-    p_limit INT DEFAULT 10
+    p_limit INT DEFAULT 10,
+    p_current_sender TEXT DEFAULT NULL
 ) RETURNS TABLE (
     memory_id UUID,
     content TEXT,
     memory_type memory_type,
     score FLOAT,
-    source TEXT
+    source TEXT,
+    sender_id TEXT
 ) AS $$
 	DECLARE
 	    query_embedding vector;
@@ -210,7 +215,13 @@ CREATE OR REPLACE FUNCTION fast_recall(
 	                        WHEN (m.metadata->>'emotional_valence') IS NULL THEN 0.5
 	                        ELSE 1.0 - (ABS((m.metadata->>'emotional_valence')::float - current_valence) / 2.0)
 	                    END
-	            END) * 0.05,
+	            END) * 0.05
+	            -- Own-sender boost: the current DM partner's own memories outrank a
+	            -- stranger's at equal similarity. NULL p_current_sender = no boost.
+	            + (CASE
+	                WHEN p_current_sender IS NOT NULL AND m.sender_id = p_current_sender THEN 0.1
+	                ELSE 0.0
+	            END),
 	            0.001
 	        ) as final_score,
 	        CASE
@@ -218,7 +229,8 @@ CREATE OR REPLACE FUNCTION fast_recall(
 	            WHEN sc.assoc_score IS NOT NULL THEN 'association'
 	            WHEN sc.temp_score IS NOT NULL THEN 'temporal'
 	            ELSE 'fallback'
-	        END as source
+	        END as source,
+	        m.sender_id
 	    FROM scored sc
 	    JOIN memories m ON sc.mem_id = m.id
 	    WHERE m.status = 'active'

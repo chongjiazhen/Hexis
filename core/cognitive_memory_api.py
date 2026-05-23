@@ -73,6 +73,7 @@ class Memory:
     source_attribution: dict[str, Any] | None = None  # primary provenance (DB-stored JSON)
     created_at: datetime | None = None
     emotional_valence: float | None = None
+    sender_id: str | None = None  # owning DM partner; None = global (no sender)
 
 
 @dataclass(frozen=True)
@@ -206,6 +207,7 @@ class CognitiveMemory:
         include_emotional_state: bool = True,
         include_goals: bool = False,
         include_drives: bool = True,
+        current_sender: str | None = None,
     ) -> HydratedContext:
         """
         Hydrate a query with relevant context for RAG prompt augmentation.
@@ -220,7 +222,9 @@ class CognitiveMemory:
         # Run independent queries in parallel on separate connections for ~60% latency reduction
         async def _fetch_memories():
             async with self._pool.acquire() as conn:
-                return await self._recall_memories(conn, query, memory_limit)
+                return await self._recall_memories(
+                    conn, query, memory_limit, current_sender=current_sender
+                )
 
         async def _fetch_partial():
             if not include_partial:
@@ -287,6 +291,7 @@ class CognitiveMemory:
         memory_types: list[MemoryType] | None = None,
         min_importance: float = 0.0,
         include_partial: bool = True,
+        current_sender: str | None = None,
     ) -> RecallResult:
         async with self._pool.acquire() as conn:
             memories = await self._recall_memories(
@@ -295,6 +300,7 @@ class CognitiveMemory:
                 limit,
                 memory_types=memory_types,
                 min_importance=min_importance,
+                current_sender=current_sender,
             )
             partial = await self._find_partial_activations(conn, query) if include_partial else []
             return RecallResult(memories=memories, partial_activations=partial, query=query)
@@ -407,6 +413,7 @@ class CognitiveMemory:
         source_attribution: dict[str, Any] | None = None,
         source_references: Any | None = None,
         trust_level: float | None = None,
+        sender_id: str | None = None,
     ) -> UUID:
         async with self._pool.acquire() as conn:
             memory_id = await self._create_memory(
@@ -419,6 +426,7 @@ class CognitiveMemory:
                 source_attribution=source_attribution,
                 source_references=source_references,
                 trust_level=trust_level,
+                sender_id=sender_id,
             )
 
             if concepts:
@@ -912,26 +920,29 @@ class CognitiveMemory:
         source_attribution: dict[str, Any] | None = None,
         source_references: Any | None = None,
         trust_level: float | None = None,
+        sender_id: str | None = None,
     ) -> UUID:
         if type == MemoryType.EPISODIC:
             return await conn.fetchval(
-                "SELECT create_episodic_memory($1::text, NULL, $2::jsonb, NULL, $3::float, CURRENT_TIMESTAMP, $4::float, $5::jsonb, $6::float)",
+                "SELECT create_episodic_memory($1::text, NULL, $2::jsonb, NULL, $3::float, CURRENT_TIMESTAMP, $4::float, $5::jsonb, $6::float, $7::text)",
                 content,
                 _to_jsonb_arg(context),
                 emotional_valence,
                 importance,
                 _to_jsonb_arg(source_attribution),
                 trust_level,
+                sender_id,
             )
         if type == MemoryType.SEMANTIC:
             sources = source_references if source_references is not None else context
             return await conn.fetchval(
-                "SELECT create_semantic_memory($1::text, 0.8::float, NULL, NULL, $2::jsonb, $3::float, $4::jsonb, $5::float)",
+                "SELECT create_semantic_memory($1::text, 0.8::float, NULL, NULL, $2::jsonb, $3::float, $4::jsonb, $5::float, $6::text)",
                 content,
                 _to_jsonb_arg(sources),
                 importance,
                 _to_jsonb_arg(source_attribution),
                 trust_level,
+                sender_id,
             )
         if type == MemoryType.PROCEDURAL:
             steps = context if context is not None else {}
@@ -962,6 +973,7 @@ class CognitiveMemory:
         limit: int,
         memory_types: list[MemoryType] | None = None,
         min_importance: float = 0.0,
+        current_sender: str | None = None,
     ) -> list[Memory]:
         rows = await conn.fetch(
             """
@@ -975,13 +987,15 @@ class CognitiveMemory:
                 trust_level,
                 source_attribution,
                 created_at,
-                emotional_valence
-            FROM recall_memories_filtered($1::text, $2::int, $3::memory_type[], $4::float)
+                emotional_valence,
+                sender_id
+            FROM recall_memories_filtered($1::text, $2::int, $3::memory_type[], $4::float, $5::text)
             """,
             query,
             limit,
             [mt.value for mt in memory_types] if memory_types else None,
             min_importance,
+            current_sender,
         )
 
         memories: list[Memory] = []
@@ -1001,6 +1015,7 @@ class CognitiveMemory:
                     source_attribution=_coerce_json(row["source_attribution"]) if row["source_attribution"] is not None else None,
                     created_at=row["created_at"],
                     emotional_valence=row["emotional_valence"],
+                    sender_id=row["sender_id"],
                 )
             )
         return memories
@@ -1244,7 +1259,13 @@ class CognitiveMemorySync:
         return self._loop.run_until_complete(self._async.record_ingestion_receipts(items))
 
 
-def format_context_for_prompt(context: HydratedContext, *, max_memories: int = 5, max_partials: int = 3) -> str:
+def format_context_for_prompt(
+    context: HydratedContext,
+    *,
+    max_memories: int = 5,
+    max_partials: int = 3,
+    current_sender: str | None = None,
+) -> str:
     parts: list[str] = []
 
     if context.memories:
@@ -1260,7 +1281,13 @@ def format_context_for_prompt(context: HydratedContext, *, max_memories: int = 5
                     src_kind = f", source: {kind} ({ref})"
                 elif kind:
                     src_kind = f", source: {kind}"
-            parts.append(f"- {m.content}{score}{trust}{src_kind}")
+            # Confidentiality privilege: a memory owned by a different DM partner
+            # is from a session with another client. Vera may use it to understand,
+            # but must never disclose it. NULL sender_id = global, not confidential.
+            confidential = ""
+            if m.sender_id is not None and m.sender_id != current_sender:
+                confidential = "[confidential — from your session with another client] "
+            parts.append(f"- {confidential}{m.content}{score}{trust}{src_kind}")
 
     if context.partial_activations:
         parts.append("\n## Vague Recollections (tip-of-tongue)")

@@ -8605,6 +8605,115 @@ async def test_fast_recall_is_mood_congruent_with_episodic_valence(db_pool):
         assert ids.index(pos_id) < ids.index(neg_id)
 
 
+async def _seed_sender_query(conn, test_id):
+    """Seed a deterministic query embedding in embedding_cache; return query_text."""
+    query_text = f"sender recall {test_id}"
+    content_hash = await conn.fetchval(
+        "SELECT encode(sha256($1::text::bytea), 'hex')", query_text
+    )
+    await conn.execute(
+        """
+        INSERT INTO embedding_cache (content_hash, embedding)
+        VALUES ($1, array_cat(ARRAY[$2::float, $3::float], array_fill(0.0::float, ARRAY[embedding_dimension() - 2]))::vector)
+        ON CONFLICT (content_hash) DO UPDATE SET embedding = EXCLUDED.embedding
+        """,
+        content_hash,
+        0.77,
+        0.31,
+    )
+    return query_text
+
+
+async def test_fast_recall_returns_sender_id(db_pool):
+    """fast_recall exposes each memory's sender_id; NULL for global memories."""
+    async with db_pool.acquire() as conn:
+        test_id = get_test_identifier("sender_col")
+        query_text = await _seed_sender_query(conn, test_id)
+
+        tagged_id = await conn.fetchval(
+            """
+            INSERT INTO memories (type, content, embedding, sender_id)
+            VALUES ('episodic', $1,
+                    array_cat(ARRAY[0.77::float, 0.31::float], array_fill(0.0::float, ARRAY[embedding_dimension() - 2]))::vector,
+                    $2)
+            RETURNING id
+            """,
+            f"tagged {test_id}",
+            "alice",
+        )
+        global_id = await conn.fetchval(
+            """
+            INSERT INTO memories (type, content, embedding)
+            VALUES ('episodic', $1,
+                    array_cat(ARRAY[0.77::float, 0.31::float], array_fill(0.0::float, ARRAY[embedding_dimension() - 2]))::vector)
+            RETURNING id
+            """,
+            f"global {test_id}",
+        )
+
+        rows = await conn.fetch("SELECT * FROM fast_recall($1, 50)", query_text)
+        by_id = {r["memory_id"]: r for r in rows}
+        assert tagged_id in by_id and by_id[tagged_id]["sender_id"] == "alice"
+        assert global_id in by_id and by_id[global_id]["sender_id"] is None
+
+
+async def test_fast_recall_boosts_current_sender(db_pool):
+    """At equal similarity, the current sender's own memory outranks another's."""
+    async with db_pool.acquire() as conn:
+        test_id = get_test_identifier("sender_boost")
+        query_text = await _seed_sender_query(conn, test_id)
+
+        # Two memories with identical embedding -> identical base score.
+        alice_id = await conn.fetchval(
+            """
+            INSERT INTO memories (type, content, embedding, sender_id)
+            VALUES ('episodic', $1,
+                    array_cat(ARRAY[0.77::float, 0.31::float], array_fill(0.0::float, ARRAY[embedding_dimension() - 2]))::vector,
+                    'alice')
+            RETURNING id
+            """,
+            f"alice mem {test_id}",
+        )
+        bob_id = await conn.fetchval(
+            """
+            INSERT INTO memories (type, content, embedding, sender_id)
+            VALUES ('episodic', $1,
+                    array_cat(ARRAY[0.77::float, 0.31::float], array_fill(0.0::float, ARRAY[embedding_dimension() - 2]))::vector,
+                    'bob')
+            RETURNING id
+            """,
+            f"bob mem {test_id}",
+        )
+
+        # Recall as alice: alice's memory ranks first.
+        rows = await conn.fetch("SELECT * FROM fast_recall($1, 50, 'alice')", query_text)
+        ids = [r["memory_id"] for r in rows]
+        assert ids.index(alice_id) < ids.index(bob_id)
+
+        # Recall as bob: order flips.
+        rows = await conn.fetch("SELECT * FROM fast_recall($1, 50, 'bob')", query_text)
+        ids = [r["memory_id"] for r in rows]
+        assert ids.index(bob_id) < ids.index(alice_id)
+
+
+async def test_create_episodic_memory_stamps_sender(db_pool):
+    """create_episodic_memory persists p_sender_id onto the memories row."""
+    async with db_pool.acquire() as conn:
+        test_id = get_test_identifier("sender_create")
+        mem_id = await conn.fetchval(
+            """
+            SELECT create_episodic_memory($1, NULL, NULL, NULL, 0.0, CURRENT_TIMESTAMP,
+                                          0.5, NULL, 0.9, $2)
+            """,
+            f"episodic for sender {test_id}",
+            "carol",
+        )
+        sender = await conn.fetchval(
+            "SELECT sender_id FROM memories WHERE id = $1", mem_id
+        )
+        assert sender == "carol"
+
+
 async def test_sync_embedding_dimension_config_respects_app_setting(db_pool):
     async with db_pool.acquire() as conn:
         tr = conn.transaction()

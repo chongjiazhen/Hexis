@@ -199,6 +199,7 @@ async def _flush_trimmed_to_memory(
     dsn: str,
     trimmed_messages: list[dict[str, Any]],
     session_id: str,
+    sender_id: str | None = None,
 ) -> int:
     """
     Pre-compaction memory flush: extract important information from messages
@@ -280,6 +281,7 @@ async def _flush_trimmed_to_memory(
                         "trust": 0.85,
                     },
                     trust_level=0.85,
+                    sender_id=sender_id,
                 )
                 stored += 1
 
@@ -297,6 +299,7 @@ async def _update_session(
     history: list[dict[str, Any]],
     *,
     dsn: str | None = None,
+    sender_id: str | None = None,
 ) -> None:
     """Update session history and last_active timestamp.
 
@@ -314,7 +317,7 @@ async def _update_session(
         # Flush trimmed messages to long-term memory (non-blocking best-effort)
         if dsn and trimmed:
             try:
-                await _flush_trimmed_to_memory(dsn, trimmed, session_id)
+                await _flush_trimmed_to_memory(dsn, trimmed, session_id, sender_id=sender_id)
             except Exception:
                 logger.exception("Pre-compaction flush error (session=%s)", session_id)
 
@@ -443,6 +446,7 @@ async def process_channel_message(
             dsn=dsn,
             session_id=f"channel:{msg.channel_type}:{msg.channel_id}:{msg.sender_id}",
             pool=pool,
+            sender_id=msg.sender_id,
         )
 
         assistant_text = result.get("assistant", "")
@@ -450,7 +454,7 @@ async def process_channel_message(
 
         async with pool.acquire() as conn:
             # Update session with new history (pre-compaction flush if trimming)
-            await _update_session(conn, session_id, new_history, dsn=dsn)
+            await _update_session(conn, session_id, new_history, dsn=dsn, sender_id=msg.sender_id)
 
             # Log outbound message
             await _log_message(
@@ -562,6 +566,7 @@ async def stream_channel_message(
             dsn=dsn,
             session_id=f"channel:{msg.channel_type}:{msg.channel_id}:{msg.sender_id}",
             pool=pool,
+            sender_id=msg.sender_id,
         ):
             collected.append(token)
             await coalescer.push(token)
@@ -593,7 +598,7 @@ async def stream_channel_message(
         new_history.append({"role": "assistant", "content": assistant_text})
 
         async with pool.acquire() as conn:
-            await _update_session(conn, session_id, new_history, dsn=dsn)
+            await _update_session(conn, session_id, new_history, dsn=dsn, sender_id=msg.sender_id)
             await _log_message(
                 conn,
                 session_id,

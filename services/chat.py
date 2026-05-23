@@ -274,6 +274,7 @@ async def _remember_conversation(
     *,
     user_message: str,
     assistant_message: str,
+    sender_id: str | None = None,
 ) -> None:
     if not user_message and not assistant_message:
         return
@@ -295,6 +296,7 @@ async def _remember_conversation(
         source_attribution=source_attribution,
         source_references=None,
         trust_level=0.95,
+        sender_id=sender_id,
     )
 
 
@@ -336,6 +338,7 @@ async def chat_turn(
     session_id: str | None = None,
     pool: Any | None = None,
     is_group: bool = False,
+    sender_id: str | None = None,
 ) -> dict[str, Any]:
     dsn = dsn or db_dsn_from_env()
     normalized = normalize_llm_config(llm_config)
@@ -385,6 +388,9 @@ async def chat_turn(
         use_rlm = False
 
     if use_rlm:
+        # NOTE: the RLM path recalls via recall_memories_stub (MemoryRepo) which
+        # is not sender-scoped — RLM-internal recall does not yet honour the
+        # confidentiality split. _remember_conversation below still tags writes.
         from services.hexis_rlm import run_chat_turn
         result = await run_chat_turn(
             user_message=user_message,
@@ -402,6 +408,7 @@ async def chat_turn(
                 mem_client,
                 user_message=user_message,
                 assistant_message=assistant_text,
+                sender_id=sender_id,
             )
         else:
             async with CognitiveMemory.connect(dsn) as mem_client:
@@ -410,6 +417,7 @@ async def chat_turn(
                     mem_client,
                     user_message=user_message,
                     assistant_message=assistant_text,
+                    sender_id=sender_id,
                 )
         new_history = list(history)
         new_history.append({"role": "user", "content": user_message})
@@ -439,12 +447,18 @@ async def chat_turn(
             is_group=is_group,
             dsn=dsn,
             max_iterations=max_tool_iterations,
+            sender_id=sender_id,
         )
         assistant_text = loop_result.text
 
         async with CognitiveMemory.connect(dsn) as mem_client:
             assistant_text = await _capture_session_assessment(mem_client, assistant_text)
-            await _remember_conversation(mem_client, user_message=user_message, assistant_message=assistant_text)
+            await _remember_conversation(
+                mem_client,
+                user_message=user_message,
+                assistant_message=assistant_text,
+                sender_id=sender_id,
+            )
 
         new_history = list(history)
         new_history.append({"role": "user", "content": user_message})
@@ -466,6 +480,7 @@ async def stream_chat_turn(
     session_id: str | None = None,
     pool: Any | None = None,
     is_group: bool = False,
+    sender_id: str | None = None,
 ) -> AsyncIterator[str]:
     """
     Streaming variant of chat_turn().
@@ -523,6 +538,7 @@ async def stream_chat_turn(
             agent_profile=agent_profile,
             is_group=is_group,
             dsn=dsn,
+            sender_id=sender_id,
         ):
             if event.event == AgentEvent.TEXT_DELTA:
                 text = event.data.get("text", "")
@@ -542,6 +558,7 @@ async def stream_chat_turn(
                     mem_client,
                     user_message=user_message,
                     assistant_message=full_text,
+                    sender_id=sender_id,
                 )
         if full_text:
             yield full_text
