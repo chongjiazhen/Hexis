@@ -30,6 +30,13 @@ services:
       - app.embedding_service_url=${EMBEDDING_SERVICE_URL:-http://host.docker.internal:11434/api/embed}
       - -c
       - app.embedding_model_id=${EMBEDDING_MODEL_ID:-embeddinggemma:300m-qat-q4_0}
+      # Fleet of ~33 workers (11 personas x 3 worker types), each holding a
+      # 1-5 conn asyncpg pool, plus probes and set-power-mode flips. PG default
+      # max_connections=100 saturates under fleet rebuild + parallel ops
+      # (observed 2026-05-20: ao_maintenance crashed with TooManyConnectionsError).
+      # 300 leaves headroom for growth + manual psql sessions.
+      - -c
+      - max_connections=${POSTGRES_MAX_CONNECTIONS:-300}
     networks:
       - public
       - private
@@ -95,8 +102,11 @@ services:
       context: .
       dockerfile: ops/Dockerfile.worker
     container_name: hexis_heartbeat_worker
+    # Targets the default hexis_memory DB (Sam). Moved off "active" profile
+    # 2026-05-20 so the persona fleet rebuild does not silently bring Sam
+    # online. Bring Sam up explicitly with --profile legacy-sam.
     profiles:
-      - active
+      - legacy-sam
     command: ["hexis-worker", "--mode", "heartbeat"]
     depends_on:
       db:
@@ -124,13 +134,15 @@ services:
       - private
       - public
 
+  # Targets default hexis_memory DB. Moved off "active" profile 2026-05-20;
+  # see heartbeat_worker comment above. Bring up with --profile legacy-sam.
   maintenance_worker:
     build:
       context: .
       dockerfile: ops/Dockerfile.worker
     container_name: hexis_maintenance_worker
     profiles:
-      - active
+      - legacy-sam
     command: ["hexis-worker", "--mode", "maintenance"]
     depends_on:
       db:
@@ -186,17 +198,20 @@ services:
       XAI_API_KEY: ${XAI_API_KEY:-}
       HEXIS_LLM_CONSCIOUS_API_KEY: ${HEXIS_LLM_CONSCIOUS_API_KEY:-}
       HEXIS_LLM_SUBCONSCIOUS_API_KEY: ${HEXIS_LLM_SUBCONSCIOUS_API_KEY:-}
+      SEARXNG_URL: ${SEARXNG_URL:-http://searxng:8080}
     networks:
       - private
       - public
 
+  # Targets default hexis_memory DB. Moved off "active" profile 2026-05-20;
+  # see heartbeat_worker comment above. Bring up with --profile legacy-sam.
   channel_worker:
     build:
       context: .
       dockerfile: ops/Dockerfile.channels
     container_name: hexis_channel_worker
     profiles:
-      - active
+      - legacy-sam
     command: ["hexis-channels"]
     depends_on:
       db:
@@ -214,8 +229,12 @@ services:
       RABBITMQ_MANAGEMENT_URL: http://rabbitmq:15672
       RABBITMQ_USER: ${RABBITMQ_DEFAULT_USER:-hexis}
       RABBITMQ_PASSWORD: ${RABBITMQ_DEFAULT_PASS:-hexis_password}
+      SEARXNG_URL: ${SEARXNG_URL:-http://searxng:8080}
       DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:-}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      SAM_TELEGRAM_BOT_TOKEN: ${SAM_TELEGRAM_BOT_TOKEN:-}
+      BAYMAX_TELEGRAM_BOT_TOKEN: ${BAYMAX_TELEGRAM_BOT_TOKEN:-}
+      TARS_TELEGRAM_BOT_TOKEN: ${TARS_TELEGRAM_BOT_TOKEN:-}
       SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
       SLACK_APP_TOKEN: ${SLACK_APP_TOKEN:-}
       SIGNAL_PHONE_NUMBER: ${SIGNAL_PHONE_NUMBER:-}

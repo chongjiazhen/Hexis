@@ -142,6 +142,85 @@ class TestExtractAllowedTools:
 
 
 # ============================================================================
+# Unit tests: _allowed_tools_for_mode (services.agent helper)
+# ============================================================================
+
+
+class TestAllowedToolsForMode:
+    def test_returns_none_for_heartbeat(self):
+        from services.agent import _allowed_tools_for_mode
+
+        # Heartbeat keeps the full registry even when profile has tools
+        result = _allowed_tools_for_mode({"tools": ["recall", "remember"]}, "heartbeat")
+        assert result is None
+
+    def test_returns_none_for_no_profile(self):
+        from services.agent import _allowed_tools_for_mode
+
+        assert _allowed_tools_for_mode(None, "chat") is None
+        assert _allowed_tools_for_mode({}, "chat") is None
+
+    def test_returns_names_for_chat_with_profile_tools(self):
+        from services.agent import _allowed_tools_for_mode
+
+        result = _allowed_tools_for_mode({"tools": ["recall", "remember"]}, "chat")
+        assert result == ["recall", "remember"]
+
+    def test_empty_list_returns_none_safe_default(self):
+        from services.agent import _allowed_tools_for_mode
+
+        # Empty allowlist must NOT filter to zero tools — safer default is no
+        # filtering. Personas without a populated allowlist preserve current
+        # behavior (full registry).
+        assert _allowed_tools_for_mode({"tools": []}, "chat") is None
+
+
+# ============================================================================
+# Unit tests: registry get_specs allowed_names filter
+# ============================================================================
+
+
+class TestRegistryAllowedNamesFilter:
+    async def test_get_specs_no_filter_returns_all(self, db_pool):
+        from core.tools import ToolContext, create_default_registry
+
+        registry = create_default_registry(db_pool)
+        specs = await registry.get_specs(ToolContext.CHAT)
+        assert len(specs) > 2  # default chat registry has many tools
+
+    async def test_get_specs_with_allowed_names_filters(self, db_pool):
+        from core.tools import ToolContext, create_default_registry
+
+        registry = create_default_registry(db_pool)
+        all_specs = await registry.get_specs(ToolContext.CHAT)
+        all_names = {s["function"]["name"] for s in all_specs}
+        # Pick 2 known-present names
+        sample = sorted(all_names)[:2]
+        filtered = await registry.get_specs(ToolContext.CHAT, allowed_names=sample)
+        filtered_names = {s["function"]["name"] for s in filtered}
+        assert filtered_names == set(sample)
+
+    async def test_get_specs_empty_allowlist_returns_empty(self, db_pool):
+        from core.tools import ToolContext, create_default_registry
+
+        # Explicit empty list at registry level = no tools. (The
+        # services.agent helper avoids passing [] — it normalizes to None —
+        # but the registry itself honors the literal contract.)
+        registry = create_default_registry(db_pool)
+        specs = await registry.get_specs(ToolContext.CHAT, allowed_names=[])
+        assert specs == []
+
+    async def test_get_specs_unknown_name_silently_skipped(self, db_pool):
+        from core.tools import ToolContext, create_default_registry
+
+        registry = create_default_registry(db_pool)
+        specs = await registry.get_specs(
+            ToolContext.CHAT, allowed_names=["__definitely_not_a_real_tool__"]
+        )
+        assert specs == []
+
+
+# ============================================================================
 # Unit tests: _build_system_prompt
 # ============================================================================
 

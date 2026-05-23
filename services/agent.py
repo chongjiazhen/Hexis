@@ -125,6 +125,31 @@ def format_subconscious_signals(output: SubconsciousOutput) -> str:
     return "\n".join(parts)
 
 
+def attach_chat_context(
+    system_prompt: str,
+    subconscious_output: SubconsciousOutput,
+    memory_context: str | None,
+) -> str:
+    """Fold per-turn hydrated context into the SYSTEM prompt for chat mode.
+
+    Subconscious signals and recalled memory context (Relevant Memories,
+    Identity, Beliefs) are the agent's own private context, not user input.
+    Concatenating them into the user message made leak-prone local models
+    echo them back and misattribute them to the user ("you provided me with
+    my Subconscious Signals..."). Placing them in the system role keeps that
+    boundary clear. Returns the system prompt with the context appended.
+    """
+    context_parts: list[str] = []
+    sub_signals = format_subconscious_signals(subconscious_output)
+    if sub_signals:
+        context_parts.append(sub_signals)
+    if memory_context:
+        context_parts.append(memory_context)
+    if not context_parts:
+        return system_prompt
+    return system_prompt + "\n\n" + "\n\n".join(context_parts)
+
+
 # ---------------------------------------------------------------------------
 # Subconscious pre-phase
 # ---------------------------------------------------------------------------
@@ -232,6 +257,29 @@ async def run_subconscious_appraisal(
 # ---------------------------------------------------------------------------
 
 
+def _allowed_tools_for_mode(
+    agent_profile: dict[str, Any] | None,
+    mode: Literal["chat", "heartbeat"],
+) -> list[str] | None:
+    """Per-persona chat tool allowlist from ``agent_profile['tools']``.
+
+    Chat mode: returns the curated tool-name list from the persona's
+    ``agent.tools`` config (read via ``get_agent_profile_context()``).
+    Filtering the 42-tool registry down to the persona's ~16-tool set cuts
+    roughly 5K tokens of tool schema from every chat turn. Heartbeat mode:
+    returns ``None`` (full registry preserved — the autonomous loop needs
+    the broader toolset including planning / scheduling).
+
+    Returns ``None`` when there is no profile, no ``tools`` field, or the
+    list is empty (safe default — no filtering, current behavior preserved).
+    """
+    if mode != "chat" or not agent_profile:
+        return None
+    from services.chat import _extract_allowed_tools  # lazy to avoid cycle
+    names = _extract_allowed_tools(agent_profile.get("tools"))
+    return names or None
+
+
 async def build_system_prompt(
     mode: Literal["chat", "heartbeat"],
     registry: "ToolRegistry | None",
@@ -240,12 +288,27 @@ async def build_system_prompt(
     subconscious_output: SubconsciousOutput | None = None,
     has_backlog_tasks: bool = False,
     is_group: bool = False,
+    persona_system_prompt: str = "",
+    allowed_tool_names: list[str] | None = None,
 ) -> str:
-    """Build the system prompt for either chat or heartbeat mode."""
+    """Build the system prompt for either chat or heartbeat mode.
+
+    ``allowed_tool_names``, when provided, filters the tool descriptions
+    embedded in the prompt to match the per-persona allowlist applied
+    elsewhere (``AgentLoopConfig.allowed_tool_names``). Keeping the
+    prompt-text tool list in sync with the API ``tools`` param prevents
+    the model from "seeing" tools it can't actually call.
+    """
+
+    # Persona system prompt (character card override) takes priority — prepend first
+    if persona_system_prompt:
+        base_prefix = persona_system_prompt.strip() + "\n\n---\n\n"
+    else:
+        base_prefix = ""
 
     # Base prompt
     if mode == "chat":
-        prompt = load_conversation_prompt().strip()
+        prompt = base_prefix + load_conversation_prompt().strip()
         if is_group:
             from services.prompt_resources import load_channel_context_prompt
             prompt += "\n\n" + load_channel_context_prompt().strip()
@@ -255,7 +318,11 @@ async def build_system_prompt(
     # Add dynamic tool descriptions
     tool_context = ToolContext.CHAT if mode == "chat" else ToolContext.HEARTBEAT
     try:
-        specs = await registry.get_specs(tool_context) if registry else []
+        specs = (
+            await registry.get_specs(tool_context, allowed_names=allowed_tool_names)
+            if registry
+            else []
+        )
         if specs:
             if mode == "chat":
                 tool_lines = []
@@ -327,6 +394,7 @@ async def run_agent(
     timeout_seconds: float | None = None,
     max_tokens: int | None = None,
     max_iterations: int | None = None,
+    sender_id: str | None = None,
 ) -> "AgentLoopResult":
     """
     Unified entry point for both chat and heartbeat agent invocations.
@@ -349,6 +417,18 @@ async def run_agent(
         llm_key = "llm.chat" if mode == "chat" else "llm.heartbeat"
         llm_fallback = "llm" if mode == "chat" else None
         llm_config = await load_llm_config(conn, llm_key, fallback_key=llm_fallback)
+
+        # Load persona system prompt override if set (character card system_prompt)
+        persona_system_prompt = ""
+        try:
+            raw_psp = await conn.fetchval(
+                "SELECT value FROM config WHERE key = 'agent.persona_system_prompt'"
+            )
+            if raw_psp:
+                import json as _json
+                persona_system_prompt = _json.loads(raw_psp) if isinstance(raw_psp, str) else str(raw_psp)
+        except Exception:
+            pass
 
         # 2. Hydrate memory context (chat mode - heartbeat builds its own context)
         memory_context = ""
@@ -410,6 +490,7 @@ async def run_agent(
             logger.warning("Subconscious pre-phase failed: %s", exc)
 
     # 4. Build system prompt
+    allowed_tool_names = _allowed_tools_for_mode(agent_profile, mode)
     system_prompt = await build_system_prompt(
         mode,
         registry,
@@ -417,27 +498,30 @@ async def run_agent(
         subconscious_output=subconscious_output,
         has_backlog_tasks=has_backlog_tasks,
         is_group=is_group,
+        persona_system_prompt=persona_system_prompt,
+        allowed_tool_names=allowed_tool_names,
     )
 
-    # 5. Build enriched user message
-    enriched_parts: list[str] = []
-
-    # Add subconscious signals
-    sub_signals = format_subconscious_signals(subconscious_output)
-    if sub_signals:
-        enriched_parts.append(sub_signals)
-
-    # Add memory context (chat mode)
-    if memory_context:
-        enriched_parts.append(memory_context)
-
-    # Add the actual user message
+    # 5. Build enriched user message.
+    #    Chat mode: hydrated context (subconscious signals + recalled memory)
+    #    folds into the SYSTEM prompt — see attach_chat_context. It must not
+    #    sit in the user turn, or leak-prone models echo it back as if the
+    #    user wrote it. Heartbeat keeps context in the turn message (no human
+    #    reads a heartbeat turn, and its assembly is left unchanged).
     if mode == "chat":
-        enriched_parts.append(f"[USER MESSAGE]\n{user_message}")
+        system_prompt = attach_chat_context(
+            system_prompt, subconscious_output, memory_context
+        )
+        enriched_user_message = user_message
     else:
+        enriched_parts: list[str] = []
+        sub_signals = format_subconscious_signals(subconscious_output)
+        if sub_signals:
+            enriched_parts.append(sub_signals)
+        if memory_context:
+            enriched_parts.append(memory_context)
         enriched_parts.append(user_message)
-
-    enriched_user_message = "\n\n".join(enriched_parts) if enriched_parts else user_message
+        enriched_user_message = "\n\n".join(enriched_parts) if enriched_parts else user_message
 
     # 6. Configure AgentLoop with mode-specific defaults
     if mode == "chat":
@@ -449,6 +533,7 @@ async def run_agent(
             llm_config=llm_config,
             registry=registry,
             pool=pool,
+            allowed_tool_names=allowed_tool_names,
             energy_budget=energy_budget,  # None = unlimited for chat
             max_iterations=max_iterations,  # None = timeout-based only
             timeout_seconds=effective_timeout,
@@ -512,6 +597,7 @@ async def stream_agent(
     has_backlog_tasks: bool = False,
     timeout_seconds: float | None = None,
     max_tokens: int | None = None,
+    sender_id: str | None = None,
 ) -> AsyncIterator[AgentEventData]:
     """
     Streaming variant of run_agent(). Yields AgentEventData as they happen.
@@ -533,6 +619,18 @@ async def stream_agent(
         llm_fallback = "llm" if mode == "chat" else None
         llm_config = await load_llm_config(conn, llm_key, fallback_key=llm_fallback)
 
+        # Load persona system prompt override if set (character card system_prompt)
+        persona_system_prompt = ""
+        try:
+            raw_psp = await conn.fetchval(
+                "SELECT value FROM config WHERE key = 'agent.persona_system_prompt'"
+            )
+            if raw_psp:
+                import json as _json
+                persona_system_prompt = _json.loads(raw_psp) if isinstance(raw_psp, str) else str(raw_psp)
+        except Exception:
+            pass
+
         # Hydrate memory
         memory_context = ""
         if mode == "chat":
@@ -551,10 +649,13 @@ async def stream_agent(
                     include_emotional_state=True,
                     include_goals=True,
                     include_drives=True,
+                    current_sender=sender_id,
                 )
                 if context.memories:
                     await mem_client.touch_memories([m.id for m in context.memories])
-                memory_context = format_context_for_prompt(context, max_memories=10)
+                memory_context = format_context_for_prompt(
+                    context, max_memories=10, current_sender=sender_id
+                )
 
                 yield AgentEventData(
                     event=AgentEvent.PHASE_CHANGE,
@@ -587,6 +688,7 @@ async def stream_agent(
             logger.warning("Subconscious pre-phase failed: %s", exc)
 
     # Build system prompt
+    allowed_tool_names = _allowed_tools_for_mode(agent_profile, mode)
     system_prompt = await build_system_prompt(
         mode,
         registry,
@@ -594,17 +696,16 @@ async def stream_agent(
         subconscious_output=subconscious_output,
         has_backlog_tasks=has_backlog_tasks,
         is_group=is_group,
+        persona_system_prompt=persona_system_prompt,
+        allowed_tool_names=allowed_tool_names,
     )
 
-    # Build enriched user message
-    enriched_parts: list[str] = []
-    sub_signals = format_subconscious_signals(subconscious_output)
-    if sub_signals:
-        enriched_parts.append(sub_signals)
-    if memory_context:
-        enriched_parts.append(memory_context)
-    enriched_parts.append(f"[USER MESSAGE]\n{user_message}")
-    enriched_user_message = "\n\n".join(enriched_parts)
+    # Build enriched user message — chat context folds into the system
+    # prompt (see attach_chat_context), keeping it out of the user turn.
+    system_prompt = attach_chat_context(
+        system_prompt, subconscious_output, memory_context
+    )
+    enriched_user_message = user_message
 
     # Configure loop
     effective_timeout = timeout_seconds or 120.0
@@ -615,6 +716,7 @@ async def stream_agent(
         llm_config=llm_config,
         registry=registry,
         pool=pool,
+        allowed_tool_names=allowed_tool_names,
         energy_budget=energy_budget,
         max_iterations=None,
         timeout_seconds=effective_timeout,

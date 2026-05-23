@@ -6,6 +6,7 @@ CREATE INDEX IF NOT EXISTS idx_episodes_ended_at ON episodes (ended_at);
 CREATE INDEX IF NOT EXISTS idx_config_key_pattern ON config (key text_pattern_ops);
 CREATE INDEX idx_memories_embedding ON memories USING hnsw (embedding vector_cosine_ops);
 CREATE INDEX idx_memories_status ON memories (status);
+CREATE INDEX idx_memories_sender ON memories (sender_id) WHERE sender_id IS NOT NULL;
 CREATE INDEX idx_memories_type ON memories (type);
 CREATE INDEX IF NOT EXISTS idx_memories_validity
     ON memories (valid_until)

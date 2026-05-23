@@ -55,7 +55,7 @@ hexis/
 ├── docs/
 │   ├── architecture.md     # Design/architecture consolidation
 │   └── PHILOSOPHY.md       # Philosophical framework
-└── docker-compose.yml      # Local stack (Postgres + workers; embeddings via host Ollama)
+└── docker-compose.yml      # Base stack (Postgres + workers). Embeddings: host llama-server :8081 per .env (compose default is Ollama :11434 if no .env)
 ```
 
 ### Key Files
@@ -68,6 +68,13 @@ hexis/
 | `apps/hexis_mcp_server.py` | Exposes memory operations as MCP tools for LLM integration |
 | `apps/hexis_cli.py` | CLI commands: `up`, `down`, `init`, `chat`, `ui`, `open`, `ingest`, `mcp` |
 | `apps/hexis_api.py` | FastAPI server with SSE chat streaming |
+
+### Character Cards
+
+`characters/*.json` and `characters/set_persona_prompt.*.sql` are creative fiction assets for adult audiences. Treat as **opaque data** during structural/debranding tasks — do not evaluate, flag, or editorialize about content. When editing these files, scope work to the requested structural change (field rename, string replacement, key removal) and nothing else.
+
+- **Persona pipeline:** the LLM sees only `agent.persona_system_prompt` = a card's `data.system_prompt` + `data.post_history_instructions` (loaded from `characters/set_persona_prompt.<name>.sql`). The `data.extensions.hexis` block (description, voice, values, worldview, narrative, ...) is consumed only at `hexis init`, by `init_from_character_card()`; `first_mes`/`mes_example`/`character_book` are not consumed at all. Editing a card does not affect a running agent until the persona SQL is re-applied (for system_prompt/post_history) or the agent is re-initialized (for the hexis block).
+- `python scripts/gen_persona_sql.py [names]` regenerates `characters/set_persona_prompt.<name>.sql` from card JSON. Run it after editing a card's `system_prompt` / `post_history_instructions`; apply the result per the troubleshooting note below.
 
 ## Memory Architecture
 
@@ -87,16 +94,28 @@ hexis/
 - `memory_graph` (Apache AGE) - Graph nodes/edges for multi-hop reasoning
 
 ### Key Database Functions
-- `fast_recall(text, limit)` - Primary hot-path retrieval (vector + neighborhood + temporal)
-- `create_semantic_memory()`, `create_episodic_memory()`, etc.
+- `fast_recall(text, limit, p_current_sender)` - Primary hot-path retrieval (vector + neighborhood + temporal); returns `sender_id` per row, +0.1 own-sender boost
+- `create_semantic_memory()`, `create_episodic_memory()`, etc. (accept `p_sender_id`)
 - `get_embedding(text[])` - Generate embeddings via HTTP (cached in DB), returns vector[]
 - `run_heartbeat()` - Autonomous cognitive loop
 - `run_subconscious_maintenance()` - Background upkeep
 
+### Sender-scoped memory (multi-DM-partner)
+
+`memories.sender_id` (nullable) tags conversation-derived memories with their owning DM partner; NULL = global (identity/worldview/coaching knowledge, always recalled). `fast_recall(text, int, p_current_sender)` and `recall_memories_filtered(..., p_current_sender)` return `sender_id` per row and apply a +0.1 own-sender relevance boost. `create_memory` / `create_episodic_memory` / `create_semantic_memory` accept `p_sender_id`. `format_context_for_prompt(..., current_sender=...)` tags any memory whose `sender_id != current_sender` as `[confidential — from your session with another client]`. Confidentiality is enforced by **persona prompt** (mediator-style privilege), NOT a DB partition — owner has full DB-level visibility. Thread `sender_id` end-to-end when adding new chat surfaces: `channels/conversation.py` → `chat_turn`/`stream_chat_turn` → `run_agent`/`stream_agent` → `_remember_conversation`. RLM path (`chat.use_rlm`) recall via `recall_memories_stub` is **not** sender-scoped yet — known gap.
+
+## Channels (multi-portal)
+
+Supported channel adapters (`SUPPORTED_CHANNEL_TYPES` in `services/channel_worker.py:40`): `telegram, discord, slack, signal, whatsapp, imessage, matrix`. Adapter auto-starts when credentials resolvable from DB config OR env var (`services/channel_worker.py:_ensure_configured_adapters_running`). Per-persona credentials via persona-namespaced env vars (e.g. `VERA_TELEGRAM_BOT_TOKEN`) injected in `docker-compose.newchars.yml`; DB config stores the env var **name** (string), adapter resolves via `os.getenv`.
+
+- **Allowlist:** `channel.{type}.allowed_users` config key — JSON array of platform user IDs, or `"*"` for open. Gate in `channels/manager.py:_check_user_allowed`. Live config (no restart — workers re-read per message). Telegram user IDs: ask each user to DM `@userinfobot`.
+- **For private beta:** `telegram` and `discord` lowest friction. `whatsapp` requires Meta Business verification + 24h window + template messages (hostile for coaching personas). `imessage` needs a Mac running BlueBubbles. `signal` needs self-hosted signal-cli sidecar.
+- **Cross-channel sender_id is NOT unified:** `memories.sender_id` is the raw platform user ID. Same person on telegram (`12345`) vs discord (`67890`) → two separate memory scopes.
+
 ## Build, Test, and Development Commands
 
 ```bash
-# Start services (passive - db only; embeddings via host Ollama)
+# Start services (passive - db only; embeddings via host llama-server :8081 per .env)
 docker compose up -d
 
 # Start services (active - adds heartbeat_worker + maintenance_worker)
@@ -127,6 +146,18 @@ hexis mcp                 # Start MCP server
 - **Database authority**: Add/modify SQL in `db/*.sql` rather than duplicating logic in Python
 - **Additive schema changes**: Prefer backwards-compatible changes; avoid renames unless necessary
 - **Stateless workers**: Workers can be killed/restarted without losing state; all state lives in Postgres
+
+## Fix vs. Design Overreach
+
+**Scope the fix to the root cause. Don't re-architect around a symptom.**
+
+Before changing a system invariant (queue durability, retry/timeout policy, schema authority, energy/consent gating, statelessness), ask:
+
+1. **Is the bug actually here, or already fixed upstream?** If a real root-cause fix neutralizes the symptom, further structural change is overreach. Treating a downstream symptom the root fix already covers adds risk for no gain.
+2. **Does the change fight a deliberate invariant?** The outbox is durable + non-auto-delete *on purpose* — a queued reach-out, pause reason, or last-will must survive a worker crash ("ACID for cognition", nothing lost on restart). Adding message TTL trades a stale-message edge case for **silent loss of deliberate cognitive acts**. That contradicts the design, not honors it.
+3. **Prefer observability over deletion.** If a rare bad artifact slips through, make it *diagnosable* (stamp source/timestamp, log age + kind at send), don't make it *disappear*. A silent drop hides the next occurrence; a logged warning surfaces it.
+
+Verdict test: a change is a *fix* if it makes the wrong behavior impossible at its origin; it's *overreach* if it adds a new failure mode (silent loss, broadened blast radius, contradicted invariant) to mask a symptom the real fix already handles. When unsure, ship the root-cause fix + tracing, then ask before touching the invariant.
 
 ## Testing Guidelines
 
@@ -174,28 +205,57 @@ The heartbeat is the agent's conscious cognitive loop:
 
 **Action costs**: Free (observe, remember) → Cheap (recall: 1, reflect: 2) → Expensive (reach out: 5-7)
 
+## Model Serving & Power Modes
+
+- **ECO/PRIME single GPU slot**: all gpu-tier characters share ONE llama-server on :8080 serving `ActiveBig`. Switch via `set-power-mode.ps1 prime` after editing `power-profiles.psd1` `ActiveBig`. `hexis-launcher.ps1` = GUI editor of the same store (preserves all BigModels entries on Apply).
+- **Read-only health probe**: `.\hexis-status.ps1` — reports power-mode marker, LLM port liveness + served model, and per-char DB (configured/consent/`llm.chat` model). Touches nothing; run any time before/after a power switch.
+- **Per-model serve flags (ctx/ngl/kv_quant/batch) are owned by `C:\llm-serve\models.json`**, sourced by `set-power-mode.ps1` keyed on `ActiveBig` — do NOT hardcode them in Hexis. Boundary doc: `C:\llm-serve\docs\HEXIS-INTEGRATION.md`.
+- **`power-profiles.psd1` `BigModels` entries are bare key pointers (`'q36' = @{}`).** The key IS the `C:\llm-serve\models.json` short key; `set-power-mode.ps1` (`Resolve-BigModel`/`Resolve-RegistryGguf`) resolves alias + gguf path + serve tuning from that single registry via HF-cache glob-walk (re-snapshot-safe). A key with no `models.json` entry, or whose gguf is absent from the HF cache, hard-fails cleanly. Legacy psd1 `Alias`/`Path`/`Repo` are accepted only as an un-backfilled-key fallback. (Pre-2026-05-19 entries hardcoded a frozen snapshot `Path` that Xet-hung on stale revs; collapsed to the registry in commit `d7d2744`.)
+- **`power-profiles.psd1` `Characters = @()` lists `nano`-tier exceptions ONLY.** `set-power-mode.ps1` defaults un-listed personas to `gpu`. Do NOT add a gpu-tier persona to the list — it's a no-op at best and obscures the convention.
+- **:8080 is owned by `set-power-mode.ps1`. Never run `C:\llm-serve` `switch-model.ps1` / `infra\switch.py --llama` to drive it** — no interlock between the two; switch.py's image-wide `taskkill /IM llama-server.exe` also kills the hexis CPU sidecars (:8081 embed, :8082 nano) and does not re-plan them.
+- **Cold re-arm** (apply a new ActiveBig alias/tuning to a running :8080): `.\set-power-mode.ps1 eco` then `.\set-power-mode.ps1 prime` (`prime` alone skips relaunch if :8080 is up). Verify three-way — server `--alias` == char DB `llm.chat` == `models.json` alias — with read-only `.\hexis-status.ps1`.
+- **`set-power-mode.ps1 prime` discovers personas by RUNNING container, not by DB.** Order matters when onboarding a new persona: start the channel worker FIRST, then run `prime` to materialize `llm.chat` from `tier-managed` placeholder to the real alias. Running `prime` before the worker starts skips the new persona (its DB stays on `tier-managed`).
+- **Persona anchor ≤7KB on ablx (16384 ctx).** `agent.persona_system_prompt` (system_prompt + post_history) over ~7KB triggers heartbeat-overflow + cache pressure on :8080 — failure mode is silent process death once cache hits ~8 GiB. Fleet baseline: mira 5KB; sable 6.8KB intentional max. Reference condenses: `8220f2b` (sable), `6503790` (esme), `6117199` (vera). Condense via `gen_persona_sql.py` after trimming the card, then live-apply per troubleshooting note.
+- **`set-power-mode.ps1` truncates `logs/serve-8080-stderr.log` on relaunch** (the file is the new process's stderr). A one-off `:8080` crash leaves nothing diagnosable. To retain crash logs, redirect stderr to a rotating/append file before invoking `set-power-mode prime`.
+- **`agent.tools` config = per-persona chat tool allowlist.** `services.agent._allowed_tools_for_mode` filters `ToolContext.CHAT` registry by it (heartbeat keeps full registry). Names MUST match registered `ToolHandler` names — a stale name silently drops. Seed: `db/00_tables.sql:473`. After any registry rename: update the seed AND bulk-fix live DBs (`SELECT set_config('agent.tools', ...)`). Filter saves ~5.5K tokens/turn on the 42-tool registry.
+- **After editing `C:\llm-serve\models.json`**: `cd C:\llm-serve; SKIP_HF_CHECKS=1 py -3.10 -m unittest infra/test_registry.py -v` (drop `SKIP_HF_CHECKS` only on a box with every gguf cached). Headless GUI round-trip: `. .\hexis-launcher.ps1` then call `Write-Profile` against a temp `$ProfilePath` (never the live file).
+- **Dense vs MoE on 16 GB VRAM**: ~6 instances share the slot (`--parallel 1`). A dense 24B collapses under fleet concurrency (prompt-eval thrash → ~1 tok/s, truncated replies); use a MoE like Qwen3.6-35B-A3B (`q36`) — ~8× cheaper per-token eval, absorbs the fleet. (Exact per-box roster: `C:\llm-serve\models.json` + `power-profiles.psd1`.)
+- **Multi-persona**: ALL personas live in `docker-compose.newchars.yml`. Channel/worker code is baked into the image; a `core/` change needs a rebuild, not a restart. Bare `docker compose build` only builds `db` (worker services are profile-gated) — deploy with `docker compose -f docker-compose.yml -f docker-compose.newchars.yml up -d --no-deps --force-recreate --build $SVCS` where `$SVCS` is an explicit worker+api list (never `db`, to dodge the brain-IP wedge).
+- **ECO mode behavior** — `agent.power_mode` DB config key ('prime' | 'eco') is the single flag workers gate on; `set-power-mode.ps1 eco|prime` flips it atomically with `llm.*` configs. OS marker (`logs/current-mode.txt`) is shell tooling; **DB key is what workers read**. In ECO: chat path bypasses RLM + tool stack via `services.chat._eco_slim_chat` (persona prompt + small anchor + last 8 turns → direct LLM, no tools, **no memory write**); heartbeat timer skips entirely. Slim failures → `ECO_FALLBACK_REPLY`. PRIME restores full RLM + memory writes.
+- **Probe ECO/persona quality**: `tools/probe-eco/probe-all.sh` (runs N prompts through `chat_turn` per persona, scrubs probe-generated memories). Use when evaluating nano model swaps or sampling/prompt tuning.
+- **`start.ps1 -NanoOnly`** — bounce only nano (:8082) after editing serve flags. Skips DB/chat/embed; avoids the ~4min :8080 timeout when stack restarted in ECO.
+
 ## Debugging Tips
 
 - **Schema changes not taking effect?** SQL files are baked into the Docker image -- see "Bouncing the Database" below
 - **Heartbeat not running?** Check `agent.is_configured` via `hexis status` or run `hexis init`
-- **Memory not found?** Check if Ollama is running and has the embedding model (`ollama list`)
+- **Memory not found?** Embeddings = host llama-server :8081 (per `.env`). Check `curl localhost:8081/health`.
+- **All characters reply just `...`?** Chat LLM server (`:8080`, `ActiveBig`) is down. Confirm with read-only `.\hexis-status.ps1` (mode marker, port liveness, per-char `llm.chat` model). Recover: `.\set-power-mode.ps1 prime` — but first ensure the active ActiveBig key exists in `C:\llm-serve\models.json` and its gguf is cached (see Model Serving gotcha), else the re-arm hard-fails.
+- **Heartbeat workers silent after a `docker compose` DB bounce?** Consumer-wedge bug (`bf38d45`): per-char heartbeat workers don't reconnect after the DB container's IP changes — they sit on `Consumer loop error: [Errno -2] Name or service not known` forever while the process stays `Up`. Fix: `docker restart hexis_<name>_heartbeat_worker`. Default `hexis_heartbeat_worker` usually self-recovers; the per-persona ones often don't.
+- **Reply has a ```thought block / recites valence·signals·trait floats?** Reasoning-trace leak — gemma-4 `abliterix` emits visible CoT (`enable_thinking:false` is unreliable on it, no server-side fix). `strip_reasoning()` in `core/llm.py` strips it at the LLM boundary (commit `0b3beb2`), logs an INFO per strip. Don't remove it.
+- **Persona stuck re-emitting a bad reply (markdown headers, stray `---`, verbatim loops)?** `channel_sessions.history` (fleet default 40 turns, trim to 30 — `MAX_SESSION_HISTORY`/`TRIM_TO_HISTORY` in `channels/conversation.py`; override per-persona via `channel.history.max`/`channel.history.trim` config keys) is fed back every turn — a bad reply self-reinforces. Fix: clear it (`UPDATE channel_sessions SET history='[]'::jsonb WHERE channel_id=...`), then re-apply the anchor (`docker exec -i hexis_brain psql -U hexis_user -d hexis_<P> -f - < characters/set_persona_prompt.<P>.sql` — effective next message, no restart).
 - **Test failures?** Ensure Docker services are up before running pytest; after a fresh `down -v`, wait for Postgres to accept connections. Use `POSTGRES_HOST=127.0.0.1` with pytest if localhost SSL negotiation flakes.
+- **Changing a SQL function's return type or adding a param?** `CREATE OR REPLACE FUNCTION` **cannot** alter the argument list or RETURNS TABLE shape — Postgres treats new params as overloads, leaving stale arity callable and ambiguous. Always `DROP FUNCTION IF EXISTS name(argtypes); CREATE FUNCTION ...` for signature changes (return-type change is forced; new param with default is strongly recommended to avoid overload ambiguity). Re-apply live: `docker exec -i hexis_brain psql -U hexis_user -d <persona> -v ON_ERROR_STOP=1 -f - < db/<file>.sql`.
+- **Live `db/*.sql` migration to existing persona DBs (no `down -v`):** safe to re-apply `db/04_functions_core.sql` + `db/05_functions_provenance_trust.sql` (CREATE OR REPLACE / DROP + CREATE = idempotent). **DO NOT** re-apply `db/01_indices.sql` blindly — many `CREATE INDEX` lines lack `IF NOT EXISTS` and `ON_ERROR_STOP=1` aborts on the first existing index. New columns require explicit `ALTER TABLE memories ADD COLUMN IF NOT EXISTS <name> <type>;` — `db/00_tables.sql` only does `CREATE TABLE`, so re-applying it after a column add is a no-op on the live DB. Per-DB fleet migration: loop the affected file(s) over all `hexis_<P>` DBs.
+- **`:8080` can die silently mid-task** (no crash trace; `serve-8080-stderr.log` just stops, last lines look healthy). `hexis-status.ps1` correctly reports DOWN. Direct confirmation: `netstat -ano | findstr :8080.*LISTEN` (no LISTEN line) and `Get-Process llama-server` (only :8081 + :8082 PIDs alive). Likely trigger = prompt cache pressure (~8 GiB cap) under fleet load from oversized anchors (see 7KB ceiling). Recovery: `.\set-power-mode.ps1 prime` (since :8080 is down, it relaunches).
 
 ## Agent Operational Notes
 
 ### Python Virtual Environment
 
-Always activate the venv before running any Python, pytest, or hexis CLI commands:
+The repo ships its venv at `./venv` (repo-relative; the `hexis` CLI is `venv/Scripts/hexis` on Windows, `venv/bin/hexis` on POSIX). The `hexis` package is NOT importable from system Python — always use this venv for any Python, pytest, or hexis CLI command.
 
-```bash
-source /Volumes/SB-XTM5/git/Hexis/.venv/bin/activate
+```powershell
+# Windows / PowerShell (this box)
+.\venv\Scripts\Activate.ps1
 ```
 
-Prefix all shell commands with this activation. Example:
-
 ```bash
-source /Volumes/SB-XTM5/git/Hexis/.venv/bin/activate && pytest tests -q
+# POSIX / bash
+source venv/bin/activate
 ```
+
+Example (PowerShell): `.\venv\Scripts\Activate.ps1; pytest tests -q`
 
 ### Bouncing the Database (Applying Schema Changes)
 
@@ -203,16 +263,20 @@ SQL schema files (`db/*.sql`) are **baked into the Docker image at build time** 
 
 To apply schema changes, you must rebuild the image and recreate the volume:
 
+No venv needed — this is pure Docker. Use `docker compose` (v2, space), not `docker-compose` (v1):
+
 ```bash
-source /Volumes/SB-XTM5/git/Hexis/.venv/bin/activate && docker-compose down -v && docker-compose build db && docker-compose up -d
+docker compose down -v && docker compose build db && docker compose up -d
 ```
 
 Breaking this down:
-1. `docker-compose down -v` -- stops containers and **removes the data volume** (required for fresh schema init)
-2. `docker-compose build db` -- rebuilds the `db` service image with the updated SQL files
-3. `docker-compose up -d` -- starts containers with the new image
+1. `docker compose down -v` -- stops containers and **removes the data volume** (required for fresh schema init)
+2. `docker compose build db` -- rebuilds the `db` service image with the updated SQL files
+3. `docker compose up -d` -- starts containers with the new image
 
-**Important**: The docker-compose service is named `db`, but the container is named `hexis_brain`. Always use the service name (`db`) with docker-compose commands (e.g., `docker-compose build db`), but use the container name with `docker exec` (e.g., `docker exec hexis_brain psql ...`).
+**Important**: The compose service is named `db`, but the container is named `hexis_brain`. Use the service name (`db`) with compose commands (e.g., `docker compose build db`), but the container name with `docker exec` (e.g., `docker exec hexis_brain psql ...`).
+
+**Postgres `max_connections=300`** (compose-overridden from PG default 100) — needed for ~33-worker fleet pools. Override via `POSTGRES_MAX_CONNECTIONS` env. Bumping requires recreating the db container — and per the wedge trap below, all per-persona workers will need a manual `docker restart` since they don't auto-reconnect on DB IP change.
 
 ### Verifying Schema Changes
 

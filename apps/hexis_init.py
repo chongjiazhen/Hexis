@@ -352,10 +352,11 @@ async def _run_init_noninteractive(args: argparse.Namespace) -> int:
 
     try:
         # 7. Save LLM config
+        endpoint = args.endpoint or ""
         heartbeat_config = {
             "provider": provider,
             "model": model,
-            "endpoint": "",
+            "endpoint": endpoint,
             "api_key_env": api_key_env,
         }
         subconscious_config = heartbeat_config.copy()
@@ -1009,6 +1010,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="LLM model (defaults per provider)")
     p.add_argument("--character", default=None,
                     help="Character card name (e.g. 'hexis', 'jarvis'). Omit for express defaults")
+    p.add_argument("--endpoint", default=None,
+                    help="LLM API endpoint URL (e.g. http://host.docker.internal:8080/v1)")
     p.add_argument("--name", default=None,
                     help="What the agent should call you (default: 'User')")
     p.add_argument("--no-docker", action="store_true", default=False,

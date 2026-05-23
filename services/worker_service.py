@@ -23,6 +23,12 @@ from core.state import (
     run_scheduled_tasks,
     should_run_subconscious_decider,
 )
+from services.alert_reaction import (
+    build_alert_outbox_message,
+    generate_alert_reaction,
+    react_to_pending_alerts,
+    _get_alert_chat_id,
+)
 from services.external_calls import ExternalCallProcessor
 from services.heartbeat_agentic import finalize_heartbeat, run_agentic_heartbeat
 from services.heartbeat_runner import execute_heartbeat_decision
@@ -65,6 +71,8 @@ class HeartbeatWorker:
         self.instance = instance or os.getenv("HEXIS_INSTANCE")
         self.pool: asyncpg.Pool | None = None
         self.running = False
+        # Track ECO/PRIME so we only log on transition, not every poll tick.
+        self._last_eco: bool | None = None
 
     async def connect(self) -> None:
         self.pool = await asyncpg.create_pool(
@@ -104,6 +112,18 @@ class HeartbeatWorker:
         logger.info("HeartbeatWorker (timer) starting...")
         await self.connect()
 
+        # Prime self._last_eco from current power_mode so the in-loop
+        # transition log fires only on actual state CHANGE (not on cold-start
+        # None -> True/False). Runtime transitions PRIME<->ECO log correctly;
+        # cold-start state is NOT logged here (a logger.info call at this
+        # exact point silently fails to surface to docker logs for reasons
+        # not yet identified - other logger.info calls in this file work
+        # fine, including the transition logs in the loop body below).
+        try:
+            self._last_eco = await self._is_eco_mode()
+        except Exception:
+            self._last_eco = None
+
         try:
             while self.running:
                 try:
@@ -115,6 +135,16 @@ class HeartbeatWorker:
                         continue
                     if not await self._is_active_hour():
                         logger.debug("Outside active hours; skipping heartbeat.")
+                        await asyncio.sleep(POLL_INTERVAL * 10)
+                        continue
+                    in_eco = await self._is_eco_mode()
+                    if in_eco != self._last_eco:
+                        if in_eco:
+                            logger.info("ECO mode entered — heartbeat cycles paused (no LLM, no episodic write).")
+                        elif self._last_eco is not None:
+                            logger.info("ECO mode exited — heartbeat cycles resumed.")
+                        self._last_eco = in_eco
+                    if in_eco:
                         await asyncio.sleep(POLL_INTERVAL * 10)
                         continue
                     await self._submit_heartbeat_if_due()
@@ -143,6 +173,23 @@ class HeartbeatWorker:
         try:
             async with self.pool.acquire() as conn:
                 return bool(await conn.fetchval("SELECT is_agent_configured() AND is_init_complete()"))
+        except Exception:
+            return False
+
+    async def _is_eco_mode(self) -> bool:
+        """Skip heartbeat cycle entirely when agent.power_mode = 'eco'.
+
+        ECO floor uses nano-imp-1b (1B CPU) which can't follow the Hexis tool
+        prompt template - autonomous heartbeats produce garbage that gets
+        stored as episodic memory and corrupts persona long-term (see
+        tools/probe-eco for empirical case). Skip silently; PRIME flip via
+        set-power-mode.ps1 resumes cycles.
+        """
+        if not self.pool:
+            return False
+        try:
+            async with self.pool.acquire() as conn:
+                return await _is_eco_mode(conn)
         except Exception:
             return False
 
@@ -235,6 +282,23 @@ async def _is_agentic_heartbeat_enabled(conn) -> bool:
         return False
 
 
+async def _is_eco_mode(conn) -> bool:
+    """
+    Read agent.power_mode. Returns True when 'eco' (heartbeat should skip).
+    Falls back to False (PRIME behavior) on any error so a missing key never
+    silently silences the fleet.
+    """
+    try:
+        val = await conn.fetchval("SELECT get_config('agent.power_mode')")
+        if val is None:
+            return False
+        if isinstance(val, str):
+            return val.strip().strip('"').lower() == 'eco'
+        return str(val).lower() == 'eco'
+    except Exception:
+        return False
+
+
 def create_heartbeat_handler(
     *,
     pool: asyncpg.Pool,
@@ -264,6 +328,14 @@ def create_heartbeat_handler(
         outbox_messages = payload.get("outbox_messages")
         if isinstance(outbox_messages, list):
             await _publish_outbox(outbox_messages)
+
+        # Batched alert reactions: comment on normal-priority alerts that
+        # arrived since the last heartbeat. The heartbeat timer skips entirely
+        # in ECO, so no explicit ECO guard is needed here.
+        try:
+            await react_to_pending_alerts(pool, bridge)
+        except Exception as exc:
+            logger.warning("Batched alert reaction failed: %s", exc)
 
         async with pool.acquire() as conn:
             # Agentic heartbeat path
@@ -443,6 +515,12 @@ class MaintenanceWorker:
                     logger.debug("Gateway record failed (non-fatal)", exc_info=True)
 
     async def _run_subconscious_if_due(self) -> None:
+        # WARNING: NOT gated on agent.power_mode='eco'. Safe today only
+        # because maintenance.subconscious_enabled defaults to false. If you
+        # ever flip that to true, add an _is_eco_mode() check here first or
+        # nano-shaped reasoning will pollute persona long-term memory in
+        # ECO. The chat path's ECO branch in services/chat.py is the
+        # canonical pattern; the heartbeat gate is in HeartbeatWorker.run().
         if not self.pool:
             return
         async with self.pool.acquire() as conn:
@@ -545,11 +623,131 @@ class MaintenanceWorker:
 # ---------------------------------------------------------------------------
 
 
-def create_webhook_handler(*, pool: asyncpg.Pool):
+async def _handle_alert_webhook(
+    pool: asyncpg.Pool,
+    bridge: RabbitMQBridge | None,
+    event: GatewayEvent,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Handle a source=alert webhook: raw delivery, memory, tiered reaction.
+
+    Raises ValueError (→ gateway marks the event failed) on a missing alert
+    body or an unconfigured alert chat — both are surfaced, not silent.
+    """
+    text = str(payload.get("text") or "").strip()
+    if not text:
+        raise ValueError("alert webhook payload missing 'text'")
+
+    priority = str(payload.get("priority") or "normal").lower()
+    if priority not in ("high", "normal"):
+        priority = "normal"
+    title = payload.get("title")
+    tags = payload.get("tags") if isinstance(payload.get("tags"), list) else []
+
+    alert_chat_id = await _get_alert_chat_id(pool)
+    if not alert_chat_id:
+        raise ValueError("channel.telegram.alert_chat_id is not configured")
+
+    # 1. Raw delivery — verbatim, no LLM. Runs first and unconditionally.
+    #    A publish failure is raised so the gateway marks the event failed —
+    #    a lost alert must be visible, never silently dropped.
+    if bridge:
+        sent = await bridge.publish_outbox_payloads(
+            [build_alert_outbox_message(text, alert_chat_id)]
+        )
+        if not sent:
+            raise RuntimeError(
+                "alert raw delivery failed: outbox publish not routed"
+            )
+
+    # 2. Memory. Importance keyed to priority. reacted=false for the heartbeat
+    #    batch to find it (the high-priority branch flips it below).
+    context = {
+        "type": "alert",
+        "kind": "alert",
+        "source": "alert",
+        "priority": priority,
+        "title": title,
+        "tags": tags,
+        "alert_text": text,
+        "reacted": False,
+    }
+    importance = 0.7 if priority == "high" else 0.4
+    memory_id = None
+    try:
+        async with pool.acquire() as conn:
+            memory_id = await conn.fetchval(
+                """
+                SELECT create_episodic_memory(
+                    p_content := $1,
+                    p_importance := $2,
+                    p_emotional_valence := 0.0,
+                    p_context := $3::jsonb,
+                    p_source_attribution := $4::jsonb,
+                    p_trust_level := 0.8
+                )
+                """,
+                f"Alert ({priority}): {text}",
+                importance,
+                json.dumps(context),
+                json.dumps({
+                    "kind": "alert",
+                    "ref": str(event.correlation_id),
+                    "label": "webhook:alert",
+                    "trust": 0.8,
+                }),
+            )
+    except Exception as exc:
+        logger.warning("Failed to record alert memory: %s", exc)
+
+    # 3. Reaction routing.
+    #    high  -> immediate: react now (skipped in ECO). reacted=True marks the
+    #             immediate tier handled — eco-skip and persona silence both
+    #             count. But a reaction that fails to publish leaves
+    #             reacted=false so the heartbeat batch retries it instead of
+    #             silently dropping the reaction.
+    #    normal -> leave reacted=false; the heartbeat batch picks it up.
+    reacted = False
+    if priority == "high":
+        reacted = True
+        async with pool.acquire() as conn:
+            eco = await _is_eco_mode(conn)
+        if not eco:
+            comment = await generate_alert_reaction(
+                pool, alert_text=text, title=title
+            )
+            if comment and bridge:
+                sent = await bridge.publish_outbox_payloads(
+                    [build_alert_outbox_message(comment, alert_chat_id)]
+                )
+                if not sent:
+                    logger.warning(
+                        "High-priority alert reaction publish failed; leaving "
+                        "unreacted for the heartbeat batch to retry"
+                    )
+                    reacted = False
+
+    if reacted and memory_id:
+        try:
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE memories SET metadata = "
+                    "jsonb_set(metadata, '{context,reacted}', 'true') WHERE id = $1",
+                    memory_id,
+                )
+        except Exception as exc:
+            logger.warning("Failed to mark alert memory reacted: %s", exc)
+
+    return {"source": "alert", "priority": priority,
+            "delivered": True, "reacted": reacted}
+
+
+def create_webhook_handler(*, pool: asyncpg.Pool, bridge: RabbitMQBridge | None = None):
     """Factory that returns a webhook event handler for the GatewayConsumer.
 
-    Webhook events are recorded as episodic memories so the agent
-    is aware that an external system sent a notification.
+    source=alert events go through the full alert pipeline (raw delivery +
+    memory + tiered reaction). Every other webhook source keeps the legacy
+    behavior: recorded as an episodic memory so the agent is aware of it.
     """
 
     async def handle_webhook(event: GatewayEvent) -> dict[str, Any] | None:
@@ -557,7 +755,10 @@ def create_webhook_handler(*, pool: asyncpg.Pool):
         source_name = event.session_key.removeprefix("webhook:")
         logger.info("Processing webhook event: %s (id=%d)", source_name, event.id)
 
-        # Record the webhook as an episodic memory
+        if source_name == "alert":
+            return await _handle_alert_webhook(pool, bridge, event, payload)
+
+        # Legacy path: record the webhook as an episodic memory.
         try:
             async with pool.acquire() as conn:
                 summary = json.dumps(payload)[:500] if payload else "{}"
@@ -640,7 +841,10 @@ async def _amain(mode: str, instance: str | None = None) -> None:
         stop_callback=_stop_all,
     )
     consumer.register(EventSource.HEARTBEAT, heartbeat_handler)
-    consumer.register(EventSource.WEBHOOK, create_webhook_handler(pool=consumer_pool))
+    consumer.register(
+        EventSource.WEBHOOK,
+        create_webhook_handler(pool=consumer_pool, bridge=bridge),
+    )
 
     import signal
 

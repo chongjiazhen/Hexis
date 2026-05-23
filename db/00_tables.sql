@@ -190,7 +190,11 @@ CREATE TABLE memories (
     access_count INTEGER DEFAULT 0,
     last_accessed TIMESTAMPTZ,
     decay_rate FLOAT DEFAULT 0.01,
-    metadata JSONB NOT NULL DEFAULT '{}'::jsonb
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    -- Multi-client scoping: which DM partner this memory came from.
+    -- NULL = global (identity/worldview/goal, coaching knowledge) — always recallable.
+    -- Non-NULL = a specific sender's conversation-derived episodic/semantic memory.
+    sender_id TEXT
 );
 CREATE UNLOGGED TABLE working_memory (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -580,6 +584,12 @@ INSERT INTO config (key, value, description) VALUES
     ('heartbeat.base_regeneration', '10'::jsonb, 'Energy regenerated per heartbeat'),
     ('heartbeat.max_energy', '20'::jsonb, 'Maximum energy cap'),
     ('heartbeat.heartbeat_interval_minutes', '60'::jsonb, 'Minutes between heartbeats'),
+    ('heartbeat.heartbeat_jitter_minutes', '20'::jsonb, 'Random +0..N minute spread added per cycle to de-cluster concurrent multi-instance heartbeats on shared inference'),
+    ('heartbeat.timezone', '"Asia/Singapore"'::jsonb, 'IANA tz for night-window hour comparison; server clock is UTC'),
+    ('heartbeat.night_start_hour', '23'::jsonb, 'Local hour [0-23] night throttle begins (inclusive)'),
+    ('heartbeat.night_end_hour', '8'::jsonb, 'Local hour [0-23] night throttle ends (exclusive); window wraps midnight when start > end'),
+    ('heartbeat.night_interval_minutes', '240'::jsonb, 'Minutes between heartbeats during night window (slower than daytime)'),
+    ('heartbeat.night_jitter_minutes', '60'::jsonb, 'Random +0..N minute spread during night window'),
     ('heartbeat.max_decision_tokens', '2048'::jsonb, 'Max tokens for heartbeat decision'),
     ('heartbeat.allowed_actions', '["observe","review_goals","remember","recall","connect","reprioritize","reflect","contemplate","meditate","study","debate_internally","maintain","mark_turning_point","begin_chapter","close_chapter","acknowledge_relationship","update_trust","reflect_on_relationship","resolve_contradiction","accept_tension","brainstorm_goals","inquire_shallow","synthesize","reach_out_user","inquire_deep","reach_out_public","fast_ingest","slow_ingest","hybrid_ingest","pause_heartbeat","terminate","rest"]'::jsonb, 'Allowed heartbeat actions'),
     ('heartbeat.max_active_goals', '3'::jsonb, 'Maximum concurrent active goals'),
@@ -622,7 +632,8 @@ INSERT INTO config (key, value, description) VALUES
     ('heartbeat.cost_hybrid_ingest', '3'::jsonb, 'Hybrid ingestion - fast pass then slow on high-signal chunks')
 ON CONFLICT (key) DO NOTHING;
 INSERT INTO config (key, value, description) VALUES
-    ('agent.tools', '["recall","sense_memory_availability","request_background_search","recall_recent","recall_episode","explore_concept","explore_cluster","get_procedures","get_strategies","list_recent_episodes","create_goal","schedule_task","list_scheduled_tasks","update_scheduled_task","delete_scheduled_task","queue_user_message"]'::jsonb, 'Allowed tool names for agent tool use')
+    ('agent.tools', '["recall","sense_memory_availability","explore_concept","get_procedures","get_strategies","remember","manage_goals","manage_schedule","manage_backlog","aggregate_signals"]'::jsonb, 'Allowed tool names for chat-context tool use. Names MUST match the ToolHandlers registered in core/tools/ — services.agent applies this list as the chat allowlist via _allowed_tools_for_mode. Heartbeat keeps the full registry. Update this seed when registry names change; otherwise the chat path silently drops missing names.'),
+    ('agent.power_mode', '"prime"'::jsonb, 'Power mode: prime (full LLM behavior) or eco (canned chat reply, heartbeat skipped, no memory writes). Flipped by set-power-mode.ps1.')
 ON CONFLICT (key) DO NOTHING;
 INSERT INTO config (key, value, description) VALUES
     ('maintenance.maintenance_interval_seconds', '60'::jsonb, 'Seconds between subconscious maintenance ticks'),

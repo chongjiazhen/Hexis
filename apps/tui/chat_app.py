@@ -260,61 +260,65 @@ class ChatScreen(Screen):
         saw_first_token = False
 
         # Use the unified agent runner (subconscious → memory hydration → conscious loop)
-        async for event in stream_agent(
-            app.pool,
-            app.registry,
-            user_message=user_input,
-            mode="chat",
-            history=self._history,
-            session_id=session_id,
-            dsn=app.dsn,
-        ):
-            if event.event == AgentEvent.PHASE_CHANGE:
-                phase = event.data.get("phase", "")
-                status = event.data.get("status", "")
-                if phase == "memory_recall":
-                    if status == "start":
-                        self._set_header_status("recalling memories", busy=True)
-                        log.write_info("Recalling memories...")
-                    else:
-                        self._set_header_status("thinking...", busy=True)
-                        count = event.data.get("count", 0)
-                        log.write_info(f"Recalled {count} memories")
-                elif phase == "subconscious":
-                    if self._verbose:
+        try:
+            async for event in stream_agent(
+                app.pool,
+                app.registry,
+                user_message=user_input,
+                mode="chat",
+                history=self._history,
+                session_id=session_id,
+                dsn=app.dsn,
+            ):
+                if event.event == AgentEvent.PHASE_CHANGE:
+                    phase = event.data.get("phase", "")
+                    status = event.data.get("status", "")
+                    if phase == "memory_recall":
                         if status == "start":
-                            log.write_info("Subconscious appraisal...")
+                            self._set_header_status("recalling memories", busy=True)
+                            log.write_info("Recalling memories...")
+                        else:
+                            self._set_header_status("thinking...", busy=True)
+                            count = event.data.get("count", 0)
+                            log.write_info(f"Recalled {count} memories")
+                    elif phase == "subconscious":
+                        if self._verbose:
+                            if status == "start":
+                                log.write_info("Subconscious appraisal...")
+                            elif status == "end":
+                                log.write_info("Subconscious appraisal complete")
+                        if status == "start":
+                            self._set_header_status("reasoning", busy=True)
                         elif status == "end":
-                            log.write_info("Subconscious appraisal complete")
-                    if status == "start":
-                        self._set_header_status("reasoning", busy=True)
-                    elif status == "end":
-                        self._set_header_status("thinking...", busy=True)
+                            self._set_header_status("thinking...", busy=True)
 
-            elif event.event == AgentEvent.TEXT_DELTA:
-                text = event.data.get("text", "")
-                if text and streaming_msg:
-                    if not saw_first_token:
-                        saw_first_token = True
-                        self._set_header_status("streaming", busy=True)
-                    full_text += text
-                    streaming_msg.append_text(text)
+                elif event.event == AgentEvent.TEXT_DELTA:
+                    text = event.data.get("text", "")
+                    if text and streaming_msg:
+                        if not saw_first_token:
+                            saw_first_token = True
+                            self._set_header_status("streaming", busy=True)
+                        full_text += text
+                        streaming_msg.append_text(text)
 
-            elif event.event == AgentEvent.TOOL_START:
-                tool_name = event.data.get("tool_name", "tool")
-                log.write_tool_start(tool_name)
+                elif event.event == AgentEvent.TOOL_START:
+                    tool_name = event.data.get("tool_name", "tool")
+                    log.write_tool_start(tool_name)
 
-            elif event.event == AgentEvent.TOOL_RESULT:
-                tool_name = event.data.get("tool_name", "tool")
-                success = event.data.get("success", False)
-                duration = event.data.get("duration")
-                error = event.data.get("error", "")
-                log.write_tool_result(tool_name, success, duration, error)
+                elif event.event == AgentEvent.TOOL_RESULT:
+                    tool_name = event.data.get("tool_name", "tool")
+                    success = event.data.get("success", False)
+                    duration = event.data.get("duration")
+                    error = event.data.get("error", "")
+                    log.write_tool_result(tool_name, success, duration, error)
 
-            elif event.event == AgentEvent.ERROR:
-                error_msg = event.data.get("error", "Unknown error")
-                log.write_error(error_msg)
-                self._set_header_status("error")
+                elif event.event == AgentEvent.ERROR:
+                    error_msg = event.data.get("error", "Unknown error")
+                    log.write_error(error_msg)
+                    self._set_header_status("error")
+        except Exception as _stream_exc:
+            log.write_error(f"[stream-exc] {type(_stream_exc).__name__}: {_stream_exc}")
+            self._set_header_status("error")
 
         # Finalize streaming message
         if streaming_msg:

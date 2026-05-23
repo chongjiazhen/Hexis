@@ -30,6 +30,10 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
+# Suppress per-request URL logging — Telegram bot tokens appear in URLs
+# and would otherwise be written to logs in plaintext.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 logger = logging.getLogger("channel_worker")
 
 CHANNEL_CONFIG_POLL_INTERVAL_S = float(os.getenv("HEXIS_CHANNEL_CONFIG_POLL_INTERVAL_S", "15"))

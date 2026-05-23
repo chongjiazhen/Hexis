@@ -227,6 +227,7 @@ CREATE OR REPLACE FUNCTION get_agent_profile_context()
 RETURNS JSONB AS $$
 BEGIN
     RETURN jsonb_build_object(
+        'name', get_config('agent.init_profile')->'agent'->>'name',
         'objectives', COALESCE(get_config('agent.objectives'), '[]'::jsonb),
         'budget', COALESCE(get_config('agent.budget'), '{}'::jsonb),
         'guardrails', COALESCE(get_config('agent.guardrails'), '[]'::jsonb),
@@ -619,11 +620,17 @@ CREATE OR REPLACE FUNCTION build_outbox_message(
 RETURNS JSONB AS $$
 DECLARE
     message_id UUID;
+    db_name   TEXT := current_database();
+    agent_id  TEXT := CASE
+        WHEN db_name LIKE 'hexis_%' THEN substring(db_name FROM 7)
+        ELSE db_name
+    END;
 BEGIN
     message_id := gen_random_uuid();
     RETURN jsonb_build_object(
         'message_id', message_id::text,
         'kind', p_kind,
+        'agent', agent_id,
         'payload', COALESCE(p_payload, '{}'::jsonb)
     );
 END;
@@ -706,11 +713,35 @@ BEGIN
     );
 END;
 $$ LANGUAGE plpgsql;
+-- TRUE when local wall-clock (heartbeat.timezone) is inside the night window.
+-- Window wraps midnight when night_start_hour > night_end_hour (e.g. 23..8).
+-- Server clock is UTC; tz config converts before the hour comparison.
+CREATE OR REPLACE FUNCTION is_heartbeat_night()
+RETURNS BOOLEAN AS $$
+DECLARE
+    tz TEXT;
+    cur_hour INT;
+    night_start INT;
+    night_end INT;
+BEGIN
+    tz := COALESCE(get_config_text('heartbeat.timezone'), 'Asia/Singapore');
+    night_start := COALESCE(get_config_int('heartbeat.night_start_hour'), 23);
+    night_end := COALESCE(get_config_int('heartbeat.night_end_hour'), 8);
+    cur_hour := extract(hour FROM (CURRENT_TIMESTAMP AT TIME ZONE tz))::INT;
+    IF night_start <= night_end THEN
+        RETURN cur_hour >= night_start AND cur_hour < night_end;
+    ELSE
+        RETURN cur_hour >= night_start OR cur_hour < night_end;
+    END IF;
+END;
+$$ LANGUAGE plpgsql STABLE;
 CREATE OR REPLACE FUNCTION should_run_heartbeat()
 RETURNS BOOLEAN AS $$
 DECLARE
     state_record RECORD;
     interval_minutes FLOAT;
+    jitter_minutes FLOAT;
+    jitter_frac FLOAT;
 BEGIN
     IF is_agent_terminated() THEN
         RETURN FALSE;
@@ -729,9 +760,27 @@ BEGIN
     IF state_record.last_heartbeat_at IS NULL THEN
         RETURN TRUE;
     END IF;
-    interval_minutes := get_config_float('heartbeat.heartbeat_interval_minutes');
 
-    RETURN CURRENT_TIMESTAMP >= state_record.last_heartbeat_at + (interval_minutes || ' minutes')::INTERVAL;
+    -- Night throttle: slower interval + wider jitter during local quiet hours.
+    IF is_heartbeat_night() THEN
+        interval_minutes := COALESCE(get_config_float('heartbeat.night_interval_minutes'),
+                                     get_config_float('heartbeat.heartbeat_interval_minutes'));
+        jitter_minutes := COALESCE(get_config_float('heartbeat.night_jitter_minutes'),
+                                   get_config_float('heartbeat.heartbeat_jitter_minutes'), 0);
+    ELSE
+        interval_minutes := get_config_float('heartbeat.heartbeat_interval_minutes');
+        jitter_minutes := COALESCE(get_config_float('heartbeat.heartbeat_jitter_minutes'), 0);
+    END IF;
+
+    -- Deterministic per-cycle jitter: stable within a cycle (depends only on
+    -- last_heartbeat_at, fixed until the next beat) so the boolean does not
+    -- flicker between polls, but differs per instance and per cycle. Spreads
+    -- concurrent instances off a shared inference backend. Always >= 0 so a
+    -- heartbeat never fires more frequently than the configured interval.
+    jitter_frac := (extract(epoch FROM state_record.last_heartbeat_at)::BIGINT % 997) / 997.0;
+
+    RETURN CURRENT_TIMESTAMP >= state_record.last_heartbeat_at
+        + ((interval_minutes + jitter_frac * jitter_minutes) || ' minutes')::INTERVAL;
 END;
 $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION should_run_maintenance()

@@ -13,7 +13,7 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Awaitable, Callable
 
@@ -164,13 +164,13 @@ class Gateway:
 
     # -- Reclaim ----------------------------------------------------
 
-    async def reclaim(self, stale_after: str = "10 minutes") -> int:
+    async def reclaim(self, stale_after: timedelta = timedelta(minutes=10)) -> int:
         """Reset stale processing events back to pending.
 
         Call on startup to recover from worker crashes.
         """
         count = await self.pool.fetchval(
-            "SELECT gateway_reclaim($1::interval)",
+            "SELECT gateway_reclaim($1)",
             stale_after,
         )
         return count or 0

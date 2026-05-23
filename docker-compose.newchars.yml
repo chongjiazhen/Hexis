@@ -1,0 +1,599 @@
+# Native channel (+ heartbeat/maintenance) workers for all hexis-native personas.
+# Reuses shared db + rabbitmq from docker-compose.yml.
+# Single source of truth — replaces the legacy per-persona docker-compose.<P>.yml files.
+#
+# Usage (channel workers only):
+#   docker compose -f docker-compose.yml -f docker-compose.newchars.yml \
+#     up -d --build <persona>_channel_worker [...]
+#
+# Usage (full stack per persona, once behavioral gate passes):
+#   docker compose -f docker-compose.yml -f docker-compose.newchars.yml \
+#     --profile active up -d \
+#     <persona>_channel_worker <persona>_heartbeat_worker <persona>_maintenance_worker
+
+x-channel-base: &channel-base
+  build:
+    context: .
+    dockerfile: ops/Dockerfile.channels
+  profiles:
+    - active
+  command: ["hexis-channels"]
+  depends_on:
+    db:
+      condition: service_healthy
+    rabbitmq:
+      condition: service_healthy
+  networks:
+    - private
+    - public
+
+x-worker-base: &worker-base
+  build:
+    context: .
+    dockerfile: ops/Dockerfile.worker
+  profiles:
+    - active
+  depends_on:
+    db:
+      condition: service_healthy
+    rabbitmq:
+      condition: service_healthy
+  networks:
+    - private
+    - public
+
+x-common-env: &common-env
+  POSTGRES_HOST: db
+  POSTGRES_PORT: 5432
+  POSTGRES_USER: ${POSTGRES_USER:-hexis_user}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hexis_password}
+  EMBEDDING_MODEL_ID: ${EMBEDDING_MODEL_ID:-unsloth/embeddinggemma-300m}
+  EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-768}
+  RABBITMQ_MANAGEMENT_URL: http://rabbitmq:15672
+  RABBITMQ_USER: ${RABBITMQ_DEFAULT_USER:-hexis}
+  RABBITMQ_PASSWORD: ${RABBITMQ_DEFAULT_PASS:-hexis_password}
+  SEARXNG_URL: ${SEARXNG_URL:-http://searxng:8080}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+  XAI_API_KEY: ${XAI_API_KEY:-}
+  HEXIS_LLM_CONSCIOUS_API_KEY: ${HEXIS_LLM_CONSCIOUS_API_KEY:-}
+  HEXIS_LLM_SUBCONSCIOUS_API_KEY: ${HEXIS_LLM_SUBCONSCIOUS_API_KEY:-}
+
+services:
+
+  # ── Ennie ──────────────────────────────────────────────────────────────────
+  ennie_channel_worker:
+    <<: *channel-base
+    container_name: hexis_ennie_channel_worker
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_ennie
+      ENNIE_TELEGRAM_BOT_TOKEN: ${ENNIE_TELEGRAM_BOT_TOKEN:-}
+
+  ennie_heartbeat_worker:
+    <<: *worker-base
+    container_name: hexis_ennie_heartbeat_worker
+    command: ["hexis-worker", "--mode", "heartbeat"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_ennie
+
+  ennie_maintenance_worker:
+    <<: *worker-base
+    container_name: hexis_ennie_maintenance_worker
+    command: ["hexis-worker", "--mode", "maintenance"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_ennie
+
+  # ── Mira ── ON ICE 2026-05-22 (RAM pressure, host constantly at 97%;
+  #          DB hexis_mira preserved; thaw: drop the frozen profile override)
+  mira_channel_worker:
+    <<: *channel-base
+    profiles: ["frozen"]
+    container_name: hexis_mira_channel_worker
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_mira
+      MIRA_TELEGRAM_BOT_TOKEN: ${MIRA_TELEGRAM_BOT_TOKEN:-}
+
+  mira_heartbeat_worker:
+    <<: *worker-base
+    profiles: ["frozen"]
+    container_name: hexis_mira_heartbeat_worker
+    command: ["hexis-worker", "--mode", "heartbeat"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_mira
+
+  mira_maintenance_worker:
+    <<: *worker-base
+    profiles: ["frozen"]
+    container_name: hexis_mira_maintenance_worker
+    command: ["hexis-worker", "--mode", "maintenance"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_mira
+
+  # ── Monika ── ON ICE 2026-05-22 (superseded by unified AI-type character;
+  #             DB hexis_monika preserved; thaw: drop the frozen profile override)
+  monika_channel_worker:
+    <<: *channel-base
+    profiles: ["frozen"]
+    container_name: hexis_monika_channel_worker
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_monika
+      MONIKA_TELEGRAM_BOT_TOKEN: ${MONIKA_TELEGRAM_BOT_TOKEN:-}
+
+  monika_heartbeat_worker:
+    <<: *worker-base
+    profiles: ["frozen"]
+    container_name: hexis_monika_heartbeat_worker
+    command: ["hexis-worker", "--mode", "heartbeat"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_monika
+
+  monika_maintenance_worker:
+    <<: *worker-base
+    profiles: ["frozen"]
+    container_name: hexis_monika_maintenance_worker
+    command: ["hexis-worker", "--mode", "maintenance"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_monika
+
+  # ── Joje ── ON ICE 2026-05-22 (superseded by unified AI-type character;
+  #           DB hexis_joje preserved; thaw: drop the frozen profile override)
+  joje_channel_worker:
+    <<: *channel-base
+    profiles: ["frozen"]
+    container_name: hexis_joje_channel_worker
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_joje
+      JOJE_TELEGRAM_BOT_TOKEN: ${JOJE_TELEGRAM_BOT_TOKEN:-}
+
+  joje_heartbeat_worker:
+    <<: *worker-base
+    profiles: ["frozen"]
+    container_name: hexis_joje_heartbeat_worker
+    command: ["hexis-worker", "--mode", "heartbeat"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_joje
+
+  joje_maintenance_worker:
+    <<: *worker-base
+    profiles: ["frozen"]
+    container_name: hexis_joje_maintenance_worker
+    command: ["hexis-worker", "--mode", "maintenance"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_joje
+
+  # ── Nines ── ON ICE 2026-05-22 (superseded by unified android character;
+  #           DB hexis_nines preserved; thaw: drop the frozen profile override)
+  nines_channel_worker:
+    <<: *channel-base
+    profiles: ["frozen"]
+    container_name: hexis_nines_channel_worker
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_nines
+      NINES_TELEGRAM_BOT_TOKEN: ${NINES_TELEGRAM_BOT_TOKEN:-}
+
+  nines_heartbeat_worker:
+    <<: *worker-base
+    profiles: ["frozen"]
+    container_name: hexis_nines_heartbeat_worker
+    command: ["hexis-worker", "--mode", "heartbeat"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_nines
+
+  nines_maintenance_worker:
+    <<: *worker-base
+    profiles: ["frozen"]
+    container_name: hexis_nines_maintenance_worker
+    command: ["hexis-worker", "--mode", "maintenance"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_nines
+
+  # ── Death ──────────────────────────────────────────────────────────────────
+  death_channel_worker:
+    <<: *channel-base
+    container_name: hexis_death_channel_worker
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_death
+      DEATH_TELEGRAM_BOT_TOKEN: ${DEATH_TELEGRAM_BOT_TOKEN:-}
+
+  death_heartbeat_worker:
+    <<: *worker-base
+    container_name: hexis_death_heartbeat_worker
+    command: ["hexis-worker", "--mode", "heartbeat"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_death
+
+  death_maintenance_worker:
+    <<: *worker-base
+    container_name: hexis_death_maintenance_worker
+    command: ["hexis-worker", "--mode", "maintenance"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_death
+
+  # ── Cassiel ────────────────────────────────────────────────────────────────
+  cassiel_channel_worker:
+    <<: *channel-base
+    container_name: hexis_cassiel_channel_worker
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_cassiel
+      CASSIEL_TELEGRAM_BOT_TOKEN: ${CASSIEL_TELEGRAM_BOT_TOKEN:-}
+
+  cassiel_heartbeat_worker:
+    <<: *worker-base
+    container_name: hexis_cassiel_heartbeat_worker
+    command: ["hexis-worker", "--mode", "heartbeat"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_cassiel
+
+  cassiel_maintenance_worker:
+    <<: *worker-base
+    container_name: hexis_cassiel_maintenance_worker
+    command: ["hexis-worker", "--mode", "maintenance"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_cassiel
+
+  # ── LOVESICK ── ON ICE 2026-05-22 (superseded by unified AI-type character;
+  #              DB hexis_lovesick preserved; thaw: drop the frozen profile override)
+  lovesick_channel_worker:
+    <<: *channel-base
+    profiles: ["frozen"]
+    container_name: hexis_lovesick_channel_worker
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_lovesick
+      LOVESICK_TELEGRAM_BOT_TOKEN: ${LOVESICK_TELEGRAM_BOT_TOKEN:-}
+
+  lovesick_heartbeat_worker:
+    <<: *worker-base
+    profiles: ["frozen"]
+    container_name: hexis_lovesick_heartbeat_worker
+    command: ["hexis-worker", "--mode", "heartbeat"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_lovesick
+
+  lovesick_maintenance_worker:
+    <<: *worker-base
+    profiles: ["frozen"]
+    container_name: hexis_lovesick_maintenance_worker
+    command: ["hexis-worker", "--mode", "maintenance"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_lovesick
+
+  # ── Charlotte ── ON ICE 2026-05-22 (superseded by unified android character;
+  #               DB hexis_charlotte preserved; thaw: drop the frozen profile override)
+  charlotte_channel_worker:
+    <<: *channel-base
+    profiles: ["frozen"]
+    container_name: hexis_charlotte_channel_worker
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_charlotte
+      CHARLOTTE_TELEGRAM_BOT_TOKEN: ${CHARLOTTE_TELEGRAM_BOT_TOKEN:-}
+
+  charlotte_heartbeat_worker:
+    <<: *worker-base
+    profiles: ["frozen"]
+    container_name: hexis_charlotte_heartbeat_worker
+    command: ["hexis-worker", "--mode", "heartbeat"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_charlotte
+
+  charlotte_maintenance_worker:
+    <<: *worker-base
+    profiles: ["frozen"]
+    container_name: hexis_charlotte_maintenance_worker
+    command: ["hexis-worker", "--mode", "maintenance"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_charlotte
+
+  # ── Ao ── ON ICE 2026-05-22 (AI-type persona overlap; thaw: drop the frozen
+  #          profile override so these rejoin the `active` profile)
+  ao_channel_worker:
+    <<: *channel-base
+    profiles: ["frozen"]
+    container_name: hexis_ao_channel_worker
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_ao
+      AO_TELEGRAM_BOT_TOKEN: ${AO_TELEGRAM_BOT_TOKEN:-}
+
+  ao_heartbeat_worker:
+    <<: *worker-base
+    profiles: ["frozen"]
+    container_name: hexis_ao_heartbeat_worker
+    command: ["hexis-worker", "--mode", "heartbeat"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_ao
+
+  ao_maintenance_worker:
+    <<: *worker-base
+    profiles: ["frozen"]
+    container_name: hexis_ao_maintenance_worker
+    command: ["hexis-worker", "--mode", "maintenance"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_ao
+
+  # ── Ichika ── ON ICE 2026-05-22 (superseded by unified AI-type character;
+  #            DB hexis_ichika preserved; thaw: drop the frozen profile override)
+  ichika_channel_worker:
+    <<: *channel-base
+    profiles: ["frozen"]
+    container_name: hexis_ichika_channel_worker
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_ichika
+      ICHIKA_TELEGRAM_BOT_TOKEN: ${ICHIKA_TELEGRAM_BOT_TOKEN:-}
+
+  ichika_heartbeat_worker:
+    <<: *worker-base
+    profiles: ["frozen"]
+    container_name: hexis_ichika_heartbeat_worker
+    command: ["hexis-worker", "--mode", "heartbeat"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_ichika
+
+  ichika_maintenance_worker:
+    <<: *worker-base
+    profiles: ["frozen"]
+    container_name: hexis_ichika_maintenance_worker
+    command: ["hexis-worker", "--mode", "maintenance"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_ichika
+
+  # ── Hazel ──────────────────────────────────────────────────────────────────
+  hazel_channel_worker:
+    <<: *channel-base
+    container_name: hexis_hazel_channel_worker
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_hazel
+      HAZEL_TELEGRAM_BOT_TOKEN: ${HAZEL_TELEGRAM_BOT_TOKEN:-}
+
+  hazel_heartbeat_worker:
+    <<: *worker-base
+    container_name: hexis_hazel_heartbeat_worker
+    command: ["hexis-worker", "--mode", "heartbeat"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_hazel
+
+  hazel_maintenance_worker:
+    <<: *worker-base
+    container_name: hexis_hazel_maintenance_worker
+    command: ["hexis-worker", "--mode", "maintenance"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_hazel
+
+  # ── Callisto ───────────────────────────────────────────────────────────────
+  callisto_channel_worker:
+    <<: *channel-base
+    container_name: hexis_callisto_channel_worker
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_callisto
+      CALLISTO_TELEGRAM_BOT_TOKEN: ${CALLISTO_TELEGRAM_BOT_TOKEN:-}
+
+  callisto_heartbeat_worker:
+    <<: *worker-base
+    container_name: hexis_callisto_heartbeat_worker
+    command: ["hexis-worker", "--mode", "heartbeat"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_callisto
+
+  callisto_maintenance_worker:
+    <<: *worker-base
+    container_name: hexis_callisto_maintenance_worker
+    command: ["hexis-worker", "--mode", "maintenance"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_callisto
+
+  # ── Vera ── communication-skills trainer persona
+  vera_channel_worker:
+    <<: *channel-base
+    container_name: hexis_vera_channel_worker
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_vera
+      VERA_TELEGRAM_BOT_TOKEN: ${VERA_TELEGRAM_BOT_TOKEN:-}
+
+  vera_heartbeat_worker:
+    <<: *worker-base
+    container_name: hexis_vera_heartbeat_worker
+    command: ["hexis-worker", "--mode", "heartbeat"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_vera
+
+  vera_maintenance_worker:
+    <<: *worker-base
+    container_name: hexis_vera_maintenance_worker
+    command: ["hexis-worker", "--mode", "maintenance"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_vera
+
+  # ── Denali ─────────────────────────────────────────────────────────────────
+  denali_channel_worker:
+    <<: *channel-base
+    container_name: hexis_denali_channel_worker
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_denali
+      DENALI_TELEGRAM_BOT_TOKEN: ${DENALI_TELEGRAM_BOT_TOKEN:-}
+
+  denali_heartbeat_worker:
+    <<: *worker-base
+    container_name: hexis_denali_heartbeat_worker
+    command: ["hexis-worker", "--mode", "heartbeat"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_denali
+
+  denali_maintenance_worker:
+    <<: *worker-base
+    container_name: hexis_denali_maintenance_worker
+    command: ["hexis-worker", "--mode", "maintenance"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_denali
+
+  # ── Vesper ─────────────────────────────────────────────────────────────────
+  vesper_channel_worker:
+    <<: *channel-base
+    container_name: hexis_vesper_channel_worker
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_vesper
+      VESPER_TELEGRAM_BOT_TOKEN: ${VESPER_TELEGRAM_BOT_TOKEN:-}
+
+  vesper_heartbeat_worker:
+    <<: *worker-base
+    container_name: hexis_vesper_heartbeat_worker
+    command: ["hexis-worker", "--mode", "heartbeat"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_vesper
+
+  vesper_maintenance_worker:
+    <<: *worker-base
+    container_name: hexis_vesper_maintenance_worker
+    command: ["hexis-worker", "--mode", "maintenance"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_vesper
+
+  # ── Eudora ── ON ICE 2026-05-22 (RAM pressure, host constantly at 97%;
+  #             DB hexis_eudora preserved; thaw: drop the frozen profile override)
+  eudora_channel_worker:
+    <<: *channel-base
+    profiles: ["frozen"]
+    container_name: hexis_eudora_channel_worker
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_eudora
+      EUDORA_TELEGRAM_BOT_TOKEN: ${EUDORA_TELEGRAM_BOT_TOKEN:-}
+
+  eudora_heartbeat_worker:
+    <<: *worker-base
+    profiles: ["frozen"]
+    container_name: hexis_eudora_heartbeat_worker
+    command: ["hexis-worker", "--mode", "heartbeat"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_eudora
+
+  eudora_maintenance_worker:
+    <<: *worker-base
+    profiles: ["frozen"]
+    container_name: hexis_eudora_maintenance_worker
+    command: ["hexis-worker", "--mode", "maintenance"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_eudora
+
+  # ── Esme ── conversation-confidence coach persona
+  esme_channel_worker:
+    <<: *channel-base
+    container_name: hexis_esme_channel_worker
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_esme
+      ESME_TELEGRAM_BOT_TOKEN: ${ESME_TELEGRAM_BOT_TOKEN:-}
+
+  esme_heartbeat_worker:
+    <<: *worker-base
+    container_name: hexis_esme_heartbeat_worker
+    command: ["hexis-worker", "--mode", "heartbeat"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_esme
+
+  esme_maintenance_worker:
+    <<: *worker-base
+    container_name: hexis_esme_maintenance_worker
+    command: ["hexis-worker", "--mode", "maintenance"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_esme
+
+  # ── Sable ── intimacy & consent coach persona
+  sable_channel_worker:
+    <<: *channel-base
+    container_name: hexis_sable_channel_worker
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_sable
+      SABLE_TELEGRAM_BOT_TOKEN: ${SABLE_TELEGRAM_BOT_TOKEN:-}
+
+  sable_heartbeat_worker:
+    <<: *worker-base
+    container_name: hexis_sable_heartbeat_worker
+    command: ["hexis-worker", "--mode", "heartbeat"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_sable
+
+  sable_maintenance_worker:
+    <<: *worker-base
+    container_name: hexis_sable_maintenance_worker
+    command: ["hexis-worker", "--mode", "maintenance"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_sable
+
+  # ── Trump ── satirical political persona
+  trump_channel_worker:
+    <<: *channel-base
+    container_name: hexis_trump_channel_worker
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_trump
+      TRUMP_TELEGRAM_BOT_TOKEN: ${TRUMP_TELEGRAM_BOT_TOKEN:-}
+
+  trump_heartbeat_worker:
+    <<: *worker-base
+    container_name: hexis_trump_heartbeat_worker
+    command: ["hexis-worker", "--mode", "heartbeat"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_trump
+
+  trump_maintenance_worker:
+    <<: *worker-base
+    container_name: hexis_trump_maintenance_worker
+    command: ["hexis-worker", "--mode", "maintenance"]
+    environment:
+      <<: *common-env
+      POSTGRES_DB: hexis_trump

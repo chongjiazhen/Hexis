@@ -48,11 +48,14 @@ BEGIN
     );
     END;
 $$ LANGUAGE plpgsql STABLE;
+-- Return-type change (new sender_id column) requires a DROP first.
+DROP FUNCTION IF EXISTS recall_memories_filtered(TEXT, INT, memory_type[], FLOAT);
 CREATE OR REPLACE FUNCTION recall_memories_filtered(
     p_query_text TEXT,
     p_limit INT DEFAULT 10,
     p_memory_types memory_type[] DEFAULT NULL,
-    p_min_importance FLOAT DEFAULT 0.0
+    p_min_importance FLOAT DEFAULT 0.0,
+    p_current_sender TEXT DEFAULT NULL
 ) RETURNS TABLE (
     memory_id UUID,
     content TEXT,
@@ -63,12 +66,13 @@ CREATE OR REPLACE FUNCTION recall_memories_filtered(
     trust_level FLOAT,
     source_attribution JSONB,
     created_at TIMESTAMPTZ,
-    emotional_valence FLOAT
+    emotional_valence FLOAT,
+    sender_id TEXT
 ) AS $$
 BEGIN
     RETURN QUERY
     WITH hits AS (
-        SELECT * FROM fast_recall(p_query_text, p_limit * 2)
+        SELECT * FROM fast_recall(p_query_text, p_limit * 2, p_current_sender)
     )
     SELECT
         h.memory_id,
@@ -80,7 +84,8 @@ BEGIN
         m.trust_level,
         m.source_attribution,
         m.created_at,
-        (m.metadata->>'emotional_valence')::float AS emotional_valence
+        (m.metadata->>'emotional_valence')::float AS emotional_valence,
+        h.sender_id
     FROM hits h
     JOIN memories m ON m.id = h.memory_id
     WHERE (p_memory_types IS NULL OR h.memory_type = ANY(p_memory_types))
@@ -906,13 +911,17 @@ BEGIN
     WHERE id = p_worldview_memory_id;
 END;
 $$ LANGUAGE plpgsql;
+-- Adding p_sender_id creates a signature overload; DROP the old arity first so a
+-- 6-arg call cannot resolve to a stale version that ignores sender_id.
+DROP FUNCTION IF EXISTS create_memory(memory_type, TEXT, FLOAT, JSONB, FLOAT, JSONB);
 CREATE OR REPLACE FUNCTION create_memory(
     p_type memory_type,
     p_content TEXT,
     p_importance FLOAT DEFAULT 0.5,
     p_source_attribution JSONB DEFAULT NULL,
     p_trust_level FLOAT DEFAULT NULL,
-    p_metadata JSONB DEFAULT '{}'::jsonb
+    p_metadata JSONB DEFAULT '{}'::jsonb,
+    p_sender_id TEXT DEFAULT NULL
 ) RETURNS UUID AS $$
 DECLARE
     new_memory_id UUID;
@@ -945,8 +954,8 @@ BEGIN
     effective_trust := LEAST(1.0, GREATEST(0.0, effective_trust));
     embedding_vec := (get_embedding(ARRAY[p_content]))[1];
 
-    INSERT INTO memories (type, content, embedding, importance, source_attribution, trust_level, trust_updated_at, metadata)
-    VALUES (p_type, p_content, embedding_vec, p_importance, normalized_source, effective_trust, CURRENT_TIMESTAMP, COALESCE(p_metadata, '{}'::jsonb))
+    INSERT INTO memories (type, content, embedding, importance, source_attribution, trust_level, trust_updated_at, metadata, sender_id)
+    VALUES (p_type, p_content, embedding_vec, p_importance, normalized_source, effective_trust, CURRENT_TIMESTAMP, COALESCE(p_metadata, '{}'::jsonb), p_sender_id)
     RETURNING id INTO new_memory_id;
     EXECUTE format(
         'SELECT * FROM ag_catalog.cypher(''memory_graph'', $q$
@@ -962,6 +971,7 @@ BEGIN
     RETURN new_memory_id;
 END;
 $$ LANGUAGE plpgsql;
+DROP FUNCTION IF EXISTS create_episodic_memory(TEXT, JSONB, JSONB, JSONB, FLOAT, TIMESTAMPTZ, FLOAT, JSONB, FLOAT);
 CREATE OR REPLACE FUNCTION create_episodic_memory(
     p_content TEXT,
     p_action_taken JSONB DEFAULT NULL,
@@ -971,7 +981,8 @@ CREATE OR REPLACE FUNCTION create_episodic_memory(
     p_event_time TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     p_importance FLOAT DEFAULT 0.5,
     p_source_attribution JSONB DEFAULT NULL,
-    p_trust_level FLOAT DEFAULT NULL
+    p_trust_level FLOAT DEFAULT NULL,
+    p_sender_id TEXT DEFAULT NULL
 ) RETURNS UUID AS $$
 DECLARE
     new_memory_id UUID;
@@ -993,11 +1004,12 @@ BEGIN
         'verification_status', NULL
     );
 
-    new_memory_id := create_memory('episodic', p_content, p_importance, normalized_source, effective_trust, meta);
+    new_memory_id := create_memory('episodic', p_content, p_importance, normalized_source, effective_trust, meta, p_sender_id);
 
     RETURN new_memory_id;
 END;
 $$ LANGUAGE plpgsql;
+DROP FUNCTION IF EXISTS create_semantic_memory(TEXT, FLOAT, TEXT[], TEXT[], JSONB, FLOAT, JSONB, FLOAT);
 CREATE OR REPLACE FUNCTION create_semantic_memory(
     p_content TEXT,
     p_confidence FLOAT,
@@ -1006,7 +1018,8 @@ CREATE OR REPLACE FUNCTION create_semantic_memory(
     p_source_references JSONB DEFAULT NULL,
     p_importance FLOAT DEFAULT 0.5,
     p_source_attribution JSONB DEFAULT NULL,
-    p_trust_level FLOAT DEFAULT NULL
+    p_trust_level FLOAT DEFAULT NULL,
+    p_sender_id TEXT DEFAULT NULL
 ) RETURNS UUID AS $$
 DECLARE
     new_memory_id UUID;
@@ -1037,7 +1050,7 @@ BEGIN
         'related_concepts', to_jsonb(p_related_concepts)
     );
 
-    new_memory_id := create_memory('semantic', p_content, p_importance, primary_source, effective_trust, meta);
+    new_memory_id := create_memory('semantic', p_content, p_importance, primary_source, effective_trust, meta, p_sender_id);
 
     PERFORM sync_memory_trust(new_memory_id);
 

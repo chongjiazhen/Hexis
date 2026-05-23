@@ -78,6 +78,12 @@ class AgentLoopConfig:
     registry: "ToolRegistry"
     pool: "asyncpg.Pool"
 
+    # Per-persona tool allowlist. If non-None, tools sent to the LLM are
+    # filtered to names in the list. Cuts ~5K tokens off the chat path by
+    # sending only the persona's curated tool set (agent.tools config) to
+    # the model instead of the full registry.
+    allowed_tool_names: list[str] | None = None
+
     # Energy budget — None means unlimited (chat mode)
     energy_budget: int | None = None
 
@@ -184,7 +190,10 @@ class AgentLoop:
         messages.extend(history or [])
         messages.append({"role": "user", "content": user_message})
 
-        tools = await self.config.registry.get_specs(self.config.tool_context)
+        tools = await self.config.registry.get_specs(
+            self.config.tool_context,
+            allowed_names=self.config.allowed_tool_names,
+        )
         await self._start_turn(user_message, messages)
 
         await self._emit(AgentEvent.LOOP_START, {

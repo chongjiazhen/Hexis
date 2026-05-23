@@ -20,11 +20,46 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Maximum conversation turns to keep in session history
+# Fleet-default conversation-history bounds. A persona on a small-context
+# model (e.g. Vera on the 24K-window local model) can override these per-DB
+# via the channel.history.max / channel.history.trim config keys — verbose
+# personas otherwise overflow the model's context window.
 MAX_SESSION_HISTORY = 40
 
 # Trim to this many when we exceed the max
 TRIM_TO_HISTORY = 30
+
+
+async def _resolve_history_limits(conn: "asyncpg.Connection") -> tuple[int, int]:
+    """Return (max, trim) session-history bounds for this persona.
+
+    Defaults are MAX_SESSION_HISTORY / TRIM_TO_HISTORY; the channel.history.max
+    and channel.history.trim config keys override them. trim is clamped below
+    max so trimming always makes progress.
+    """
+    max_n, trim_n = MAX_SESSION_HISTORY, TRIM_TO_HISTORY
+
+    def _as_int(raw: Any, default: int) -> int:
+        try:
+            return int(json.loads(raw) if isinstance(raw, str) else raw)
+        except (TypeError, ValueError):
+            return default
+
+    try:
+        rows = await conn.fetch(
+            "SELECT key, value FROM config "
+            "WHERE key IN ('channel.history.max', 'channel.history.trim')"
+        )
+        cfg = {r["key"]: r["value"] for r in rows}
+        if "channel.history.max" in cfg:
+            max_n = _as_int(cfg["channel.history.max"], max_n)
+        if "channel.history.trim" in cfg:
+            trim_n = _as_int(cfg["channel.history.trim"], trim_n)
+    except Exception:
+        logger.debug("history-limit config lookup failed; using defaults")
+
+    trim_n = max(1, min(trim_n, max_n - 1))
+    return max_n, trim_n
 
 # Default energy cost per channel message (0 = free)
 DEFAULT_CHANNEL_ENERGY_COST = 0.0
@@ -218,6 +253,7 @@ async def _flush_trimmed_to_memory(
     dsn: str,
     trimmed_messages: list[dict[str, Any]],
     session_id: str,
+    sender_id: str | None = None,
 ) -> int:
     """
     Pre-compaction memory flush: extract important information from messages
@@ -300,12 +336,15 @@ async def _flush_trimmed_to_memory(
                 }
 
                 if recmem_enabled:
+                    # PR-C: preserve real sender through compaction flush. Synthetic
+                    # suffix is the idempotency disambiguator, not the identity.
                     digest = hashlib.sha256(f"{user_text}\x1e{assistant_text}".encode("utf-8")).hexdigest()[:16]
+                    identity_prefix = sender_id or "session"
                     await mem.remember_turn_raw(
                         user_text,
                         assistant_text,
                         session_id=session_id,
-                        source_identity=f"compaction:{session_id}:{idx}:{digest}",
+                        source_identity=f"{identity_prefix}:compaction:{session_id}:{idx}:{digest}",
                         importance=importance,
                         source_attribution=source_attr,
                         metadata={"type": "conversation", "source": "compaction_flush"},
@@ -320,6 +359,7 @@ async def _flush_trimmed_to_memory(
                         context={"type": "conversation", "source": "compaction_flush"},
                         source_attribution=source_attr,
                         trust_level=0.85,
+                        sender_id=sender_id,
                     )
                 stored += 1
 
@@ -337,22 +377,25 @@ async def _update_session(
     history: list[dict[str, Any]],
     *,
     dsn: str | None = None,
+    sender_id: str | None = None,
 ) -> None:
     """Update session history and last_active timestamp.
 
-    When history exceeds MAX_SESSION_HISTORY, runs a pre-compaction memory
-    flush to preserve important information from the messages being trimmed,
-    then trims to TRIM_TO_HISTORY.
+    When history exceeds the max bound, runs a pre-compaction memory flush to
+    preserve important information from the messages being trimmed, then trims
+    to the trim bound. Bounds come from _resolve_history_limits (per-persona
+    config, fleet defaults otherwise).
     """
-    if len(history) > MAX_SESSION_HISTORY:
+    max_n, trim_n = await _resolve_history_limits(conn)
+    if len(history) > max_n:
         # Messages that will be discarded
-        trimmed = history[:-TRIM_TO_HISTORY]
-        history = history[-TRIM_TO_HISTORY:]
+        trimmed = history[:-trim_n]
+        history = history[-trim_n:]
 
         # Flush trimmed messages to long-term memory (non-blocking best-effort)
         if dsn and trimmed:
             try:
-                await _flush_trimmed_to_memory(dsn, trimmed, session_id)
+                await _flush_trimmed_to_memory(dsn, trimmed, session_id, sender_id=sender_id)
             except Exception:
                 logger.exception("Pre-compaction flush error (session=%s)", session_id)
 
@@ -467,6 +510,7 @@ async def process_channel_message(
             dsn=dsn,
             session_id=f"channel:{msg.channel_type}:{msg.channel_id}:{msg.sender_id}",
             pool=pool,
+            sender_id=msg.sender_id,
         )
 
         assistant_text = result.get("assistant", "")
@@ -572,12 +616,31 @@ async def stream_channel_message(
             dsn=dsn,
             session_id=f"channel:{msg.channel_type}:{msg.channel_id}:{msg.sender_id}",
             pool=pool,
+            sender_id=msg.sender_id,
         ):
             collected.append(token)
             await coalescer.push(token)
 
         message_id = await coalescer.flush()
         assistant_text = "".join(collected)
+
+        if not assistant_text:
+            # Model returned nothing — don't poison history with an empty assistant turn.
+            # Send a fallback so the user knows the message was received.
+            logger.warning(
+                "Empty streaming response for %s/%s — sending fallback, not storing in history",
+                msg.channel_type, msg.sender_id,
+            )
+            try:
+                await adapter.send(
+                    msg.channel_id,
+                    "...",
+                    reply_to=msg.message_id,
+                    thread_id=msg.thread_id,
+                )
+            except Exception:
+                logger.debug("Failed to send empty-response fallback", exc_info=True)
+            return None
 
         # Update session and log
         new_history = list(history)
