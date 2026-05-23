@@ -85,6 +85,14 @@ SELECT
     s.updated_at
 FROM state s
 WHERE s.key = 'maintenance_state';
+CREATE VIEW recmem_state AS
+SELECT
+    1 as id,
+    (s.value->>'last_sweep_at')::timestamptz as last_sweep_at,
+    COALESCE(s.value->'last_sweep_result', '{}'::jsonb) as last_sweep_result,
+    s.updated_at
+FROM state s
+WHERE s.key = 'recmem_state';
 CREATE VIEW active_goals AS
 SELECT
     id,
@@ -230,6 +238,21 @@ SELECT
     ) as heartbeats_24h,
     0::bigint as pending_calls,
     0::bigint as relationships_discovered_24h;
+CREATE OR REPLACE VIEW recmem_rollout_health AS
+SELECT
+    (SELECT COUNT(*) FROM subconscious_units WHERE status = 'active') AS active_raw_units,
+    (SELECT COUNT(*) FROM subconscious_units WHERE embedding_status = 'pending') AS pending_embeddings,
+    (SELECT COUNT(*) FROM subconscious_units WHERE embedding_status = 'failed') AS failed_embeddings,
+    (SELECT COUNT(*) FROM subconscious_units WHERE route_status = 'unrouted' AND embedding_status = 'embedded') AS pending_routes,
+    (SELECT COUNT(*) FROM subconscious_units WHERE route_status = 'route_failed') AS failed_routes,
+    (SELECT COUNT(*) FROM recmem_consolidation_tasks WHERE status = 'pending' AND next_attempt_at <= CURRENT_TIMESTAMP) AS pending_tasks,
+    (SELECT COUNT(*) FROM recmem_consolidation_tasks WHERE status = 'failed') AS failed_tasks,
+    (SELECT COUNT(*) FROM recmem_consolidation_tasks WHERE status = 'dropped') AS dropped_tasks,
+    (SELECT AVG(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - created_at))) FROM subconscious_units WHERE embedding_status = 'pending') AS avg_pending_embedding_age_s,
+    (SELECT AVG(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - embedded_at))) FROM subconscious_units WHERE embedding_status = 'embedded' AND route_status = 'unrouted') AS avg_pending_route_age_s,
+    (SELECT COUNT(*) FROM recmem_retrieval_comparisons WHERE created_at > CURRENT_TIMESTAMP - INTERVAL '24 hours') AS dual_write_comparisons_24h,
+    (SELECT COUNT(*) FROM recmem_rollout_events WHERE created_at > CURRENT_TIMESTAMP - INTERVAL '24 hours') AS rollout_events_24h,
+    (SELECT get_recmem_rollout_metrics(CURRENT_TIMESTAMP - INTERVAL '24 hours')) AS metrics_24h;
 CREATE OR REPLACE VIEW worker_tasks AS
 SELECT
     'heartbeat'::text AS task_type,
@@ -239,4 +262,32 @@ UNION ALL
 SELECT
     'subconscious_maintenance'::text AS task_type,
     CASE WHEN should_run_maintenance() THEN 1 ELSE 0 END AS pending_count,
-    'Run subconscious maintenance tick (consolidate + prune)'::text AS description;
+    'Run subconscious maintenance tick (consolidate + prune)'::text AS description
+UNION ALL
+SELECT
+    'recmem_embedding'::text AS task_type,
+    COUNT(*)::int AS pending_count,
+    'Embed pending RecMem raw units'::text AS description
+FROM subconscious_units
+WHERE embedding_status = 'pending'
+UNION ALL
+SELECT
+    'recmem_routing'::text AS task_type,
+    COUNT(*)::int AS pending_count,
+    'Route embedded RecMem raw units'::text AS description
+FROM subconscious_units
+WHERE embedding_status = 'embedded'
+  AND route_status = 'unrouted'
+UNION ALL
+SELECT
+    'recmem_consolidation'::text AS task_type,
+    COUNT(*)::int AS pending_count,
+    'Process pending RecMem consolidation tasks'::text AS description
+FROM recmem_consolidation_tasks
+WHERE status = 'pending'
+  AND next_attempt_at <= CURRENT_TIMESTAMP
+UNION ALL
+SELECT
+    'recmem_sweep'::text AS task_type,
+    CASE WHEN should_run_recmem_sweep() THEN 1 ELSE 0 END AS pending_count,
+    'Re-route old RecMem raw-only units'::text AS description;

@@ -133,6 +133,7 @@ CREATE OR REPLACE FUNCTION fast_recall(
             1 - (m.embedding <=> query_embedding) as sim
         FROM memories m
 	        WHERE m.status = 'active'
+              AND (m.valid_until IS NULL OR m.valid_until > CURRENT_TIMESTAMP)
 	          AND m.embedding IS NOT NULL
 	          AND m.embedding <> zero_vec
 	        ORDER BY m.embedding <=> query_embedding
@@ -234,6 +235,7 @@ CREATE OR REPLACE FUNCTION fast_recall(
 	    FROM scored sc
 	    JOIN memories m ON sc.mem_id = m.id
 	    WHERE m.status = 'active'
+          AND (m.valid_until IS NULL OR m.valid_until > CURRENT_TIMESTAMP)
           AND m.trust_level >= min_trust
 	    ORDER BY final_score DESC
 	    LIMIT p_limit;

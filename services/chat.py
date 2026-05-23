@@ -1,10 +1,14 @@
 from __future__ import annotations
 
-import json
+import asyncio
 import logging
+import hashlib
+import json
 import re
+import time
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator
+from uuid import UUID
 
 from core.agent_api import db_dsn_from_env, get_agent_profile_context, pool_sizes_from_env
 from core.agent_loop import AgentEvent
@@ -14,6 +18,145 @@ from core.tools import create_default_registry, ToolContext, ToolExecutionContex
 from services.agent import run_agent, stream_agent
 
 logger = logging.getLogger(__name__)
+
+
+def _uuid_text_or_none(val: str | None) -> str | None:
+    if val is None:
+        return None
+    try:
+        return str(UUID(str(val)))
+    except Exception:
+        return None
+
+
+async def _record_recmem_rollout_event(
+    *,
+    mem_client: CognitiveMemory | None = None,
+    dsn: str | None = None,
+    event_type: str,
+    session_id: str | None,
+    source_identity: str | None,
+    raw_unit_id: str | None,
+    raw_status: str | None,
+    direct_promoted: bool,
+    eager_written: bool,
+    eager_memory_id: str | None,
+    duration_ms: float | None,
+    error: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    async def _write(client: CognitiveMemory) -> None:
+        async with client._pool.acquire() as conn:
+            await conn.fetchval(
+                """
+                SELECT record_recmem_rollout_event(
+                    $1::text, $2::uuid, $3::text, $4::uuid, $5::text,
+                    $6::boolean, $7::boolean, $8::uuid, $9::float,
+                    $10::text, $11::jsonb
+                )
+                """,
+                event_type,
+                _uuid_text_or_none(session_id),
+                source_identity,
+                raw_unit_id,
+                raw_status,
+                direct_promoted,
+                eager_written,
+                eager_memory_id,
+                duration_ms,
+                error,
+                json.dumps(metadata or {}),
+            )
+
+    try:
+        if dsn:
+            async with CognitiveMemory.connect(dsn) as client:
+                await _write(client)
+        elif mem_client is not None:
+            await _write(mem_client)
+    except Exception:
+        logger.debug("RecMem rollout event recording failed", exc_info=True)
+
+
+def _schedule_recmem_rollout_event(**kwargs: Any) -> None:
+    try:
+        task = asyncio.create_task(_record_recmem_rollout_event(**kwargs))
+    except RuntimeError:
+        return
+
+    def _consume_exception(done: asyncio.Task[None]) -> None:
+        try:
+            done.exception()
+        except asyncio.CancelledError:
+            pass
+
+    task.add_done_callback(_consume_exception)
+
+
+async def _log_dual_write_comparison(
+    mem_client: CognitiveMemory | None = None,
+    *,
+    dsn: str | None = None,
+    query: str,
+    session_id: str | None,
+) -> None:
+    async def _compare(client: CognitiveMemory) -> None:
+        started = time.perf_counter()
+        eager = await client.recall(query, limit=10, include_partial=False)
+        recmem = await client.hydrate_recmem(query, session_id=session_id)
+        duration_ms = (time.perf_counter() - started) * 1000
+        eager_ids = [m.id for m in eager.memories]
+        recmem_ids = [m.id for m in recmem]
+        async with client._pool.acquire() as conn:
+            await conn.fetchval(
+                """
+                SELECT record_recmem_dual_write_comparison(
+                    $1::text, $2::uuid, $3::uuid[], $4::uuid[], $5::float, $6::jsonb
+                )
+                """,
+                query,
+                _uuid_text_or_none(session_id),
+                eager_ids,
+                recmem_ids,
+                duration_ms,
+                json.dumps({"source": "chat"}),
+            )
+        logger.info(
+            "RecMem dual-write comparison: session=%s eager=%s recmem=%s",
+            session_id,
+            [str(mid) for mid in eager_ids],
+            [str(mid) for mid in recmem_ids],
+        )
+
+    try:
+        if dsn:
+            async with CognitiveMemory.connect(dsn) as client:
+                await _compare(client)
+        elif mem_client is not None:
+            await _compare(mem_client)
+    except Exception:
+        logger.debug("RecMem dual-write comparison failed", exc_info=True)
+
+
+def _schedule_dual_write_comparison(
+    mem_client: CognitiveMemory | None = None,
+    *,
+    dsn: str | None = None,
+    query: str,
+    session_id: str | None,
+) -> None:
+    try:
+        task = asyncio.create_task(_log_dual_write_comparison(mem_client, dsn=dsn, query=query, session_id=session_id))
+    except RuntimeError:
+        return
+
+    def _consume_exception(done: asyncio.Task[None]) -> None:
+        try:
+            done.exception()
+        except asyncio.CancelledError:
+            pass
+
+    task.add_done_callback(_consume_exception)
 
 
 ECO_SLIM_ANCHOR = (
@@ -274,30 +417,31 @@ async def _remember_conversation(
     *,
     user_message: str,
     assistant_message: str,
+    session_id: str | None = None,
+    source_identity: str | None = None,
     sender_id: str | None = None,
+    background_dsn: str | None = None,
 ) -> None:
     if not user_message and not assistant_message:
         return
-    content = f"User: {user_message}\n\nAssistant: {assistant_message}"
-    importance = _estimate_importance(user_message, assistant_message)
-    source_attribution = {
-        "kind": "conversation",
-        "ref": "conversation_turn",
-        "label": "conversation turn",
-        "observed_at": datetime.now(timezone.utc).isoformat(),
-        "trust": 0.95,
-    }
-    await mem_client.remember(
-        content,
-        type=MemoryType.EPISODIC,
-        importance=importance,
-        emotional_valence=0.0,
-        context={"type": "conversation"},
-        source_attribution=source_attribution,
-        source_references=None,
-        trust_level=0.95,
-        sender_id=sender_id,
+    # sender_id IS upstream's source_identity in their RecMem framing. Explicit
+    # source_identity wins if set; otherwise fall back to sender_id.
+    effective_identity = source_identity if source_identity is not None else sender_id
+    await mem_client.record_chat_turn_memory(
+        user_message,
+        assistant_message,
+        session_id=session_id,
+        source_identity=effective_identity,
+        context={"metadata": {"type": "conversation"}},
     )
+
+
+def _conversation_source_identity(session_id: str | None, history: list[dict[str, Any]] | None, user_message: str, assistant_message: str) -> str | None:
+    if not session_id:
+        return None
+    digest = hashlib.sha256(f"{user_message}\x1e{assistant_message}".encode("utf-8")).hexdigest()[:16]
+    turn_index = len(history or [])
+    return f"chat:{session_id}:{turn_index}:{digest}"
 
 
 async def _build_execution_context(
@@ -408,7 +552,10 @@ async def chat_turn(
                 mem_client,
                 user_message=user_message,
                 assistant_message=assistant_text,
+                session_id=session_id,
+                source_identity=_conversation_source_identity(session_id, history, user_message, assistant_text),
                 sender_id=sender_id,
+                background_dsn=dsn,
             )
         else:
             async with CognitiveMemory.connect(dsn) as mem_client:
@@ -417,7 +564,10 @@ async def chat_turn(
                     mem_client,
                     user_message=user_message,
                     assistant_message=assistant_text,
+                    session_id=session_id,
+                    source_identity=_conversation_source_identity(session_id, history, user_message, assistant_text),
                     sender_id=sender_id,
+                    background_dsn=dsn,
                 )
         new_history = list(history)
         new_history.append({"role": "user", "content": user_message})
@@ -457,7 +607,10 @@ async def chat_turn(
                 mem_client,
                 user_message=user_message,
                 assistant_message=assistant_text,
+                session_id=session_id,
+                source_identity=_conversation_source_identity(session_id, history, user_message, assistant_text),
                 sender_id=sender_id,
+                background_dsn=dsn,
             )
 
         new_history = list(history)
@@ -558,7 +711,10 @@ async def stream_chat_turn(
                     mem_client,
                     user_message=user_message,
                     assistant_message=full_text,
+                    session_id=session_id,
+                    source_identity=_conversation_source_identity(session_id, history, user_message, full_text),
                     sender_id=sender_id,
+                    background_dsn=dsn,
                 )
         if full_text:
             yield full_text

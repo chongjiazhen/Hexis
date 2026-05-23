@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import hashlib
 from datetime import datetime, timezone
 from typing import Any, TYPE_CHECKING
 
@@ -65,6 +66,59 @@ DEFAULT_CHANNEL_ENERGY_COST = 0.0
 
 # Default rate limit (messages per sender per hour, None = unlimited)
 DEFAULT_RATE_LIMIT: int | None = None
+
+
+def _coerce_json(value: Any) -> Any:
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except Exception:
+            return value
+    return value
+
+
+async def _prepare_channel_turn_db(
+    conn: asyncpg.Connection,
+    msg: ChannelMessage,
+) -> dict[str, Any]:
+    raw = await conn.fetchval(
+        "SELECT prepare_channel_turn($1::jsonb)",
+        json.dumps({
+            "channel_type": msg.channel_type,
+            "channel_id": msg.channel_id,
+            "sender_id": msg.sender_id,
+            "sender_name": msg.sender_name,
+            "content": msg.content,
+            "message_id": msg.message_id,
+        }),
+    )
+    result = _coerce_json(raw)
+    return result if isinstance(result, dict) else {}
+
+
+async def _finalize_channel_turn_db(
+    conn: asyncpg.Connection,
+    *,
+    session_id: str,
+    user_text: str,
+    assistant_text: str,
+    history: list[dict[str, Any]],
+    metadata: dict[str, Any] | None = None,
+    platform_message_id: str | None = None,
+) -> dict[str, Any]:
+    raw = await conn.fetchval(
+        "SELECT finalize_channel_turn($1::uuid, $2::text, $3::text, $4::jsonb)",
+        session_id,
+        user_text,
+        assistant_text,
+        json.dumps({
+            "history": history,
+            "metadata": metadata or {},
+            "platform_message_id": platform_message_id,
+        }),
+    )
+    result = _coerce_json(raw)
+    return result if isinstance(result, dict) else {}
 
 
 async def _check_channel_energy(
@@ -247,7 +301,14 @@ async def _flush_trimmed_to_memory(
         from core.cognitive_memory_api import CognitiveMemory, MemoryType
 
         async with CognitiveMemory.connect(dsn) as mem:
-            for user_text, assistant_text in pairs:
+            recmem_enabled = False
+            try:
+                async with mem._pool.acquire() as conn:
+                    recmem_enabled = bool(await conn.fetchval("SELECT COALESCE(get_config_bool('memory.recmem_enabled'), false)"))
+            except Exception:
+                recmem_enabled = False
+
+            for idx, (user_text, assistant_text) in enumerate(pairs):
                 # Estimate importance -- only store if worth remembering
                 combined = (user_text + " " + assistant_text).lower()
                 importance = 0.3  # baseline for compaction-saved memories
@@ -266,23 +327,40 @@ async def _flush_trimmed_to_memory(
                 if importance < 0.4 and len(user_text) + len(assistant_text) < 100:
                     continue
 
-                content = f"User: {user_text}\n\nAssistant: {assistant_text}"
-                await mem.remember(
-                    content,
-                    type=MemoryType.EPISODIC,
-                    importance=importance,
-                    emotional_valence=0.0,
-                    context={"type": "conversation", "source": "compaction_flush"},
-                    source_attribution={
-                        "kind": "compaction_flush",
-                        "ref": session_id,
-                        "label": "pre-compaction memory flush",
-                        "observed_at": datetime.now(timezone.utc).isoformat(),
-                        "trust": 0.85,
-                    },
-                    trust_level=0.85,
-                    sender_id=sender_id,
-                )
+                source_attr = {
+                    "kind": "compaction_flush",
+                    "ref": session_id,
+                    "label": "pre-compaction memory flush",
+                    "observed_at": datetime.now(timezone.utc).isoformat(),
+                    "trust": 0.85,
+                }
+
+                if recmem_enabled:
+                    # PR-C: preserve real sender through compaction flush. Synthetic
+                    # suffix is the idempotency disambiguator, not the identity.
+                    digest = hashlib.sha256(f"{user_text}\x1e{assistant_text}".encode("utf-8")).hexdigest()[:16]
+                    identity_prefix = sender_id or "session"
+                    await mem.remember_turn_raw(
+                        user_text,
+                        assistant_text,
+                        session_id=session_id,
+                        source_identity=f"{identity_prefix}:compaction:{session_id}:{idx}:{digest}",
+                        importance=importance,
+                        source_attribution=source_attr,
+                        metadata={"type": "conversation", "source": "compaction_flush"},
+                    )
+                else:
+                    content = f"User: {user_text}\n\nAssistant: {assistant_text}"
+                    await mem.remember(
+                        content,
+                        type=MemoryType.EPISODIC,
+                        importance=importance,
+                        emotional_valence=0.0,
+                        context={"type": "conversation", "source": "compaction_flush"},
+                        source_attribution=source_attr,
+                        trust_level=0.85,
+                        sender_id=sender_id,
+                    )
                 stored += 1
 
         if stored:
@@ -382,26 +460,12 @@ async def process_channel_message(
 
     try:
         async with pool.acquire() as conn:
-            # Check energy budget and rate limits
-            allowed, cost, rejection = await _check_channel_energy(conn, msg)
-            if not allowed:
-                return [rejection or "I can't respond right now."]
+            prepared = await _prepare_channel_turn_db(conn, msg)
+            if not prepared.get("allowed"):
+                return [prepared.get("rejection") or "I can't respond right now."]
 
-            # Load session
-            session_id, history = await _get_or_create_session(conn, msg)
-
-            # Log inbound message
-            await _log_message(
-                conn,
-                session_id,
-                "inbound",
-                msg.content,
-                platform_message_id=msg.message_id,
-                metadata={
-                    "channel_type": msg.channel_type,
-                    "sender_name": msg.sender_name,
-                },
-            )
+            session_id = str(prepared["session_id"])
+            history = prepared.get("history") if isinstance(prepared.get("history"), list) else []
 
             # Load LLM config from DB
             llm_config = await load_llm_config(conn, "llm.chat", fallback_key="llm.heartbeat")
@@ -453,15 +517,12 @@ async def process_channel_message(
         new_history = result.get("history", [])
 
         async with pool.acquire() as conn:
-            # Update session with new history (pre-compaction flush if trimming)
-            await _update_session(conn, session_id, new_history, dsn=dsn, sender_id=msg.sender_id)
-
-            # Log outbound message
-            await _log_message(
+            await _finalize_channel_turn_db(
                 conn,
-                session_id,
-                "outbound",
-                assistant_text,
+                session_id=session_id,
+                user_text=user_content,
+                assistant_text=assistant_text,
+                history=new_history,
                 metadata={"channel_type": msg.channel_type},
             )
 
@@ -502,24 +563,13 @@ async def stream_channel_message(
 
     try:
         async with pool.acquire() as conn:
-            # Check energy budget and rate limits
-            allowed, cost, rejection = await _check_channel_energy(conn, msg)
-            if not allowed:
-                await adapter.send(msg.channel_id, rejection or "I can't respond right now.", reply_to=msg.message_id)
+            prepared = await _prepare_channel_turn_db(conn, msg)
+            if not prepared.get("allowed"):
+                await adapter.send(msg.channel_id, prepared.get("rejection") or "I can't respond right now.", reply_to=msg.message_id)
                 return None
 
-            session_id, history = await _get_or_create_session(conn, msg)
-            await _log_message(
-                conn,
-                session_id,
-                "inbound",
-                msg.content,
-                platform_message_id=msg.message_id,
-                metadata={
-                    "channel_type": msg.channel_type,
-                    "sender_name": msg.sender_name,
-                },
-            )
+            session_id = str(prepared["session_id"])
+            history = prepared.get("history") if isinstance(prepared.get("history"), list) else []
             llm_config = await load_llm_config(conn, "llm.chat", fallback_key="llm.heartbeat")
 
         # Record channel event for audit trail (record-and-dispatch)
@@ -598,12 +648,12 @@ async def stream_channel_message(
         new_history.append({"role": "assistant", "content": assistant_text})
 
         async with pool.acquire() as conn:
-            await _update_session(conn, session_id, new_history, dsn=dsn, sender_id=msg.sender_id)
-            await _log_message(
+            await _finalize_channel_turn_db(
                 conn,
-                session_id,
-                "outbound",
-                assistant_text,
+                session_id=session_id,
+                user_text=user_content,
+                assistant_text=assistant_text,
+                history=new_history,
                 platform_message_id=message_id,
                 metadata={"channel_type": msg.channel_type, "streamed": True},
             )

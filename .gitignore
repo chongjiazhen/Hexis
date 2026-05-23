@@ -73,5 +73,5 @@ logs/
 # Misc
 .cache/
 .tmp/
-.reference
+.reference/
 .claude.local.md

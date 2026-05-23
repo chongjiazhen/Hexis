@@ -89,6 +89,8 @@ BEGIN
     FROM hits h
     JOIN memories m ON m.id = h.memory_id
     WHERE (p_memory_types IS NULL OR h.memory_type = ANY(p_memory_types))
+      AND m.status = 'active'
+      AND (m.valid_until IS NULL OR m.valid_until > CURRENT_TIMESTAMP)
       AND m.importance >= COALESCE(p_min_importance, 0.0)
     ORDER BY h.score DESC
     LIMIT p_limit;
@@ -168,6 +170,7 @@ BEGIN
             (m.metadata->>'emotional_valence')::float AS emotional_valence
         FROM memories m
         WHERE m.status = 'active'
+          AND (m.valid_until IS NULL OR m.valid_until > CURRENT_TIMESTAMP)
           AND (p_memory_types IS NULL OR m.type = ANY(p_memory_types))
           AND m.importance >= COALESCE(p_min_importance, 0.0)
           AND (p_source_path IS NULL OR m.source_attribution->>'path' ILIKE '%' || p_source_path || '%')
@@ -267,7 +270,8 @@ BEGIN
         m.created_at,
         (m.metadata->>'emotional_valence')::float
     FROM memories m
-    WHERE m.id = p_memory_id;
+    WHERE m.id = p_memory_id
+      AND (m.valid_until IS NULL OR m.valid_until > CURRENT_TIMESTAMP);
 END;
 $$ LANGUAGE plpgsql STABLE;
 CREATE OR REPLACE FUNCTION get_memories_summary(p_ids UUID[])
@@ -351,6 +355,7 @@ BEGIN
         (m.metadata->>'emotional_valence')::float
     FROM memories m
     WHERE m.status = 'active'
+      AND (m.valid_until IS NULL OR m.valid_until > CURRENT_TIMESTAMP)
       AND (p_memory_types IS NULL OR m.type = ANY(p_memory_types))
     ORDER BY
         CASE WHEN p_by_access THEN m.last_accessed ELSE m.created_at END DESC NULLS LAST
@@ -473,6 +478,7 @@ BEGIN
     FROM get_cluster_members_graph(p_cluster_id) gcm
     JOIN memories m ON gcm.memory_id = m.id
     WHERE m.status = 'active'
+      AND (m.valid_until IS NULL OR m.valid_until > CURRENT_TIMESTAMP)
     ORDER BY gcm.membership_strength DESC
     LIMIT p_limit;
 END;
@@ -578,6 +584,7 @@ BEGIN
         1 - (m.embedding <=> (SELECT emb FROM query_embedding)) as similarity
     FROM memories m
     WHERE m.status = 'active'
+      AND (m.valid_until IS NULL OR m.valid_until > CURRENT_TIMESTAMP)
       AND m.type = 'procedural'
     ORDER BY m.embedding <=> (SELECT emb FROM query_embedding)
     LIMIT p_limit;
@@ -610,6 +617,7 @@ BEGIN
         1 - (m.embedding <=> (SELECT emb FROM query_embedding)) as similarity
     FROM memories m
     WHERE m.status = 'active'
+      AND (m.valid_until IS NULL OR m.valid_until > CURRENT_TIMESTAMP)
       AND m.type = 'strategic'
     ORDER BY m.embedding <=> (SELECT emb FROM query_embedding)
     LIMIT p_limit;
@@ -1370,6 +1378,8 @@ BEGIN
     RETURN ids;
 END;
 $$ LANGUAGE plpgsql;
+-- PR-B: add p_sender_id at the end. Signature still backwards-compatible for
+-- callers that pass positional args 1..7; new param has default NULL.
 CREATE OR REPLACE FUNCTION create_memory_with_embedding(
     p_type memory_type,
     p_content TEXT,
@@ -1377,7 +1387,8 @@ CREATE OR REPLACE FUNCTION create_memory_with_embedding(
     p_importance FLOAT DEFAULT 0.5,
     p_source_attribution JSONB DEFAULT NULL,
     p_trust_level FLOAT DEFAULT NULL,
-    p_metadata JSONB DEFAULT '{}'::jsonb
+    p_metadata JSONB DEFAULT '{}'::jsonb,
+    p_sender_id TEXT DEFAULT NULL
 ) RETURNS UUID AS $$
 DECLARE
     new_memory_id UUID;
@@ -1412,8 +1423,8 @@ BEGIN
     END IF;
     effective_trust := LEAST(1.0, GREATEST(0.0, effective_trust));
 
-    INSERT INTO memories (type, content, embedding, importance, source_attribution, trust_level, trust_updated_at, metadata)
-    VALUES (p_type, p_content, p_embedding, p_importance, normalized_source, effective_trust, CURRENT_TIMESTAMP, COALESCE(p_metadata, '{}'::jsonb))
+    INSERT INTO memories (type, content, embedding, importance, source_attribution, trust_level, trust_updated_at, metadata, sender_id)
+    VALUES (p_type, p_content, p_embedding, p_importance, normalized_source, effective_trust, CURRENT_TIMESTAMP, COALESCE(p_metadata, '{}'::jsonb), p_sender_id)
     RETURNING id INTO new_memory_id;
 
     EXECUTE format(
@@ -1555,6 +1566,7 @@ BEGIN
         SELECT m.id, m.content, m.type, m.embedding, m.importance
         FROM memories m
         WHERE m.status = 'active'
+          AND (m.valid_until IS NULL OR m.valid_until > CURRENT_TIMESTAMP)
           AND m.embedding IS NOT NULL
           AND m.embedding <> zero_vec
           AND (p_memory_types IS NULL OR m.type = ANY(p_memory_types))
@@ -1613,7 +1625,8 @@ BEGIN
     FROM memories m
     JOIN get_cluster_members_graph(p_cluster_id) gcm ON m.id = gcm.memory_id
     WHERE m.status = 'active'
-    AND gcm.membership_strength > 0.3;
+      AND (m.valid_until IS NULL OR m.valid_until > CURRENT_TIMESTAMP)
+      AND gcm.membership_strength > 0.3;
 
     UPDATE clusters
     SET centroid_embedding = new_centroid,
@@ -2039,6 +2052,7 @@ BEGIN
             'fts'::text AS source
         FROM memories m
         WHERE m.status = 'active'
+          AND (m.valid_until IS NULL OR m.valid_until > CURRENT_TIMESTAMP)
           AND to_tsvector('english', m.content) @@ fts_query
         ORDER BY fts_score DESC
         LIMIT p_limit * 2
@@ -2072,6 +2086,7 @@ BEGIN
     FROM merged mg
     JOIN memories m ON m.id = mg.mem_id
     WHERE m.status = 'active'
+      AND (m.valid_until IS NULL OR m.valid_until > CURRENT_TIMESTAMP)
     ORDER BY mg.combined_score DESC
     LIMIT p_limit;
 END;
