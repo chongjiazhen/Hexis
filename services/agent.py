@@ -425,8 +425,7 @@ async def run_agent(
                 "SELECT value FROM config WHERE key = 'agent.persona_system_prompt'"
             )
             if raw_psp:
-                import json as _json
-                persona_system_prompt = _json.loads(raw_psp) if isinstance(raw_psp, str) else str(raw_psp)
+                persona_system_prompt = json.loads(raw_psp) if isinstance(raw_psp, str) else str(raw_psp)
         except Exception:
             pass
 
@@ -626,8 +625,7 @@ async def stream_agent(
                 "SELECT value FROM config WHERE key = 'agent.persona_system_prompt'"
             )
             if raw_psp:
-                import json as _json
-                persona_system_prompt = _json.loads(raw_psp) if isinstance(raw_psp, str) else str(raw_psp)
+                persona_system_prompt = json.loads(raw_psp) if isinstance(raw_psp, str) else str(raw_psp)
         except Exception:
             pass
 

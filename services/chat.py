@@ -226,7 +226,7 @@ async def _eco_slim_chat(
     capability.
     """
     persona = await _load_persona_system_prompt(pool, dsn)
-    system_msg = persona.strip() + "\n\n---\n\n" + ECO_SLIM_ANCHOR if persona else ECO_SLIM_ANCHOR
+    system_msg = f"{persona.strip()}\n\n---\n\n{ECO_SLIM_ANCHOR}" if persona else ECO_SLIM_ANCHOR
 
     # Trim history to last N exchanges to keep prompt tight on 1B
     trimmed_history = history[-8:] if len(history) > 8 else history
