@@ -591,8 +591,8 @@ class ImageReader(DocumentReader):
             import pytesseract
 
         try:
-            image = Image.open(file_path)
-            text = pytesseract.image_to_string(image)
+            with Image.open(file_path) as image:
+                text = pytesseract.image_to_string(image)
             if not text.strip():
                 return f"[Image: {file_path.name}]\n[No text detected via OCR]"
             return f"[Image: {file_path.name}]\n[OCR Extracted Text]\n\n{text}"

@@ -18,6 +18,7 @@ import logging
 import os
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, AsyncIterator, Literal
 
 import asyncpg
@@ -547,10 +548,9 @@ async def init_consent_request(req: InitConsentRequest):
                 return JSONResponse({"consent_record": existing, "reused": True, "status": None})
 
     # No existing record; request consent from the configured provider/model.
-    prompt_path = os.path.join(os.path.dirname(__file__), "..", "services", "prompts", "consent.md")
+    prompt_path = Path(__file__).resolve().parent.parent / "services" / "prompts" / "consent.md"
     try:
-        with open(prompt_path, "r", encoding="utf-8") as f:
-            consent_text = f.read()
+        consent_text = prompt_path.read_text(encoding="utf-8")
     except OSError:
         consent_text = "Consent prompt missing. Respond with JSON only."
 
