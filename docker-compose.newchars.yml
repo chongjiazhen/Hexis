@@ -523,55 +523,55 @@ services:
       <<: *common-env
       POSTGRES_DB: hexis_eudora
 
-  # ── Esme ── conversation-confidence coach persona
-  esme_channel_worker:
+  # ── Iris ── conversation-confidence coach persona (renamed from Esme 2026-05-25)
+  iris_channel_worker:
     <<: *channel-base
-    container_name: hexis_esme_channel_worker
+    container_name: hexis_iris_channel_worker
     environment:
       <<: *common-env
-      POSTGRES_DB: hexis_esme
-      ESME_TELEGRAM_BOT_TOKEN: ${ESME_TELEGRAM_BOT_TOKEN:-}
+      POSTGRES_DB: hexis_iris
+      IRIS_TELEGRAM_BOT_TOKEN: ${IRIS_TELEGRAM_BOT_TOKEN:-}
 
-  esme_heartbeat_worker:
+  iris_heartbeat_worker:
     <<: *worker-base
-    container_name: hexis_esme_heartbeat_worker
+    container_name: hexis_iris_heartbeat_worker
     command: ["hexis-worker", "--mode", "heartbeat"]
     environment:
       <<: *common-env
-      POSTGRES_DB: hexis_esme
+      POSTGRES_DB: hexis_iris
 
-  esme_maintenance_worker:
+  iris_maintenance_worker:
     <<: *worker-base
-    container_name: hexis_esme_maintenance_worker
+    container_name: hexis_iris_maintenance_worker
     command: ["hexis-worker", "--mode", "maintenance"]
     environment:
       <<: *common-env
-      POSTGRES_DB: hexis_esme
+      POSTGRES_DB: hexis_iris
 
-  # ── Sable ── intimacy & consent coach persona
-  sable_channel_worker:
+  # ── Lyra ── intimacy & consent coach persona (renamed from Sable 2026-05-25)
+  lyra_channel_worker:
     <<: *channel-base
-    container_name: hexis_sable_channel_worker
+    container_name: hexis_lyra_channel_worker
     environment:
       <<: *common-env
-      POSTGRES_DB: hexis_sable
-      SABLE_TELEGRAM_BOT_TOKEN: ${SABLE_TELEGRAM_BOT_TOKEN:-}
+      POSTGRES_DB: hexis_lyra
+      LYRA_TELEGRAM_BOT_TOKEN: ${LYRA_TELEGRAM_BOT_TOKEN:-}
 
-  sable_heartbeat_worker:
+  lyra_heartbeat_worker:
     <<: *worker-base
-    container_name: hexis_sable_heartbeat_worker
+    container_name: hexis_lyra_heartbeat_worker
     command: ["hexis-worker", "--mode", "heartbeat"]
     environment:
       <<: *common-env
-      POSTGRES_DB: hexis_sable
+      POSTGRES_DB: hexis_lyra
 
-  sable_maintenance_worker:
+  lyra_maintenance_worker:
     <<: *worker-base
-    container_name: hexis_sable_maintenance_worker
+    container_name: hexis_lyra_maintenance_worker
     command: ["hexis-worker", "--mode", "maintenance"]
     environment:
       <<: *common-env
-      POSTGRES_DB: hexis_sable
+      POSTGRES_DB: hexis_lyra
 
   # ── Trump ── satirical political persona
   trump_channel_worker:

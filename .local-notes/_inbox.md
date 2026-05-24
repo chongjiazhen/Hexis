@@ -27,19 +27,24 @@ Maps to heart / voice / body coach tiers.
 Three sister-Muses energy. No fleet initial clash.
 
 **Lock status (2026-05-25):**
-- **Iris** ✓ LOCKED (Esme → Iris). Passed collision/meaning/phonetic
-  checks. Messenger of gods = voice tier bullseye.
-- **Lyra** ✓ LOCKED (Sable → Lyra). Passed collision/meaning/phonetic
-  checks. Lyre/chord = embodied/touch metaphor without on-the-nose.
+- **Iris** ✓ EXECUTED (Esme → Iris, 2026-05-25). DB `hexis_iris` live,
+  3 workers up, Telegram `@convo_coach_bot` connected as Iris.
+- **Lyra** ✓ EXECUTED (Sable → Lyra, 2026-05-25). DB `hexis_lyra` live,
+  3 workers up, Telegram `@intimacy_coach_bot` connected as Lyra.
 - **Vera** ⏳ DEFERRED — keep current name OR rename to Thea/Alethea.
   Decision pends quartet/pentad scope commit (whether Galene/Mneme
   also coming in changes the trinity-anchor sound).
 
-**Migration not yet executed.** Files on disk still `esme.json`,
-`sable.json`, `set_persona_prompt.esme.sql`, etc. Avatar output folders
-still `output/hexis/esme/`, `output/hexis/sable/`. Rename = ~1h per
-persona (DB config + character JSON + persona SQL + compose env vars +
-cold-start anchor re-apply + avatar folder).
+**Migration runbook** captured in
+`.local-notes/fleet-tg-avatars-2026-05-25.md` — 11-step sequence,
+~30min/persona. Key gotchas: PRMT heredoc identifier in persona SQL
+also needs renaming; DB config `channel.telegram.bot_token` +
+`agent.init_profile.agent.name` + `agent.init_profile.agent.description`
+all need updating after persona SQL re-apply (easy to miss; channel
+worker fails on `InvalidToken` if env var name not updated).
+
+**Avatar output folders** still `output/hexis/esme/`,
+`output/hexis/sable/` — rename only if you re-run gen for these personas.
 
 **Distinct-axis analysis (where could the guild expand?):**
 

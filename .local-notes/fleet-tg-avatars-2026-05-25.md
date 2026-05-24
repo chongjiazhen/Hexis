@@ -4,10 +4,26 @@ Documented 2026-05-25 after a one-sitting gen sprint that produced MVP
 avatars for Hazel / Ennie / Vesper / Null / Callisto / Sable / Esme / Vera.
 
 **Coach naming rename (2026-05-25):**
-- **Esme → Iris** ✓ LOCKED (messenger of gods, voice tier)
-- **Sable → Lyra** ✓ LOCKED (lyre/chord, body tier)
-- **Vera → Thea/Alethea** ⏳ DEFERRED (truth/unconcealment, heart tier — pends quartet/pentad scope decision)
-- Migration not yet executed. Files on disk still `esme.json`, `sable.json`, persona SQL, avatar folders. Rename ~1h per persona.
+- **Esme → Iris** ✓ EXECUTED (DB renamed `hexis_esme`→`hexis_iris`, workers up, Telegram `@convo_coach_bot` connected as Iris). Messenger of gods, voice tier.
+- **Sable → Lyra** ✓ EXECUTED (DB renamed `hexis_sable`→`hexis_lyra`, workers up, Telegram `@intimacy_coach_bot` connected as Lyra). Lyre/chord, body tier.
+- **Vera → Thea/Alethea** ⏳ DEFERRED — pends quartet/pentad scope decision (truth/unconcealment, heart tier).
+- Avatar output folders still `output/hexis/esme/`, `output/hexis/sable/` — rename if you re-run gen for these personas.
+
+**Migration steps that mattered (per persona ~30min):**
+1. Stop 3 workers (`docker compose stop <name>_channel_worker <name>_heartbeat_worker <name>_maintenance_worker`)
+2. Replace persona name in `characters/<old>.json` + `mv` to `<new>.json` (also: PRMT heredoc identifier in persona SQL)
+3. Replace persona name in `characters/set_persona_prompt.<old>.sql` + `mv` to `<new>.sql`
+4. `.env`: rename `<OLD>_TELEGRAM_BOT_TOKEN` → `<NEW>_TELEGRAM_BOT_TOKEN` (same token value)
+5. `docker-compose.newchars.yml`: rename service block (service name, container_name, POSTGRES_DB, env var name)
+6. Terminate any live DB connections + `ALTER DATABASE hexis_<old> RENAME TO hexis_<new>`
+7. Re-apply persona SQL to renamed DB: `docker exec -i hexis_brain psql -U hexis_user -d hexis_<new> -v ON_ERROR_STOP=1 -f - < characters/set_persona_prompt.<new>.sql`
+8. **DB config updates** (this step is easy to miss):
+   - `UPDATE config SET value = '"<NEW>_TELEGRAM_BOT_TOKEN"'::jsonb WHERE key = 'channel.telegram.bot_token';`
+   - `UPDATE config SET value = jsonb_set(value, '{agent,name}', '"<New>"'::jsonb) WHERE key = 'agent.init_profile';`
+   - `UPDATE config SET value = jsonb_set(value, '{agent,description}', to_jsonb(replace(value->'agent'->>'description', '<Old>', '<New>'))) WHERE key = 'agent.init_profile';`
+9. `docker compose ... up -d --no-deps --force-recreate <new>_*` (rebuilds new per-service images)
+10. Verify clean startup via `docker logs <new>_*` — channel adapter must report Telegram connected
+11. `docker rm hexis_<old>_*` (cleanup stopped containers)
 
 Lessons captured: image gen is **not** blocked by naming, folders can
 rename post-decision.
