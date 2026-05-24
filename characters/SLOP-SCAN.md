@@ -24,9 +24,8 @@ Two phases:
 
 ### Phase 2 — library (373 PNGs)
 
-- [ ] **Setup** — decode all `C:\sillytavern-tools\cards\*.png` to JSON sidecars
-  (use `st-card-dump` or `C:\sillytavern-tools\extract-cards.py`), then write
-  `C:\sillytavern-tools\cards\SLOP-SCAN-P2.md` with an 8/batch checklist (47 batches).
+- [x] **Setup** — 373 PNGs decoded to `cards\.json\` via `st-card-dump`;
+  `C:\sillytavern-tools\SLOP-SCAN-P2.md` written with 47-batch checklist (8/batch).
 - [ ] Batches 1–47 — tracked in `SLOP-SCAN-P2.md`, findings appended there.
 
 Loop rule each tick: first unchecked Phase-1 batch → do it. Phase 1 all checked + Phase-2
