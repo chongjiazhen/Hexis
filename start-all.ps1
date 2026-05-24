@@ -20,9 +20,12 @@ if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Force -Path $LogDi
 $LogFile = Join-Path $LogDir ("start-all_{0}.log" -f (Get-Date -Format "yyyyMMdd_HHmmss"))
 Start-Transcript -Path $LogFile -Append | Out-Null
 
-# Compose files: base stack only.
+# Compose files: base stack + newchars persona fleet. The newchars file only
+# adds persona worker services (active-profile); frozen personas stay gated out
+# by their own `profiles: ["frozen"]` override and won't start.
 $Compose = @(
-    "-f", "docker-compose.yml"
+    "-f", "docker-compose.yml",
+    "-f", "docker-compose.newchars.yml"
 )
 
 function Test-DockerEngine {
@@ -85,7 +88,15 @@ function Test-StackPrereqs {
     $dbHealth = (docker inspect hexis_brain --format '{{.State.Health.Status}}' 2>$null)
     $ok = $true
     if ($dbHealth -ne "healthy") { Write-Host "[verify] db not healthy (status: $dbHealth)"; $ok = $false }
-    if (-not (Test-Port 8080))   { Write-Host "[verify] chat llama-server :8080 not listening"; $ok = $false }
+    # Mode-gated: in ECO, set-power-mode.ps1 owns :8080 and start.ps1 skips launching it.
+    # Don't require :8080 here or verify always fails on ECO boots.
+    $markerFile = Join-Path $Root "logs\current-mode.txt"
+    $lastMode = if (Test-Path $markerFile) { (Get-Content $markerFile -ErrorAction SilentlyContinue | Select-Object -First 1).Trim() } else { "" }
+    if ($lastMode -ne "eco") {
+        if (-not (Test-Port 8080)) { Write-Host "[verify] chat llama-server :8080 not listening"; $ok = $false }
+    } else {
+        Write-Host "[verify] chat :8080 check skipped (mode=eco)"
+    }
     if (-not (Test-Port 8081))   { Write-Host "[verify] embed llama-server :8081 not listening"; $ok = $false }
     return $ok
 }
@@ -129,8 +140,8 @@ if ($startRc -eq 1 -or -not (Test-StackPrereqs)) {
     exit 1
 }
 
-# 3. rabbitmq + default workers/api (`profile: active`)
-Write-Host "[start] rabbitmq + default workers/api"
+# 3. rabbitmq + default workers/api + newchars persona fleet (`profile: active`)
+Write-Host "[start] rabbitmq + default workers/api + newchars persona fleet"
 Push-Location $Root
 $composeRc = Invoke-Docker compose @Compose --profile active up -d
 Pop-Location
@@ -188,6 +199,6 @@ Write-Host "  nano   http://127.0.0.1:8082  (CPU-1B, ECO floor)"
 Write-Host "  db     127.0.0.1:43815"
 Write-Host "  api    http://127.0.0.1:43817"
 Write-Host ""
-Write-Host "  Default character is online via its Telegram bot."
+Write-Host "  Default character + newchars persona fleet online via Telegram bots."
 Stop-Transcript | Out-Null
 exit 0
