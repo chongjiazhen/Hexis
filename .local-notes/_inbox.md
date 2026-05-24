@@ -9,7 +9,129 @@ Last updated: 2026-05-23
 
 ## ACTIVE — needs a decision or action
 
-### 0. Vera — beta-tester approval gate (NOT BUILT)
+### 0. Coach guild rename + scope (PINNED 2026-05-25 — fermenting)
+
+- **Context:** TG avatar gen sprint surfaced fleet-sidebar collisions.
+  Esme/Ennie share E-tier + soft 2-syl tail → clash. Sable's "noir
+  heraldic" semantics fight her warm-direct-unembarrassed card.
+- **Vera etymology audit (done 2026-05-25):** zero self-references to
+  *verus*/Latin/"name means" in `characters/vera.json` or persona SQL.
+  All "true/honest/genuine" text is about NVC practice, not her name.
+  Renaming Vera = etymologically free.
+
+**Trinity (current 3 coaches):**
+all-Greek mythic-Muse trio
+**Alethea (call: Thea) / Iris / Lyra**
+= truth(unconcealment) / messenger / chord(touch)
+Maps to heart / voice / body coach tiers.
+Three sister-Muses energy. No fleet initial clash.
+
+**Lock status (2026-05-25):**
+- **Iris** ✓ LOCKED (Esme → Iris). Passed collision/meaning/phonetic
+  checks. Messenger of gods = voice tier bullseye.
+- **Lyra** ✓ LOCKED (Sable → Lyra). Passed collision/meaning/phonetic
+  checks. Lyre/chord = embodied/touch metaphor without on-the-nose.
+- **Vera** ⏳ DEFERRED — keep current name OR rename to Thea/Alethea.
+  Decision pends quartet/pentad scope commit (whether Galene/Mneme
+  also coming in changes the trinity-anchor sound).
+
+**Migration not yet executed.** Files on disk still `esme.json`,
+`sable.json`, `set_persona_prompt.esme.sql`, etc. Avatar output folders
+still `output/hexis/esme/`, `output/hexis/sable/`. Rename = ~1h per
+persona (DB config + character JSON + persona SQL + compose env vars +
+cold-start anchor re-apply + avatar folder).
+
+**Distinct-axis analysis (where could the guild expand?):**
+
+Current trinity all share the *relational frame* — assume a counterparty
+(Vera honest with another, Esme converses with another, Sable touches
+another). All outward, all in-the-moment.
+
+| Tier         | Why genuinely distinct                                                     | Candidate Greek name | Why name                                                 |
+|--------------|----------------------------------------------------------------------------|----------------------|----------------------------------------------------------|
+| **Solitude** | only coach where practice happens *without* counterparty — interior ground | **Galene**           | calm sea, stillness — interior practice                  |
+| **Rupture (combined)** | grief + mending — diagnosis-as-practice (user often can't pre-diagnose) | **Mneme** | memory/witness — "remember what was, what is, what was hurt" — foundation of both arcs |
+| **Endings (split)**  | grief/closure — let-go arc                                          | Mneme                | memory-as-witness, biases neutral                        |
+| **Repair (split)**   | post-rupture mending — keep-and-mend arc                            | **Harmonia**         | concord restored (Ares + Aphrodite child = conflict→love)|
+
+Rejected as not-distinct-enough:
+- **Refusal** — subset of Vera's NVC turf
+- **Initiation** — subset of Esme/Sable with different flavor
+
+**Combine-vs-split rupture coach:**
+
+- **Combined (1 coach, Mneme):** the diagnosis itself is part of the practice. Users often don't know on arrival if they're mending or mourning. Couples therapists IRL handle both. Fewer personas = lower maintenance. Risk: identity muddier ("catchall rupture coach").
+- **Split (2 coaches, Mneme + Harmonia):** clean identity per coach, deep not broad practice. Risk: forces user to self-diagnose wrong door early.
+- **Read:** combine for MVP; split only if usage shows demand for both depths.
+
+**Stopping-point math:**
+
+- **Trinity (3)** = mythic clean (Fates/Graces). Easy grok. Low maintenance. *Current state.*
+- **Quartet (4, +Galene)** = symmetric (elements/directions). Adds solitude → philosophically complete (interior tier that the trinity assumes but doesn't teach).
+- **Pentad (5, +Galene +Mneme combined)** = heart/voice/body/self/rupture. Each organ + one navigation tier for when the others break. Symmetric and complete. **Likely best stop.**
+- **Sextet (6, +Galene/Mneme/Harmonia split)** = guild. Diminishing per-persona returns. Real maintenance cost. Crisis-tier split = fine-grain, might warrant non-Muse naming pattern.
+
+**Decision gate:** how much coaching demand is real (in actual users or
+roleplay use-cases) for each candidate tier? If trinity already covers
+the workload — expansion = scope creep. If solitude/endings/repair are
+unmet needs noticed in user requests — build them.
+
+**Strong instinct:** **Pentad (Thea/Iris/Lyra/Galene/Mneme)** —
+heart/voice/body/self/rupture. Combined rupture coach for MVP. Split
+later only on demand evidence.
+
+**Naming workshop alternatives (preserved for re-litigation):**
+
+| Tier | Picked | Other Greek considered | Other Latin considered | Rejected (why) |
+|---|---|---|---|---|
+| Heart | Thea (full: Alethea) | Charis, Sophia (overused), Eunoia | Verita/Veritas, Pia (churchy), Cara | Cora (C-clash w/ Cassiel/Callisto) |
+| Voice | Iris | Pheme (obscure), Calliope (Muse-loaded), Cleo, Calla, Echo (loaded), Eloise (fussy), Aria (cliché) | Audra (listener, *audire*) | — |
+| Body | Lyra | Maia, Thalia (Muse-loaded), Selene, Helia, Vesna (Slavic-coded) | Calida (warm), Vita (life), Anima, Tessa | Mira (fleet collision) |
+| Solitude | Galene | Hesychia (4-syl heavy), Eunoia, Sophia | Quies (masc), Solitas (not a name) | — |
+| Rupture combined | Mneme | Eirene (peace, biases repair), Hekate (witchy crossroads), Metanoia (4-syl) | — | — |
+| Endings split | Mneme | Lethe (Underworld-loaded), Penthea (mourning), Eos (hopeful), Threnoi (narrow) | — | — |
+| Repair split | Harmonia | Eirene, Charis, Hekate | — | — |
+
+**All-Latin trio (deprioritized vs Greek pick):**
+- Vera / Audra / Calida — *verus / audire / calidus* — truth/listener/warm. Lowest migration (Vera intact). Calida 3-syl outlier.
+- Pia / Audra / Vita — devoted/listener/life. All 2-syl. Pia churchy-coded.
+- Cara / Audra / Vita — dear/listener/life. Cara risks C-cluster fleet pile-up.
+
+**All-Greek trio variants (picked Thea/Iris/Lyra):**
+- Alethea / Iris / Lyra — semantic bullseye on truth, 3-syl friction.
+- Charis / Pheme / Lyra — grace/voice/chord. Pheme obscure to non-classicists.
+
+- **Migration cost** (per persona, validated previously): ~1h —
+  rename in DB config `agent.persona_system_prompt` + character JSON +
+  persona SQL + compose env var names + cold-start anchor re-apply.
+- **Image gen NOT blocked by naming** — SDXL prompts use trait tags,
+  not persona names. Can render all coaches now, rename folders post-decision.
+
+---
+
+### 1. Persona self-decided group chime-in (PINNED 2026-05-23)
+
+- **Context:** Trump just opened to all (`allowed_users="*"`, ambient 0.25).
+  Current ambient mechanism = dumb dice roll in
+  `channels/telegram_adapter.py:194-198`, pre-LLM. Persona never sees
+  skipped messages. Static per-channel float, not persona-aware.
+- **Question:** can persona itself judge "is this worth chiming in on?"
+- **Options sketched:**
+  1. **Nano-gate** — cheap `:8082` call (persona one-liner + last-N + new
+     msg → yes/no). Replaces dice roll at same hook point. Reuses ECO
+     sidecar. Recommended.
+  2. **Embedding salience** — `cosine(msg, persona_centroid)` +
+     `cosine(msg, recent_topic_cluster)`. Zero LLM cost. Misses
+     sarcasm/sociality.
+  3. **Tool-shaped** — full chat runs, first tool choice = `pass_quietly`.
+     Most expressive, pays full cost per msg. Bad for high-traffic groups.
+  4. **Heartbeat-as-observer** — group msgs → `working` memories, not chat
+     path. Heartbeat decides chime-in via `reach_out`. Energy budget =
+     natural rate limiter. Philosophically correct, biggest refactor.
+- **Lean:** #1 (nano-gate) for ship. #4 long-term once heartbeat plumbing
+  matures.
+
+### 2. Vera — beta-tester approval gate (NOT BUILT)
 
 - **State 2026-05-23:** per-user memory + confidentiality privilege shipped.
   Schema migrated on `hexis_vera`, workers recreated, persona prompt
@@ -60,7 +182,7 @@ Last updated: 2026-05-23
     "SELECT set_config('channel.telegram.allowed_users', '[\"593307304\"]'::jsonb)"
   ```
 
-### 1. Vera — assessment capture (PARKED, watching)
+### 3. Vera — assessment capture (PARKED, watching)
 - **State:** parked 2026-05-22 after ~8 gate runs. Vera (comms-trainer
   persona) is LIVE on Telegram — coaching is good, leak fixed, fits context.
 - **The unsolved bit:** structured `[session-assessment]` capture. Vera emits
@@ -76,16 +198,7 @@ Last updated: 2026-05-23
   §9a + a `KNOWN GAP` comment in `services/chat.py` `stream_chat_turn`.
   Operator: how does SillyTavern do streaming but still regex (more flexible text editor? not messenging app)
 
-### 2. Fleet rollout — agent.py context-assembly fix
-- **State:** `fix(agent): move chat hydrated context into system prompt`
-  is committed + live ONLY on `hexis_vera_channel_worker` (rebuilt).
-- **Pending:** the fix is fleet-wide-correct but other personas still run the
-  old image. Before rolling out: regression-test 2–3 personas (mira/death/
-  ennie — operator DMs them), then rebuild all `*_channel_worker` images.
-- **Heartbeat/maintenance images do NOT need rebuilding** — the fix is
-  chat-mode only; heartbeat assembly was deliberately left unchanged.
-
-### 3. Persona pipeline — `.sql` files vs native `data.*` consumption (DESIGN, undecided)
+### 4. Persona pipeline — `.sql` files vs native `data.*` consumption (DESIGN, undecided)
 - **Origin:** `characters/set_persona_prompt.<name>.sql` is fork-only. Upstream
   (QuixiAI/Hexis) has no `agent.persona_system_prompt` key AT ALL — confirmed
   `git grep` on `origin/main` finds it in zero `*.py`/`*.sql`. No GitHub issue
@@ -117,35 +230,6 @@ Last updated: 2026-05-23
 - **Next:** no code. When ready to decide, write a `.local-notes/` RFC
   stating options + costs + the divergence question plainly.
 
-### 4. CLAUDE.md staleness
-- Debugging section says `channel_sessions.history` = "last 8 turns". Wrong:
-  actual cap is `MAX_SESSION_HISTORY=40` → trim to `30` (`channels/
-  conversation.py`), now config-overridable via `channel.history.max` /
-  `channel.history.trim`. Fix the CLAUDE.md line when convenient.
-
-### 5. Per-user memory — one persona, many DM partners (DESIGN, undecided)
-- **Question:** can a single Vera DMing several people remember each one
-  individually?
-- **Today — half:** `channel_sessions` is keyed by `sender_id` → recent
-  conversation history IS per-partner. But the `memories` table has NO
-  sender/subject column — one shared pool per `hexis_vera` DB.
-  `_remember_conversation` writes untagged; `hydrate`/`fast_recall` query
-  DB-wide. So the persistent layer (episodic/semantic/strategic — Vera's
-  actual value) is NOT per-user: recalling for Alice can surface Bob's
-  memories. Hexis is architecturally single-self / single-relationship
-  (one `agent` row, one identity, one memory pool).
-- **Two paths to multi-client:**
-  - **A. DB per client** (`hexis_vera_alice`, …) — zero new code, but N DBs +
-    N channel workers, not "one Vera" (N clones, no shared Vera-growth),
-    doesn't scale.
-  - **B. Per-subject scoping in one DB** — tag each memory with `sender_id`
-    (column or `metadata`), scope `hydrate`/`fast_recall` to the current
-    sender. One Vera, one identity, per-client memory partition. Correct
-    model. Real work: schema + hot-path `fast_recall` (`db/*.sql`) + memory
-    API + thread `sender_id` through the chat path. Fleet-wide schema change.
-- **Next:** no code. Genuine architecture project, not a tweak. If pursued,
-  write a `.local-notes/` RFC (B is the right design; cost is the question).
-
 ---
 
 ## LOW PRIORITY / NOTES
@@ -160,27 +244,11 @@ Last updated: 2026-05-23
 - Minor glitch: Vera reused an earlier scenario verbatim (Sam/spreadsheet)
   from recall. Low priority, model-ish. Watch if it persists.
 
----
-
-## DONE THIS SESSION (2026-05-22)
-
-- Froze Lovesick / Monika / Joje / Ichika (commit `0679b46`) — superseded by
-  a forthcoming unified AI-type character. DBs preserved.
-- Froze Nines / Charlotte (commit `b0f1af0`) — superseded by a forthcoming
-  unified android character. DBs preserved.
-- Vera comms-trainer persona: brainstormed → spec → plan → built + onboarded
-  live (card, persona SQL, compose, DB `hexis_vera`, consent, anchor, all 3
-  workers running). Plan tasks 1–13 effectively done; gate passed on coaching
-  quality, assessment capture parked (see item 1).
-- `fix(agent)` context-leak fix, `fix(channels)` per-persona history cap,
-  session-assessment capture helper + 9 unit tests — all committed.
+### Voice I/O
+- text-to-speech, speech-to-text — unexplored. No spec.
 
 ---
 
 ## WAITING ON / EXTERNAL
 
-- **Unified AI-type character** — to supersede Lovesick/Monika/Joje/Ichika.
-  Not started; awaiting design.
-- **Unified android character** — to supersede Nines/Charlotte. Not started.
-
-text-to-speech, speech-to-text
+- _(none)_
