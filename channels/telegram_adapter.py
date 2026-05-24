@@ -556,7 +556,16 @@ class TelegramAdapter(ChannelAdapter):
                 parse_mode="MarkdownV2",
             )
             return True
-        except Exception:
+        except Exception as e:
+            # Telegram returns BadRequest "Message is not modified" when the
+            # new content matches what's already rendered. Streaming senders
+            # commonly fire a final edit identical to the last chunk — treat
+            # as a successful no-op. Falling through to the plain-text retry
+            # would replace the MarkdownV2-rendered message (which differs
+            # textually from the raw input) with raw text, destroying code
+            # formatting the user already sees correctly.
+            if "Message is not modified" in str(e):
+                return True
             # Retry without parse_mode. Log so MarkdownV2-escape regressions
             # are diagnosable instead of silently degrading to plain text.
             logger.warning(
