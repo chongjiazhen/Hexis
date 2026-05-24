@@ -33,6 +33,37 @@ import sys
 import asyncpg
 
 
+# On ECO->PRIME, every persona's last_heartbeat_at is hours stale, so
+# should_run_heartbeat() returns true for the whole fleet on the next poll
+# tick - all ~26 workers submit simultaneously and queue behind a single
+# --parallel 1 GPU slot. Roll last_heartbeat_at into the jitter window so
+# the first post-flip cycle lands at last + interval + per-cycle jitter,
+# spread across personas via the existing epoch-mod jitter_frac. Gated on
+# being actually overdue (> interval old) so a prime->prime re-arm or a
+# fresh init does NOT touch a healthy fleet.
+STAGGER_HEARTBEAT_SQL = """
+UPDATE state
+SET value = jsonb_set(
+    value,
+    '{last_heartbeat_at}',
+    to_jsonb(
+        CURRENT_TIMESTAMP - (
+            random() * COALESCE(
+                get_config_float('heartbeat.heartbeat_jitter_minutes'), 20.0
+            )
+        ) * INTERVAL '1 minute'
+    )
+)
+WHERE key = 'heartbeat_state'
+  AND (value->>'last_heartbeat_at') IS NOT NULL
+  AND CURRENT_TIMESTAMP - (value->>'last_heartbeat_at')::timestamptz
+      > COALESCE(
+            get_config_float('heartbeat.heartbeat_interval_minutes'), 60.0
+        ) * INTERVAL '1 minute'
+RETURNING (value->>'last_heartbeat_at')::timestamptz AS new_last
+"""
+
+
 async def apply_instance(dsn: str, db: str, entries: dict) -> None:
     conn = await asyncpg.connect(dsn)
     try:
@@ -40,8 +71,19 @@ async def apply_instance(dsn: str, db: str, entries: dict) -> None:
             await conn.execute(
                 "SELECT set_config($1, $2::jsonb)", key, json.dumps(cfg)
             )
+        mode = entries.get("agent.power_mode")
+        staggered_to = None
+        if isinstance(mode, str) and mode.strip().lower() != "eco":
+            row = await conn.fetchrow(STAGGER_HEARTBEAT_SQL)
+            if row is not None:
+                staggered_to = row["new_last"]
+        tag = (
+            f" [stagger: last_heartbeat_at -> {staggered_to.isoformat()}]"
+            if staggered_to is not None
+            else ""
+        )
         print(f"[set-power-mode] {db}: {', '.join(entries.keys())} -> "
-              f"{entries.get('llm.chat', {}).get('model', '?')}")
+              f"{entries.get('llm.chat', {}).get('model', '?')}{tag}")
     finally:
         await conn.close()
 
