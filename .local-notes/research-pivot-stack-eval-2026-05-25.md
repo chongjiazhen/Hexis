@@ -743,3 +743,122 @@ Two-Hermes-one-Mem0 is the **canonical multi-instance Hermes deployment** per Me
 | **3 (multi-instance sync)** | optional, later | Phase 2 + add home-WSL2 Hermes instance B. Centralize Mem0 at home rig. Git-sync SOUL.md + skills/. Both boxes = same persona. |
 
 Each phase reversible. Phase 3 = nice-to-have, not required. Phase 2 standalone is a complete stack.
+
+---
+
+## 13. SillyTavern drift recognition + memory-extension landscape
+
+### 13.1 Hexis is drifting toward SillyTavern, not OpenPersona
+
+Hexis-as-it-exists shares more DNA with SillyTavern than with Hermes/OpenClaw/OpenPersona:
+
+| Surface | Hexis | SillyTavern |
+|---|---|---|
+| Card format | `data.system_prompt`, `data.first_mes`, `data.mes_example`, `data.character_book`, `data.alternate_greetings` | **Same fields** (CLAUDE.md confirms SillyTavern V2 compat) |
+| Multi-persona roster | 11+ personas (mira/esme/sable/cassiel/death/...) | Character collection (chub.ai / JanitorAI marketplaces) |
+| Backstory depth | Rich lore, worldview, narrative | Lorebooks, world info, character notes |
+| Local-LLM-first | llama.cpp `:8080` | koboldcpp / oobabooga / llama.cpp |
+| NSFW-tolerant | "creative fiction assets for adult audiences" (CLAUDE.md) | Heavy roleplay/NSFW community use |
+
+60% SillyTavern by structure. Card-format compat was intentional. Earlier framing (compete-with-OpenPersona) targeted wrong audience.
+
+### 13.2 SillyTavern memory extension landscape — saturated
+
+| Extension | Role | Status |
+|---|---|---|
+| **Vector Storage** | Semantic RAG over chat + uploaded text | **Built-in** (superseded deprecated Smart Context) |
+| **World Info / Lorebooks** | Keyword-triggered knowledge insertion; char-bound or chat-bound | **Built-in** |
+| **Memory Books** (aikohanasaki) | Auto scene-marking + AI JSON summaries → lorebook entries | Active add-on |
+| **Smart Memory** (senjinthedragon) | Multi-tier: summaries + character facts + session details + scene history + story arcs + away recap | Active add-on |
+| **CharMemory** (bal-spec) | Auto structured-mem extraction → Data Bank → vector retrieval | Active add-on |
+| **ReMemory** (InspectorCaracal) | Yet another memory extension | Add-on |
+| **LorebookOrdering** (aikohanasaki) | Priority + budget across multiple lorebooks | Add-on |
+| **Honcho integration** | External memory-as-a-service via client+server plugin | Reference impl |
+| Mem0 | Previously integrated, now "migrating from Mem0" | Possibly deprecated |
+
+**Critical:** Smart Memory description verbatim: *"multi-tier memory system — automatic context summaries, persistent character facts across sessions, within-session details, scene history, story arcs, and an away recap."* That's **Hexis's typed-memory taxonomy in SillyTavern dialect.** Working/episodic/semantic/procedural/strategic + cold-start anchor. Convergent design, independently arrived at.
+
+**Implication:** "Hexis memory backend for SillyTavern" wedge is **saturated.** Don't compete.
+
+### 13.3 Extension architecture (for reference)
+
+Two-part pattern (per Honcho integration):
+1. Client extension (JS in `public/scripts/extensions/`) — hooks `getContext()` + Event System.
+2. Server proxy plugin (Node.js) — proxies to external backend.
+
+Well-documented, no architectural blockers. Hexis-as-extension would be ~1-2 month side project IF the wedge justified it.
+
+### 13.4 Wedge recalibration (post-user-input)
+
+What's UNIQUE inside SillyTavern ecosystem (no extension found):
+
+| Hexis feature | ST-extension equivalent? | Wedge? |
+|---|---|---|
+| Heartbeat / autonomous loop | **None** | **Real wedge** |
+| Consent / refusal / self-term | **None** | **Real wedge** |
+| Energy budgeting | **None** | **Real wedge** |
+| ~~Multi-channel projection (Telegram/Discord)~~ | **ST front-end + Termux Android = native everywhere-use** | **Not a wedge — user removed.** ST QoL features beat custom Telegram bridge; mobile already solved. |
+| Sender-scoped memory (multi-DM confidentiality) | Partial (chat-bound lorebooks) | Possible wedge, niche |
+
+Wedge shrinks to **3 features**: heartbeat + consent/refusal + energy budgeting. All cognitive-loop layer, not memory layer.
+
+### 13.5 User reframe — return to SillyTavern, idea-crib from Hexis
+
+User stopped using ST when Hexis long-term-memory looked interesting. Didn't go deep on ST memory extensions at that time. Now sees ST memory extension maturity → wants to return to ST as primary persona tool.
+
+Implications:
+- Card collection ports back to ST (already V2-shaped). No migration cost.
+- ST built-in Vector Storage + Memory Books + Smart Memory cover the memory layer Hexis was solving. **No need for Hexis backend.**
+- Heartbeat / consent / refusal **as ideas**, not as code — crib into ST usage patterns:
+  - **Heartbeat:** scheduled task at OS level (cron / Task Scheduler / Termux job) that sends a synthetic "what would you do right now?" prompt to ST API → character generates unprompted message → posted back to chat history. Doesn't need Hexis.
+  - **Consent / refusal:** SillyTavern `post_history_instructions` HARD RULE pattern (already cribbed from Hexis CLAUDE.md). Author once per card.
+  - **Energy budgeting:** manual self-imposed cadence. For personal use, OS-level rate limit is enough.
+- Multi-channel projection deprecated: ST front-end QoL + Termux Android mainstream = "everywhere use" solved natively. Telegram-bridge work was solving a non-problem.
+
+### 13.6 Final stack picture (post-recognition)
+
+Replace prior "Hermes + Mem0 for persona + cribbed Hexis infra" framing:
+
+```
+Coding tool:    Hermes-WSL2 (work primary, home optional via §11/§12)
+                + Mem0 (memory for coding agent)
+                + corp LLM / home rig llama.cpp via tailnet
+
+Persona tool:   SillyTavern (return to native ST)
+                + Vector Storage (built-in memory)
+                + Smart Memory or Memory Books (multi-tier memory)
+                + character cards (port from Hexis JSONs)
+                + post_history HARD RULE (consent/refusal cribbed from Hexis)
+                + OS-cron synthetic-prompt (heartbeat cribbed from Hexis, optional)
+                + Termux ST on Android (mobile everywhere-use)
+
+Inference:      llama.cpp :8080 (set-power-mode arbiter, q36 ActiveBig)
+                serves all consumers: Hexis-Telegram (legacy), Hermes (coding),
+                ST (persona) — all OpenAI-compat HTTP clients
+```
+
+**Zero Hexis-stack new development.** Hexis itself becomes:
+- A legacy Telegram-persona reach (run it as long as you want, no upkeep planned)
+- A reference architecture (the depth work is documented, cards are exportable)
+- An idea source for cribbing into ST usage patterns
+
+### 13.7 What this means for monetization / legacy
+
+- **Card distribution:** export Hexis cards to chub.ai or similar. Free distribution, real audience. Lowest-friction value extract.
+- **Hexis backend monetization:** dead. Memory wedge saturated by ST community.
+- **Agent-loop ST extension:** open question — small wedge (3 features), small audience, but real. Side project if motivated. Probably skip for hobby framing.
+- **Legacy write-up:** "Cognitive architecture lessons from building a SillyTavern alternative before realizing SillyTavern had already solved memory." Honest essay, real audience inside ST community.
+
+### 13.8 Supersedes earlier sections
+
+Prior sections framed pivot as Hermes-replaces-Hexis-persona-role. **Correction:** Hermes is for **coding** not personas. **SillyTavern** is for personas. Hexis stays as legacy Telegram reach + reference architecture, not as primary tool.
+
+Final mental model:
+- **Hermes = coding agent** (your daily-driver dev tool)
+- **SillyTavern = persona tool** (return-to-native, with cribbed Hexis ideas)
+- **Hexis = legacy + reference** (existing Telegram personas, no new dev)
+- **Mem0 = Hermes plugin** (coding memory, not persona memory)
+- **ST built-in + Smart Memory = persona memory** (no Hexis backend needed)
+- **llama.cpp + set-power-mode = inference farm** (serves all consumers)
+
+This is the cleanest possible end-state given the saturation finding.
