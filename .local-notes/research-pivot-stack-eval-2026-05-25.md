@@ -541,3 +541,48 @@ For future reference:
 - **Plus governance flux** — founder Steinberger left for OpenAI Feb 2026; community foundation transition.
 
 Stars = accumulated history (lagging). Token volume = real-time use (current). Velocity vector flipped; star count alone is misleading. 6-12 month watch decides whether OpenClaw stabilizes under foundation or continues losing share.
+
+---
+
+## 10. Correction — OpenCode is redundant, drop from stack
+
+§8.3 + §9 proposed a two-tool setup: Hermes for persona harness + OpenCode for terminal coding. **Wrong.** Hermes already covers coding role.
+
+### Why OpenCode was floated
+
+Reasoning: ephemeral coding shouldn't bloat persona memory. Coding chatter → MEMORY.md / Mem0 noise.
+
+### Why it doesn't hold
+
+- Hermes has 40+ tools incl. filesystem / shell / code / browser. Coding is a core use case (Nous DNA + agentskills.io lineage).
+- Hermes `/goal` + multi-agent kanban scopes coding tasks separately from main convo.
+- Mem0 has user/session/agent scopes — coding session = different agent scope, no persona contamination by design.
+- "Two-tool setup" solved a non-problem.
+
+### Corrected final stack
+
+```
+Hermes (persona harness AND coding agent — one tool, two jobs)
++ Mem0 (memory)
++ hand-authored SKILL.md / SOUL.md (persona = self-maintained)
++ llama.cpp :8080 via OpenAI-compat + Hexis set-power-mode.ps1 (transferred infra)
++ Hexis Telegram fleet on shared :8080 (additive coexistence per §9.1)
++ Hexis-cribbed: probe-eco, 7KB anchor budget, post_history HARD RULE pattern
+```
+
+**1.5 upstreams confirmed minimal.** (Hermes + Mem0; Mem0 effectively a Hermes plugin via MemoryProvider.)
+
+### When OpenCode would still apply
+
+Only if:
+- Stateless TUI coder w/ build/plan-mode UX preferred over Hermes for one-off edits
+- Coding-on-machine-A vs persona-on-machine-B isolation desired
+- SST release cadence / community preferred over Nous
+
+For single-box hobby use w/ fleet already running: **skip OpenCode.** Use Hermes for both code + persona.
+
+### What this supersedes
+
+- §8.3 OpenCode deep-dive — facts still correct, "use as separate dev tool" recommendation withdrawn.
+- §9 two-tool setup mention — withdrawn.
+- Repos-to-avoid list (§8.6): add OpenCode (was implicitly "use separately", now "skip entirely").
