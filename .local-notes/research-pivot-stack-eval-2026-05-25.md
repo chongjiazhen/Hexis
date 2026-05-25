@@ -257,3 +257,145 @@ Honest reads accumulated across the thread:
 - `.local-notes/research-persona-memory-systems.md` — 2026-05-21 baseline.
 - `.local-notes/strategy-local-llm-positioning.md` — 2026-05-21 positioning.
 - `.local-notes/plan-model-tier-probe.md` — implementation plan for the model-tier probe.
+
+---
+
+## 8. Update (same day, post-deep-dive corrections)
+
+### 8.1 OpenPersona correction — polish ≠ traction
+
+Prior framing oversold OpenPersona as "leading persona spec." Actual data:
+
+- **OpenPersona repo: 27 stars.** Smallest project in the entire comparison. 20× smaller than Hexis (521).
+- acnlabs = 28-repo spec factory (MetaSpec, OmniTaskAgent, mcp-factory, ACN, persona-skills, org-harness, paperclip-acn-plugin, …). Not a focused product org.
+- **ACN = ERC-8004 on-chain agent identity on Base mainnet.** Web3 angle. Polish + crypto-adjacency + spec-heavy + low stars = "raise on spec, not users" pattern. Possibly VC/grant/token-launch-driven.
+- English docs + Chinese contributor names (Nuwa, Tong Jincheng, Zhang Xuefeng personas) + Web3 framing = overseas-facing crypto-AI startup positioning, not developer-adoption-driven.
+
+**Implication:** treat OpenPersona spec as **reference, not dependency.** Read the 4-layer / Soul-Memory-Bridge / supersession ideas, crib what fits, don't `git submodule add`. On-chain identity for a private persona fleet is precisely the wrong design for personal use.
+
+Adoption-validated polish (Hermes, OpenClaw) is what to *depend on*. Polish-without-validation (OpenPersona) is what to *read and crib from*.
+
+### 8.2 OpenClaw README deep-dive
+
+| Axis | OpenClaw |
+|---|---|
+| Tagline | *"Your own personal AI assistant. Any OS. Any Platform. The lobster way. 🦞"* |
+| Mascot | Molty (space lobster) — character-driven by design |
+| License | MIT |
+| Stars | ~372K (fastest-ever to 100K, peak 710 stars/hr Jan 30 2026) |
+| Stack | TS / pnpm / Node 24 monorepo (`core/gateway/agent/cli/sdk/ui`) |
+| Workspace | `~/.openclaw/workspace/` injects `AGENTS.md + SOUL.md + TOOLS.md` + `skills/<name>/SKILL.md` |
+| Registry | ClawHub (clawhub.ai) |
+| Channels | 20+ messaging (WhatsApp / Telegram / Slack / Discord / Signal / iMessage / etc.) |
+| MCP | First-class registry |
+| Sandbox | Docker / SSH / OpenShell backends |
+| Model | Provider-agnostic config; OpenAI primary sponsor; local via OpenAI-compat (off happy-path) |
+| Governance | Community foundation; Steinberger left for OpenAI Feb 2026 |
+
+**Status: "dominant but mindshare leaking."** Stars = accumulated stock (372K, doesn't decay). Daily OpenRouter token traffic = current flow, and Hermes overtook in May 2026 (224B vs 186B). Velocity vector flipped. 6-12 month watch.
+
+**Fit:** OpenClaw's `SOUL.md` + `SKILL.md` + workspace IS what OpenPersona compiles into. Direct OpenPersona-first-class runtime. Persona-driven by core design (Molty mascot proves it).
+
+### 8.3 OpenCode README deep-dive
+
+| Axis | OpenCode |
+|---|---|
+| Tagline | *"The open source AI coding agent. Built for the terminal."* |
+| License | OSS (LICENSE file present; not surfaced in README excerpt) |
+| Stars | ~165K, 19.5K forks |
+| Stack | TS (65.9%) / Bun / Turbo monorepo, by SST team |
+| Built-ins | `build` (full access) + `plan` (read-only) + `@general` subagent |
+| AGENTS.md | Yes (`/init` creates) |
+| SKILL.md | Not mentioned |
+| OpenPersona | Not supported |
+| Local LLM | 75+ providers including local |
+| Memory | Session-scoped; no persistent cross-session memory layer |
+
+**Category reframe:** OpenCode is in the **Claude Code / Codex / Cursor / Aider class** — coding assistant, project-scoped `AGENTS.md`, no SOUL.md, no SKILL.md persona packs, no persistent identity. **Wrong category for persona harness.**
+
+**Useful in different role:** as terminal dev tool for editing the stack itself. Replace VSCode + Copilot w/ OpenCode (terminal-native, multi-provider, points at local llama.cpp via OpenAI-compat). Separate process from persona harness.
+
+### 8.4 Reverse-picking strategy (memory-first)
+
+User reframe: pick market-voted memory layer, then pick harness with best integration. Persona = self-maintained SKILL.md. Idea-crib from OpenPersona/Hexis/OpenClaw without importing as dep.
+
+**Memory market vote = Mem0:**
+- 21 framework integrations
+- Apache 2.0
+- FastEmbed local emb
+- PGVector self-host (reuses Hexis Postgres muscle)
+- 1,764 tok/conv (340× cheaper than Zep)
+- LoCoMo 91.6
+- April 2026 algo: single-pass extraction + multi-signal retrieval
+
+**Harness w/ best Mem0 integration = Hermes:**
+- First-class `MemoryProvider` interface (issue #3943)
+- Built-in adapter
+- Background daemon + zero-latency prefetch
+- MIT, local-LLM via OpenAI-compat
+- 140K stars, won OpenRouter daily token leaderboard May 2026
+
+OpenClaw is second (skill-plugin Mem0, not built-in). OpenHuman disqualified (GPL-3.0 + managed-cloud). Letta competes w/ Mem0 architecturally.
+
+### 8.5 Final revised stack (cleanest possible)
+
+```
+Hermes (agent harness, 140K stars, MIT, built-in Mem0 daemon)
++ Mem0 self-host w/ PGVector (Apache 2.0, FastEmbed local emb)
++ hand-authored SKILL.md + SOUL.md (persona = self-maintained)
++ llama.cpp :8080 via OpenAI-compat + Hexis set-power-mode.ps1 (transferred infra)
++ Hexis-cribbed: probe-eco harness, 7KB anchor budget, post_history HARD RULE pattern
+```
+
+**1.5 upstream upkeep** (Hermes + Mem0; Mem0 effectively a Hermes plugin via MemoryProvider).
+
+### 8.6 Five repos avoided
+
+- Hexis docker stack — retire.
+- OpenPersona — never install (idea-crib only).
+- OpenClaw — never install (idea-crib SOUL.md / SKILL.md format + AGENTS.md/TOOLS.md workspace convention only).
+- OpenHuman — never install (GPL-3.0 + managed-cloud).
+- Letta / Zep / Cognee / MemMachine — never install.
+
+### 8.7 Ideas to crib (no upstream dep)
+
+**From OpenPersona spec:**
+- Memory supersession (`supersededBy` chains) → Mem0 metadata field; link new mem → old mem ID on update.
+- Soul-Memory Bridge (eventLog → evolvedTraits) → periodic Mem0 cron promoting high-frequency episodic patterns to persona-fact memories. Hexis `run_subconscious_maintenance` already does this — port the logic.
+- 3-gates lifecycle — skip (overkill for personal).
+- 4-layer Soul/Body/Faculty/Skill — collapse into SKILL.md sections; authoring template not runtime spec.
+
+**From Hexis (your own work):**
+- 7KB anchor budget rule → SKILL.md size cap.
+- post_history HARD RULE pattern → SKILL.md trailer section.
+- Energy budgeting → skip for personal use, OR implement as Mem0-recorded action-cost log if you want depth.
+- Consent / refusal / self-term → bake into SKILL.md HARD RULE. Authority lives in prompt, not code.
+- Heartbeat as cognitive loop → Hermes v0.13 ships `/goal` + cron tasks. Close enough; skip bespoke loop.
+- probe-eco harness → direct port; harness-agnostic.
+- set-power-mode + models.json + ECO/PRIME → direct port; the genuinely-yours infra.
+
+**From OpenClaw (idea-only):**
+- `AGENTS.md + SOUL.md + TOOLS.md` workspace layout → adopt as Hermes workspace convention. Hermes already has SOUL.md; align the other two.
+- Sandbox via Docker / SSH / OpenShell → for if personas ever expose to group chats.
+
+**From OpenHuman (idea-only):**
+- Day-1 ingest of user data → write a one-off connector to dump your data into Mem0 directly. Skip OpenHuman's GPL+cloud stack.
+
+### 8.8 Caveats
+
+1. **Hermes is coding-biased.** Nous DNA = dev tool. Persona/companion fit is OK but not happy path. `SOUL.md` is single-persona (THE Hermes voice). Multi-persona fleet = N Hermes instances under `set-power-mode` arbiter, mirroring current Hexis docker pattern.
+2. **Hermes built-in `MEMORY.md` (~2,200 chars) + `USER.md` (~1,375 chars) is bounded.** Mem0 (external) carries long-tail. Wire Mem0 daemon BEFORE personas accumulate state.
+3. **No fleet-multi-persona affordance in ANY harness.** `set-power-mode.ps1` + N-instance pattern is bespoke regardless of stack — your value-add.
+4. **60-day OpenHuman watch still independent.** If they relicense + drop cloud dep, reconsider. Both unlikely.
+5. **OpenClaw mindshare watch independent.** If foundation stabilizes + Hermes-overtake reverses by Q3 2026, reconsider OpenClaw as alt harness. Default = Hermes.
+
+### 8.9 Meta-correction on prior recommendations earlier in this note
+
+Earlier sections (1-7) treated OpenPersona as a near-must, OpenHuman as a contender, OpenClaw as the persona-happy harness. Corrections:
+
+- OpenPersona → idea-crib only (27 stars confirms spec-not-product).
+- OpenHuman → out (GPL-3.0 + managed-cloud violates local-only mandate).
+- OpenClaw → second-choice harness (mindshare leaking; idea-crib SOUL.md/SKILL.md/AGENTS.md/TOOLS.md workspace format).
+- Hermes → primary harness (first-class Mem0 daemon, won OpenRouter, MIT, 140K stars + active funded development).
+
+**The right framing was the user's reverse-pick: market-voted memory layer → harness w/ best integration → persona self-maintained.** Sections 1-7 had the data; section 8 has the synthesis.
