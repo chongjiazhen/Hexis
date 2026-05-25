@@ -862,3 +862,94 @@ Final mental model:
 - **llama.cpp + set-power-mode = inference farm** (serves all consumers)
 
 This is the cleanest possible end-state given the saturation finding.
+
+---
+
+## 14. Memory-provider correction — Mem0 → Holographic primary
+
+Independent agent re-research (2026-05-25 evening) corrected memory-layer recommendation in §8.5 / §11 / §12.
+
+### 14.1 Claims reconfirmed (delta vs prior framing)
+
+| Claim | Prior framing | Verified state |
+|---|---|---|
+| Mem0 49% LongMemEval temporal | "Mem0 weak / saturated market" | **STALE.** Mem0 2026 algorithm update self-reports 97.0% temporal / 94.4% overall ([mem0.ai blog](https://mem0.ai/blog/the-token-efficient-memory-algorithm-now-has-temporal-reasoning)). Vendor-reported only, not independently reproduced. Soften the critique. |
+| ByteRover 96.1% LoCoMo #1 | "accuracy leader" | **SELF-REPORTED** on own arXiv preprint (not peer-reviewed). Independent benchmark cites **92.2%** LoCoMo. Still strong, not 96.1%. |
+| Hindsight 91.4% LongMemEval | "quality leader on LongMemEval" | **VERIFIED INDEPENDENTLY** ([arxiv 2512.12818](https://arxiv.org/pdf/2512.12818)). MIT-licensed, self-hostable. **Probable real quality leader.** |
+| Supermemory 85.4% | from review | **WRONG NUMBER.** Real figures are 81.6% (GPT-4o) and 84.6% (GPT-5) per [vectorize.io](https://vectorize.io/articles/hindsight-vs-supermemory). Also proprietary closed-source. |
+| Holographic local-only zero-dep | "trial-tier alt" | **VERIFIED.** MIT, SQLite + FTS5 + Holographic Reduced Representation algebra, no API/network. First-class Hermes provider. |
+| OpenViking AGPL-3.0 | "viral license concern" | Verified, but CLI/examples are Apache 2.0; for hobby non-distributed use, AGPL is largely non-issue. |
+
+### 14.2 Mem0 reassessment
+
+Mem0's 51.4K stars = **first-mover inertia + strong DX/SDK**, not current quality leadership.
+
+- 2025: 49% temporal LongMemEval (real embarrassment)
+- 2026 update: 97% claimed (vendor self-report, unverified externally)
+- $249/mo graph paywall = irrelevant for local-only hobby use (would self-host Apache OSS core)
+- Self-host core is heavier than Holographic, lower verified accuracy than Hindsight
+
+**Not the right primary pick** for the 16/16 local-only hobby Hermes stack. Still viable if you want largest-community SDK quality, but no longer first-choice.
+
+### 14.3 Memory-provider entries missed in prior research
+
+- **TencentDB Agent Memory** — May 2026, MIT, 4-tier local memory pipeline, sqlite-vec backend. Fresh; worth eval.
+- **Agentmemory** (`rohitg00/agentmemory`) — explicitly markets to Hermes + Claude Code + Cursor. MIT.
+- **sqlite-memory** (`sqliteai/sqlite-memory`) — MIT, **uses llama.cpp local embeddings**. Natural fit since `:8081` embed already runs.
+- ByteRover renamed from "Cipher" — older `campfirein/cipher` refs are same project.
+
+### 14.4 Revised memory-provider ranking (your constraints: 16GB VRAM, 16GB RAM, local-only, MIT/Apache, hobby)
+
+| Rank | Provider | License | Why |
+|---|---|---|---|
+| **1 (primary)** | **Holographic** | MIT | Zero deps, SQLite+FTS5+HRR algebra, no API keys, no Docker, no network. First-class Hermes provider. ~50-200MB RAM. Trivially fits constraints. |
+| **2 (backup, high accuracy)** | **Hindsight** | MIT | Highest INDEPENDENTLY verified LongMemEval (91.4-94.6%). Single-Docker self-host w/ embedded Postgres + cross-encoder reranker. Heavier (~500MB-1GB RAM) but accuracy ceiling. |
+| **3 (backup, llama.cpp reuse)** | **sqlite-memory** | MIT | Uses llama.cpp embeddings via your existing `:8081` embed. Markdown-aware. Natural fit for coding+persona Hermes. |
+| 4 (watch) | TencentDB Agent Memory | MIT | Brand new (May 2026); worth tracking but unproven. |
+| Skip | Mem0, ByteRover, Honcho, Supermemory, RetainDB | various | Cloud-default OR vendor-self-reported OR overhyped OR paid. |
+
+### 14.5 Revised stack diagram (supersedes §8.5 / §11 / §12)
+
+```
+Hermes (work-WSL2) [primary harness]
+  + Holographic memory (local SQLite, MIT, zero-dep) ← was Mem0 in §8.5
+  + llama.cpp :8080 via Tailscale → home rig (ablx or q36 ActiveBig)
+  + RTK CLI proxy (Rust, tool-output compression)
+  + caveman-style SOUL.md + AGENTS.md (authored compression)
+Home rig (Hexis Telegram fleet + inference serving)
+  + ablx :8080 (set-power-mode arbiter) [current ActiveBig]
+  + Hexis Docker fleet (Telegram-only personas)
+  + Tailscale serves :8080 over tailnet
+```
+
+**Net upstreams: 2** (Hermes + Holographic memory). RTK = utility binary. Tailscale = network plumbing. Hexis fleet legacy = no new dev.
+
+If Holographic feels sparse on real workloads after trial: upgrade path → Hindsight (heavier infra, peer-verified accuracy).
+
+### 14.6 What this supersedes
+
+- §8.5 stack: replace "Mem0 self-host w/ PGVector" → "Holographic local SQLite"
+- §11.2 / §11.3 stack: same replacement
+- §12.2 sync model: Mem0 was assumed shared sync target across two Hermes instances. **Holographic doesn't have a documented multi-instance sync story.** If §12 sync becomes real (two Hermes instances) → re-eval: either run Hindsight (server-mode, both instances connect over tailnet) OR accept per-instance Holographic with periodic git-sync of SQLite file (works but conflict-y on simultaneous writes).
+- §12.3 architecture diagram: Mem0 → Holographic on home rig. Hindsight is the alternative if multi-instance sync is required.
+
+### 14.7 Action items (when ready)
+
+- [ ] Install Holographic for Hermes work-WSL2 trial — Hermes built-in support
+- [ ] Verify Holographic works alongside coding sessions (recall test: chat → restart → ask "what did we discuss?")
+- [ ] Defer Hindsight setup until Holographic limits surface
+- [ ] Skip Mem0 install (was the original plan; superseded)
+
+### 14.8 Sources
+
+- Independent reconfirm sources:
+  - https://get-hermes.ai/memory/
+  - https://atlan.com/know/mem0-alternatives/
+  - https://www.byterover.dev/blog/benchmark-ai-agent-memory
+  - https://arxiv.org/pdf/2512.12818 (Hindsight)
+  - https://vectorize.io/articles/hindsight-vs-supermemory
+  - https://github.com/volcengine/OpenViking
+  - https://github.com/sqliteai/sqlite-memory
+  - https://mem0.ai/blog/the-token-efficient-memory-algorithm-now-has-temporal-reasoning
+  - https://hindsight.vectorize.io/guides/2026/04/21/guide-hermes-agent-holographic-memory-technical-deep-dive
+  - https://www.marktechpost.com/2026/05/23/tencent-open-sources-tencentdb-agent-memory-a-4-tier-local-memory-pipeline-for-ai-agents/
