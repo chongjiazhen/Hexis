@@ -399,3 +399,145 @@ Earlier sections (1-7) treated OpenPersona as a near-must, OpenHuman as a conten
 - Hermes → primary harness (first-class Mem0 daemon, won OpenRouter, MIT, 140K stars + active funded development).
 
 **The right framing was the user's reverse-pick: market-voted memory layer → harness w/ best integration → persona self-maintained.** Sections 1-7 had the data; section 8 has the synthesis.
+
+---
+
+## 9. Update (later same day) — additive coexistence + verifications
+
+### 9.1 Reframe: additive coexistence, not pivot/replacement
+
+Earlier sections framed Hexis-vs-Hermes as either-or. **Correction: additive.** Both can run on the same llama.cpp `:8080` slot simultaneously.
+
+**Architecture:**
+
+```
+┌─ llama.cpp :8080 (ActiveBig q36, set-power-mode arbiter) ───┐
+│                                                              │
+│  ←  Hexis fleet (~6 gpu personas, Telegram + heartbeat)     │ ← keep as-is
+│        mira / esme / sable / cassiel / monika / death / ...  │
+│                                                              │
+│  ←  Hermes (host process, main "daily driver" persona,      │ ← new addition
+│        multi-channel, w/ Mem0 daemon, OpenAI-compat to :8080)│
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
+   :8081 embed (CPU) :8082 nano (ECO) — unchanged
+```
+
+llama-server doesn't know about sessions — every request is fresh prompt + history. Hermes is just another OpenAI-compat HTTP client. Adding it = one more consumer of the same slot. Zero code changes to set-power-mode, schema, or model.
+
+**Wrinkles (not blockers):**
+
+1. **Prompt-cache thrash.** Hermes anchor ≠ Hexis persona anchors → cache-miss on switch. Already happens between Hexis personas; adding Hermes = one more cache class.
+2. **Concurrent-load contention.** `--parallel 1` queues. Hermes interactive may wait briefly during Hexis heartbeat prefill. Mitigation: raise `--parallel` to 2-3 (measure VRAM on q36), lower Hexis heartbeat cadence on unused personas, or accept queue waits.
+3. **Model fit.** Hermes expects clean system-prompt + tool-call adherence. q36 handles it. abliterix has CoT-leak risk (mitigated by Hexis `strip_reasoning()` only — Hermes has no such filter). Lean q36 as ActiveBig if Hermes is daily driver.
+4. **set-power-mode doesn't know about Hermes.** Hermes is host-process, not container. `prime` discovers personas by running containers. Hermes lives outside set-power-mode's purview; just point it at `http://localhost:8080/v1`.
+5. **Mem0 vs Hexis Postgres = parallel stores.** Hermes-persona state in Mem0. Hexis-persona state in `hexis_<persona>` DBs. **Do NOT mirror.** Two cognitive frames, two stores, clean separation.
+
+**Why this is the *right* pivot path:**
+
+- **Zero migration risk.** Hexis personas (mira/esme/cassiel/...) keep running untouched.
+- **One-persona spike** = pick a NEW persona as Hermes daily driver. Do NOT port mira to Hermes (mira stays Hexis-Telegram).
+- **Same infra cost.** No double-VRAM, no second machine, no parallel docker stack.
+- **Real comparison.** Hermes-Mem0 vs Hexis-Postgres on same model + hardware. Honest A/B over 2-4 weeks.
+- **Reversibility.** Hermes flops → kill host process, Hexis untouched. Hermes wins → migrate Hexis personas incrementally over months.
+
+This **supersedes** the "2-week mira-port spike" framing earlier in this note (sections 4 and 8.5). Mira stays. Hermes gets a new persona.
+
+### 9.2 Verified: OpenHuman managed-cloud is NOT hallucinated
+
+User flagged the "Open* + managed-cloud" oxymoron as suspicious. Direct README + docs quotes confirm it's open-core, not pure-OSS-local:
+
+From README:
+
+> *"The default managed experience still uses OpenHuman-hosted services for account sign-in, model routing, web search proxying, and managed integration/OAuth flows through the Composio connector layer."*
+
+> *"If you want to run Composio directly instead, configure direct mode with your own Composio API key; real-time trigger webhooks then need to be hosted and wired by you."*
+
+> *"some real-time triggers and hosted features still require the managed backend."*
+
+From `tinyhumans.gitbook.io/openhuman/features/model-routing/local-ai`:
+
+> *"Ollama, used for bundled model lifecycle, embeddings, and the existing model-asset flow"*
+
+> *"LM Studio, used through its local OpenAI-compatible server for chat-style local inference."*
+
+> *"Vision, STT, TTS, and Web search stay cloud-only with no local option offered."*
+
+> *"Turning on local AI does not silently route everything through it, you choose the workloads."*
+
+**Local AI scope verified:**
+
+| Workload | Local possible? |
+|---|---|
+| Chat | yes (LM Studio OpenAI-compat) |
+| Reasoning | yes (Ollama / LM Studio) |
+| Embeddings | yes (Ollama `all-minilm:latest`) |
+| Vision | **no — cloud-only** |
+| STT | **no — cloud-only** |
+| TTS | **no — cloud-only** |
+| Web search | **no — cloud-only** ("backend proxy") |
+| OAuth/connectors (118) | requires Composio (managed default OR self-host BYO key + webhook infra) |
+
+**llama.cpp NOT named.** Only Ollama + LM Studio. Your set-power-mode + llama.cpp `:8080` would need to route through LM Studio's OpenAI-compat slot (transitively works) OR run Ollama parallel (extra process, separate model cache). Either way, NOT first-class supported.
+
+**Verdict:** OpenHuman is open-core (GPL-3.0 code + managed-default backend), not open-local. Marketing tagline "Your Personal AI super intelligence: local memory" is technically accurate at the data-storage layer but obscures that headline features (118 connectors, vision/voice/search, real-time triggers) depend on managed components.
+
+**Stays out of stack.** Local-only mandate violated even in "local AI mode."
+
+User's "Open* + managed-cloud oxymoron" smell test was the right reflex. Trust it on future "Open*" projects.
+
+### 9.3 Mindshare trend — OpenHuman vs Hermes
+
+Triangulated data:
+
+| Metric | OpenHuman | Hermes |
+|---|---|---|
+| Repo age | ~3 months (Feb 18, 2026) | ~3 months (~Feb 2026) |
+| Stars (current) | **~27K** | ~140-153K |
+| Star growth | 776 → 27K in ~9 days (35×); ~3K/day during surge | 0 → 140K in <3 mo (~1.5K/day avg) |
+| Week-over-week | 150% | sustained, not spike |
+| OpenRouter daily tokens | not reported | **224B (May 10) → 271B (rising)** |
+| Production users | 5K users in first 7 days | 7.5M monthly devs via ecosystem |
+| Last big release | v0.53.43 (May 13) | **v0.13.0 "Tenacity"** May 7 — 864 commits / 588 PRs / 295 contributors |
+| Recent accolades | #1 GitHub Trending 7 days (May 18); #1 Product Hunt daily/weekly/monthly | #1 OpenRouter daily token rankings (May 10), overtook OpenClaw |
+
+**Two different curves:**
+
+- **OpenHuman = trending-period spike.** Steep acceleration off low base. Novel pitch capturing attention. Risk: hype curves of 3K stars/day rarely sustain past 30-60 days.
+- **Hermes = sustained adoption + production-validated.** Slower per-day but 6× higher absolute over 3 months. OpenRouter token volume is *use, not stars* — 224B → 271B means production traffic is **climbing**, not plateauing post-launch.
+
+**Are they competitors?** No, despite the YouTube SEO bait framing.
+- OpenHuman = "personal-data second brain" niche.
+- Hermes = "general-purpose self-improving agent" niche.
+- Overlap at "persistent local AI" framing only; value-add is different.
+- Could coexist on one box. Not substitutes.
+
+**Honest read:**
+
+| Question | Answer |
+|---|---|
+| Bigger mindshare *now*? | Hermes (5× stars + production token volume). |
+| Growing faster *now*? | OpenHuman (150% WoW vs Hermes sustained climb). |
+| Stronger longevity signal? | Hermes (production token usage = users *shipping*, not just *trying*). |
+| Higher flameout risk? | OpenHuman (steep spike from small base + managed-cloud + GPL-3.0 + Composio dep friction may surface as community discourse). |
+| Active development? | Hermes (864-commit single release vs OpenHuman small-patch cadence). |
+
+**Forward signal:** Hermes 224B → 271B daily tokens between May 10 and end of May = +20% in 3 weeks. If that continues → ~400B daily by July. Bet on the durable curve.
+
+### 9.4 What this confirms for the stack
+
+No change to §8.5 recommended stack. Reinforces:
+
+- **Hermes for harness role.** Mindshare durability + production validation + active dev cadence + Mem0 first-class + MIT + local-LLM-OK = lowest-risk longest-lived choice.
+- **OpenHuman remains a 60-day watch, but the bar is higher.** Need both (a) star growth sustained past June-July AND (b) reduction in managed-cloud surface area. (b) is unlikely given their business model.
+- **Hybrid coexistence path** (§9.1) is the actual right execution: keep Hexis Telegram fleet running, add Hermes as primary daily-driver consumer of the same `:8080`, compare lived experience over 2-4 weeks before committing to fleet migration.
+
+### 9.5 OpenClaw "dominant but mindshare leaking" — definition
+
+For future reference:
+
+- **Dominant on stock** (accumulated stars) — 372K, fastest-ever to 100K, doesn't decay.
+- **Leaking on flow** (daily traffic) — Hermes overtook on OpenRouter May 2026 (224B vs OpenClaw 186B daily tokens).
+- **Plus governance flux** — founder Steinberger left for OpenAI Feb 2026; community foundation transition.
+
+Stars = accumulated history (lagging). Token volume = real-time use (current). Velocity vector flipped; star count alone is misleading. 6-12 month watch decides whether OpenClaw stabilizes under foundation or continues losing share.
