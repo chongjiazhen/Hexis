@@ -3,7 +3,7 @@
 Centralized "what's on our plate" so nothing gets dropped. Newest context at
 top of each item. Untracked scratch (lives in `.local-notes/`).
 
-Last updated: 2026-05-23
+Last updated: 2026-05-25
 
 ---
 
@@ -235,6 +235,74 @@ later only on demand evidence.
 - **Next:** no code. When ready to decide, write a `.local-notes/` RFC
   stating options + costs + the divergence question plainly.
 
+### 5. Telegram alert → persona routing (SHIPPED, fallback DEFERRED — paused 2026-05-25)
+
+- **State:** core 6-task plan SHIPPED. POST `/api/webhook/alert` → raw text
+  verbatim to persona's TG bot + episodic memory write → `priority=high`
+  immediate bounded LLM reaction (persona may emit silence token) →
+  `priority=normal` queued for next heartbeat batch scan. ECO skips
+  reactions, raw deliver kept. Gated by `channel.telegram.alert_chat_id`.
+- **Code:** `services/alert_reaction.py` (builder, reaction turn, batched
+  scan), `services/worker_service.py:626` (webhook handler), `:336/:846`
+  (heartbeat call + bridge wire). Tests: 11 (`test_alert_reaction.py` +
+  `test_worker_webhook_alert.py`).
+- **Docs:**
+  - Design: `docs/superpowers/specs/2026-05-22-telegram-alert-persona-design.md`
+  - Plan (6 tasks, all DONE): `docs/superpowers/plans/2026-05-22-telegram-alert-persona.md`
+  - Operator: `README.md:137-170`
+- **Shipping commits:** `cbc20a2` (outbox builder), `32649fe` (reaction
+  turn), `cce241f` (batched scan), `b60a8a4` (webhook handler), `6694506`
+  (bridge wire), `fab05a4` (reaction fix), `5557e99` (alert-chat-id reader
+  + publish-only mark-reacted).
+- **NOT shipped — direct-fallback (hexis-down resilience):** script-side
+  helper sends direct to Telegram when webhook unavailable, buffers for
+  replay on hexis recovery (replay drained as `deliver=false` memory-only,
+  no stale reactions). Spec at
+  `docs/superpowers/specs/2026-05-22-alert-direct-fallback-design.md`.
+  No code yet. Resume here when alert traffic justifies resilience cost.
+- **End-to-end smoke (resume sanity check):** with fleet up + persona's
+  `channel.telegram.alert_chat_id` set →
+  `curl -X POST http://127.0.0.1:43817/api/webhook/alert -d '{"persona":"<P>","text":"test alert","priority":"high"}'`
+  → raw text in TG within ~1s; LLM reaction follows or persona stays silent.
+
+### 6. Persona-as-MCP pair-programmer (PAUSED 2026-05-25, wiring likely ABANDONED)
+
+- **Thesis:** expose each persona via MCP `consult_persona` tool so office
+  Claude Code / Codex / Hermes / opencode can call home-rig personas as
+  pair-programmers w/ personality + persistent project memory. Vesper =
+  systems/CI, Hazel = ML/data, Ennie = refactor/clean-code.
+- **Spike landed (uncommitted):**
+  - `apps/hexis_mcp_server.py` — new `consult_persona(message, session_id?,
+    sender_id?)` tool; `--persona <name>` flag (overrides POSTGRES_DB);
+    `--profile pair` (suppresses 80-tool memory registry, exposes only
+    `consult_persona`); `--sender` / `HEXIS_MCP_SENDER` env / `mcp-<pid>`
+    default chain; in-memory `sessions` map for multi-turn continuity.
+  - `tools/smoke-consult-persona.py` — direct dispatcher (no stdio framing).
+- **Smoke results (Vesper, prime, q26):**
+  - Single-turn clean: `find . -mtime -1` in 10s ✓
+  - Two-turn continuity: turns=1→2, history carried ✓
+  - Memory write: 2 rows, `source_attribution->>'ref' LIKE 'chat:<sess>:%'` ✓
+  - RLM-mode flake on two-turn: `FINAL_VAR / Variable 'answer' not found`
+    leaked. Persona/RLM-prompting issue, NOT spike bug.
+- **Suggested commit message** (if salvaged):
+  `feat(mcp): consult_persona tool + --persona/--profile flags for pair-programmer use`
+- **Pivot weakens premise** (`research-pivot-stack-eval-2026-05-25.md` §8.5):
+  office stack = Hermes + Mem0 + SKILL.md/SOUL.md. Hermes self-authors
+  skills + Mem0 holds project memory locally. Dev/doc ingestion lives
+  hermes-side natively → no phone-home, no WAN 15-25s/turn tax, no
+  home-rig wake dependency.
+- **Survives ONLY IF** persona-flavor (Vesper-as-systems-coach as a
+  relationship, not a tool) is the wanted value, OR multi-persona consult
+  (Vesper + Hazel weigh in on same problem — Hermes is single-SOUL).
+- **Decision:** abandon Path A (SSH stdio) + Path B (HTTP) wiring. Keep
+  spike code as Hexis-internal demo of persona-as-tool (future: heartbeat
+  calling sibling persona via MCP). Don't invest more. If pivot does NOT
+  land (60-day OpenHuman watch fails), revisit for hobby-tier personality
+  use only.
+- **Pre-existing gap surfaced (not spike):** `memories.sender_id` not
+  populated by chat path (CLAUDE.md flags "RLM path not sender-scoped
+  yet"). Chat path stores session tag in `source_attribution.ref` instead.
+
 ---
 
 ## LOW PRIORITY / NOTES
@@ -251,6 +319,14 @@ later only on demand evidence.
 
 ### Voice I/O
 - text-to-speech, speech-to-text — unexplored. No spec.
+
+### Housekeeping — `_inbox-test` deleted (2026-05-25)
+- Scratch file `.local-notes/_inbox-test` (untracked) deleted after
+  content-diff vs this inbox. All actionable items either DUP of current
+  `_inbox.md` sections, shipped/superseded (per-user memory, agent.py
+  context fix, CLAUDE.md staleness, Vera approval gate, etc.), or migrated
+  (item 0z → §6 above). "Unified AI-type / Unified android character"
+  WAITING items confirmed done + gone. Test pollution (`test hx.`) noise.
 
 ---
 
