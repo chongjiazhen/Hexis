@@ -100,7 +100,50 @@ def _require(args: dict[str, Any], key: str, tool: str) -> Any:
     return args[key]
 
 
-async def _dispatch_tool(client: CognitiveMemory, name: str, args: dict[str, Any]) -> Any:
+async def _dispatch_tool(
+    client: CognitiveMemory,
+    name: str,
+    args: dict[str, Any],
+    *,
+    pool: Any = None,
+    dsn: str | None = None,
+    default_sender: str | None = None,
+    sessions: dict[str, list[dict[str, Any]]] | None = None,
+) -> Any:
+    if name == "consult_persona":
+        message = _require(args, "message", name)
+        session_id = str(args.get("session_id") or "mcp-default")
+        sender_id = args.get("sender_id") or default_sender
+        sess_map = sessions if sessions is not None else {}
+        history = list(sess_map.get(session_id) or [])
+
+        if pool is None:
+            raise RuntimeError("consult_persona requires an active DB pool")
+
+        from core.llm_config import load_llm_config
+        from services.chat import chat_turn
+
+        async with pool.acquire() as conn:
+            llm_config = await load_llm_config(conn, "llm.chat", fallback_key="llm.heartbeat")
+
+        result = await chat_turn(
+            user_message=str(message),
+            history=history,
+            llm_config=llm_config,
+            dsn=dsn,
+            pool=pool,
+            session_id=session_id,
+            sender_id=sender_id,
+        )
+        new_history = result.get("history") or history
+        sess_map[session_id] = new_history
+        return {
+            "reply": result.get("assistant", ""),
+            "session_id": session_id,
+            "sender_id": sender_id,
+            "turns": len(new_history) // 2,
+        }
+
     if name == "hydrate":
         query = _require(args, "query", name)
         return await client.hydrate(
@@ -325,8 +368,33 @@ async def _dispatch_tool(client: CognitiveMemory, name: str, args: dict[str, Any
     raise ValueError(f"Unknown tool '{name}'")
 
 
+def _consult_persona_spec() -> Any:
+    return _tool(
+        "consult_persona",
+        "Ask this Hexis persona a question and get a single-shot reply in their voice. "
+        "Memory + persona prompt apply. Use the same session_id to keep a continued thread.",
+        {
+            "type": "object",
+            "properties": {
+                "message": {"type": "string"},
+                "session_id": {
+                    "type": "string",
+                    "description": "Conversation thread id; same id continues history within this MCP server process.",
+                },
+                "sender_id": {
+                    "type": "string",
+                    "description": "Override default sender tag (memory scope). Defaults to mcp-<pid> or HEXIS_MCP_SENDER env.",
+                },
+            },
+            "required": ["message"],
+            "additionalProperties": False,
+        },
+    )
+
+
 def _tools() -> list[Any]:
     return [
+        _consult_persona_spec(),
         _tool(
             "hydrate",
             "Hydrate a query with relevant memories + (optional) identity/worldview/drives/emotion.",
@@ -652,7 +720,7 @@ def _tools() -> list[Any]:
     ]
 
 
-async def _run_server(dsn: str) -> None:
+async def _run_server(dsn: str, *, profile: str = "full", default_sender: str | None = None) -> None:
     try:
         from mcp.server import Server
         from mcp.server.models import InitializationOptions
@@ -676,12 +744,20 @@ async def _run_server(dsn: str) -> None:
 
     # Build a set of registry tool names for routing
     _registry_tool_names: set[str] = set()
+    # Persona consultation sessions: session_id -> history list
+    sessions: dict[str, list[dict[str, Any]]] = {}
 
     @server.list_tools()
     async def list_tools():
         nonlocal _registry_tool_names
 
-        # Start with legacy memory tools
+        # Pair-programmer profile: expose only consult_persona. The 80-tool
+        # registry blows host token budgets and isn't needed when a host
+        # agent (Claude Code / Codex / Hermes) just wants to ask the persona.
+        if profile == "pair":
+            return [_consult_persona_spec()]
+
+        # Start with legacy memory tools (includes consult_persona)
         tools = _tools()
         legacy_names = {t.name for t in tools}
 
@@ -709,8 +785,16 @@ async def _run_server(dsn: str) -> None:
                 result = await registry.execute(name, arguments or {}, ctx)
                 text = result.to_model_output()
             else:
-                # Legacy dispatch for memory tools
-                result = await _dispatch_tool(client, name, arguments or {})
+                # Legacy dispatch for memory tools + consult_persona
+                result = await _dispatch_tool(
+                    client,
+                    name,
+                    arguments or {},
+                    pool=pool,
+                    dsn=dsn,
+                    default_sender=default_sender,
+                    sessions=sessions,
+                )
                 # Compact: no indent/newlines/sort — whitespace is pure ctx
                 # bloat for low-ctx bodies. Semantically identical JSON.
                 text = json.dumps(_jsonable(result), separators=(",", ":"))
@@ -744,15 +828,34 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.getenv("HEXIS_DB_DSN") or None,
         help="Postgres DSN; defaults to POSTGRES_* env vars",
     )
+    p.add_argument(
+        "--persona",
+        default=os.getenv("HEXIS_MCP_PERSONA") or None,
+        help="Persona name; sets POSTGRES_DB=hexis_<name> for this server process.",
+    )
+    p.add_argument(
+        "--profile",
+        choices=["full", "pair"],
+        default=os.getenv("HEXIS_MCP_PROFILE", "full"),
+        help="Tool surface: 'full' exposes all memory + registry tools; 'pair' exposes only consult_persona.",
+    )
+    p.add_argument(
+        "--sender",
+        default=os.getenv("HEXIS_MCP_SENDER") or None,
+        help="Default sender_id stamped on memory writes. Defaults to mcp-<pid>.",
+    )
     return p
 
 
 def main(argv: list[str] | None = None) -> int:
     load_dotenv()
     args = build_parser().parse_args(argv)
+    if args.persona:
+        os.environ["POSTGRES_DB"] = f"hexis_{args.persona}"
     dsn = args.dsn or _env_dsn()
+    default_sender = args.sender or f"mcp-{os.getpid()}"
     try:
-        asyncio.run(_run_server(dsn))
+        asyncio.run(_run_server(dsn, profile=args.profile, default_sender=default_sender))
         return 0
     except KeyboardInterrupt:
         return 130
