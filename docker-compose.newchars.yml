@@ -523,9 +523,10 @@ services:
       <<: *common-env
       POSTGRES_DB: hexis_eudora
 
-  # ── Iris ── conversation-confidence coach persona (renamed from Esme 2026-05-25)
+  # ── Iris ── FROZEN 2026-05-25 — content folded into Vera (NVC + conversation) and Lyra (Tier 0 verbal). DB hexis_iris preserved as archive.
   iris_channel_worker:
     <<: *channel-base
+    profiles: ["frozen"]
     container_name: hexis_iris_channel_worker
     environment:
       <<: *common-env
@@ -534,6 +535,7 @@ services:
 
   iris_heartbeat_worker:
     <<: *worker-base
+    profiles: ["frozen"]
     container_name: hexis_iris_heartbeat_worker
     command: ["hexis-worker", "--mode", "heartbeat"]
     environment:
@@ -542,6 +544,7 @@ services:
 
   iris_maintenance_worker:
     <<: *worker-base
+    profiles: ["frozen"]
     container_name: hexis_iris_maintenance_worker
     command: ["hexis-worker", "--mode", "maintenance"]
     environment:

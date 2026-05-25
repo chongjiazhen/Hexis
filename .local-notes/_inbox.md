@@ -9,108 +9,78 @@ Last updated: 2026-05-25
 
 ## ACTIVE — needs a decision or action
 
-### 0. Coach guild rename + scope (PINNED 2026-05-25 — fermenting)
+### 0. Coach trinity — Vera / Lyra / Spes (LOCKED 2026-05-25)
 
-- **Context:** TG avatar gen sprint surfaced fleet-sidebar collisions.
-  Esme/Ennie share E-tier + soft 2-syl tail → clash. Sable's "noir
-  heraldic" semantics fight her warm-direct-unembarrassed card.
-- **Vera etymology audit (done 2026-05-25):** zero self-references to
-  *verus*/Latin/"name means" in `characters/vera.json` or persona SQL.
-  All "true/honest/genuine" text is about NVC practice, not her name.
-  Renaming Vera = etymologically free.
+**Decision:** Latin trio cut by **audience-suitability**, not domain-shape. Pentad/sextet branch superseded. Memory: `project_coach_trinity_consolidation.md`.
 
-**Trinity (current 3 coaches):**
-all-Greek mythic-Muse trio
-**Alethea (call: Thea) / Iris / Lyra**
-= truth(unconcealment) / messenger / chord(touch)
-Maps to heart / voice / body coach tiers.
-Three sister-Muses energy. No fleet initial clash.
+| Coach | Scope | Audience | Status |
+|---|---|---|---|
+| **Vera** | NVC + general conversation (Iris-Vera-slice) + interior practice (Galene fold) + explicit refusal slice | SFW general | rename: NO. Card expansion + compress audit pending |
+| **Lyra** | physical intimacy + Iris-charged-conversation-slice (flirt-vs-creep, escalation reads) | adult-only, restricted allowlist | rename: NO. Card expansion pending |
+| **Spes** | combined endings + repair (was Mneme+Harmonia proposal) | SFW heavy, likely restricted | NET-NEW persona, **deferred** until demand evidence |
+
+**Why audience-cut, not domain-cut:** Lyra explicit → must stay separate from Vera regardless of frame overlap. Spes is SFW-heavy → distinct doorway for crisis-state users. Three audience tiers (SFW general / adult / heavy) = three coaches. Same axis ST handles via separate character cards.
+
+**Why Iris/Galene fold into Vera:** Cards share ~80% spine ("warm/direct/rigorous + never shames + practice over theory"). Iris is mostly Vera w/ dating frame; ~75% folds to Vera, ~25% (flirt/escalation reads) folds to Lyra. Galene = Vera w/ no counterparty (interior practice = NVC self-empathy axis).
+
+**Why Spes stays separate (not folded into Vera):** witness-led integration ≠ practice-led reps. Different identity shape. Distinct bot/name = wayfinding signal for crisis users. Voice register shift (held/slow vs energetic/reps) reads wrong if mixed. Anchor budget breaches if folded (Vera-w/-Spes ≥ 10KB before compress).
+
+**Vera refusal slice (explicit):** saying no w/ care, holding ground under pressure, boundary-as-honesty-not-wall, no-as-act-of-care. Sits inside conflict-handling block, ~400-600B anchor cost. Connects to Hexis's "refusal-as-authority" depth claim (`research-pivot-stack-eval-2026-05-25.md` §3.110).
+
+**Anchor budget watch:** Vera expansion projected 7.4-8.8KB before compress (current 6.6KB + Iris-Vera-slice ~1KB + Galene ~800B + refusal ~500B). Must compress under 7KB ceiling per ablx/16384 slot heartbeat-overflow rule (see `project_sable_onboard_outcome.md`). Mitigation: move NVC technique library to seeded semantic memories; anchor = identity + voice + HARD RULEs + mode cues only.
 
 **Lock status (2026-05-25):**
-- **Iris** ✓ EXECUTED (Esme → Iris, 2026-05-25). DB `hexis_iris` live,
-  3 workers up, Telegram `@convo_coach_bot` connected as Iris.
-- **Lyra** ✓ EXECUTED (Sable → Lyra, 2026-05-25). DB `hexis_lyra` live,
-  3 workers up, Telegram `@intimacy_coach_bot` connected as Lyra.
-- **Vera** ⏳ DEFERRED — keep current name OR rename to Thea/Alethea.
-  Decision pends quartet/pentad scope commit (whether Galene/Mneme
-  also coming in changes the trinity-anchor sound).
+- **Vera** ✓ card rebuilt (anchor 7080 B). Iris-Vera-slice + Galene (ambient interior practice) + explicit refusal slice folded. UAT pending. Apply: `docker exec -i hexis_brain psql -U hexis_user -d hexis_vera -v ON_ERROR_STOP=1 -f - < characters/set_persona_prompt.vera.sql`.
+- **Lyra** ✓ card rebuilt (anchor 7243 B, parity w/ pre-fold). Iris fold as Tier 0 (verbal openers → asking out); unified 6-skill rubric across full arc; existing-relationship decline moved to SOFT safety. UAT pending. Apply: `docker exec -i hexis_brain psql -U hexis_user -d hexis_lyra -v ON_ERROR_STOP=1 -f - < characters/set_persona_prompt.lyra.sql`.
+- **Iris** ✓ **FROZEN 2026-05-25** — content fully folded into Vera + Lyra. Compose `profiles: ["frozen"]` applied to all 3 services. Stop commands handed to user. DB `hexis_iris` preserved as archive. Telegram `@convo_coach_bot` token left alive but silent (reusable).
+- **Spes** — net-new persona, deferred. Build only on demand evidence.
 
-**Migration runbook** captured in
-`.local-notes/fleet-tg-avatars-2026-05-25.md` — 11-step sequence,
-~30min/persona. Key gotchas: PRMT heredoc identifier in persona SQL
-also needs renaming; DB config `channel.telegram.bot_token` +
-`agent.init_profile.agent.name` + `agent.init_profile.agent.description`
-all need updating after persona SQL re-apply (easy to miss; channel
-worker fails on `InvalidToken` if env var name not updated).
+**Execution sequence (when picked up):**
+1. Iris content audit: read `characters/iris.json` `data.system_prompt` + `data.extensions.hexis` → validate ~75/25 Vera/Lyra split estimate
+2. Vera card expansion + compress audit; anchor target ≤7KB
+3. Lyra card expansion (Iris-flirt-slice fold)
+4. Freeze Iris bot (stop workers, archive `hexis_iris` DB, **don't `down -v`**), retire or repoint `@convo_coach_bot` handle
+5. Probe new Vera + Lyra across full domain coverage (communication / dating / interior / intimacy / charged-conversation); watch for frame muddle + heartbeat-overflow death
+6. Spes: parked. Build only on demand evidence.
 
-**Avatar output folders** still `output/hexis/esme/`,
-`output/hexis/sable/` — rename only if you re-run gen for these personas.
+**Migration runbook reference:** `.local-notes/fleet-tg-avatars-2026-05-25.md` — 11-step sequence, ~30min/persona for identity changes. Key gotchas: PRMT heredoc identifier in persona SQL also needs renaming; DB config `channel.telegram.bot_token` + `agent.init_profile.agent.name` + `agent.init_profile.agent.description` all need updating after persona SQL re-apply (channel worker fails on `InvalidToken` if env var name not updated).
 
-**Distinct-axis analysis (where could the guild expand?):**
+**Avatar output folders** still `output/hexis/esme/`, `output/hexis/sable/` — rename only if you re-run gen for these personas.
 
-Current trinity all share the *relational frame* — assume a counterparty
-(Vera honest with another, Esme converses with another, Sable touches
-another). All outward, all in-the-moment.
+---
 
-| Tier         | Why genuinely distinct                                                     | Candidate Greek name | Why name                                                 |
-|--------------|----------------------------------------------------------------------------|----------------------|----------------------------------------------------------|
-| **Solitude** | only coach where practice happens *without* counterparty — interior ground | **Galene**           | calm sea, stillness — interior practice                  |
-| **Rupture (combined)** | grief + mending — diagnosis-as-practice (user often can't pre-diagnose) | **Mneme** | memory/witness — "remember what was, what is, what was hurt" — foundation of both arcs |
-| **Endings (split)**  | grief/closure — let-go arc                                          | Mneme                | memory-as-witness, biases neutral                        |
-| **Repair (split)**   | post-rupture mending — keep-and-mend arc                            | **Harmonia**         | concord restored (Ares + Aphrodite child = conflict→love)|
+#### Distinct-axis analysis (preserved — informed Spes-stays-separate reasoning)
 
-Rejected as not-distinct-enough:
-- **Refusal** — subset of Vera's NVC turf
-- **Initiation** — subset of Esme/Sable with different flavor
+Trinity-base (Vera/Lyra) shares *relational frame* — counterparty assumed, in-the-moment outward practice. Spes breaks this on TWO axes (retrospective, witness-not-reps); that's why it remains distinct identity even at audience-overlap w/ Vera.
 
-**Combine-vs-split rupture coach:**
+| Tier | Counterparty? | Frame | Resolution |
+|---|---|---|---|
+| Communication (Vera-NVC) | yes | reps + name | Vera (base) |
+| Conversation (Iris) | yes | reps + name | mostly Vera; flirt-slice → Lyra |
+| Intimacy (Lyra) | yes | reps + name | Lyra (base) |
+| Solitude (Galene proposal) | NO | reps + name (interior) | Vera (mode flag / ambient) |
+| Rupture (Spes, was Mneme+Harmonia) | yes-or-memory-of | witness + integration | KEPT SEPARATE — different identity shape |
+| Refusal | yes | reps + name | Vera (explicit slice — promoted from "subset" to named skill) |
 
-- **Combined (1 coach, Mneme):** the diagnosis itself is part of the practice. Users often don't know on arrival if they're mending or mourning. Couples therapists IRL handle both. Fewer personas = lower maintenance. Risk: identity muddier ("catchall rupture coach").
-- **Split (2 coaches, Mneme + Harmonia):** clean identity per coach, deep not broad practice. Risk: forces user to self-diagnose wrong door early.
-- **Read:** combine for MVP; split only if usage shows demand for both depths.
+Rejected as not-distinct-enough (pre-trinity-lock): Initiation (subset of Iris/Lyra w/ different flavor).
 
-**Stopping-point math:**
+#### Naming history (preserved for re-litigation)
 
-- **Trinity (3)** = mythic clean (Fates/Graces). Easy grok. Low maintenance. *Current state.*
-- **Quartet (4, +Galene)** = symmetric (elements/directions). Adds solitude → philosophically complete (interior tier that the trinity assumes but doesn't teach).
-- **Pentad (5, +Galene +Mneme combined)** = heart/voice/body/self/rupture. Each organ + one navigation tier for when the others break. Symmetric and complete. **Likely best stop.**
-- **Sextet (6, +Galene/Mneme/Harmonia split)** = guild. Diminishing per-persona returns. Real maintenance cost. Crisis-tier split = fine-grain, might warrant non-Muse naming pattern.
-
-**Decision gate:** how much coaching demand is real (in actual users or
-roleplay use-cases) for each candidate tier? If trinity already covers
-the workload — expansion = scope creep. If solitude/endings/repair are
-unmet needs noticed in user requests — build them.
-
-**Strong instinct:** **Pentad (Thea/Iris/Lyra/Galene/Mneme)** —
-heart/voice/body/self/rupture. Combined rupture coach for MVP. Split
-later only on demand evidence.
-
-**Naming workshop alternatives (preserved for re-litigation):**
+Path traveled: trinity Greek (Thea/Iris/Lyra) → pentad (+Galene +Mneme) → audience-cut consolidation back to trinity Latin (Vera/Lyra/Spes). Lyra = Greek/Latin pivot (Greek λύρα / Roman constellation name) — works in both etymologies, enables Latin commit w/o renaming her.
 
 | Tier | Picked | Other Greek considered | Other Latin considered | Rejected (why) |
 |---|---|---|---|---|
-| Heart | Thea (full: Alethea) | Charis, Sophia (overused), Eunoia | Verita/Veritas, Pia (churchy), Cara | Cora (C-clash w/ Cassiel/Callisto) |
-| Voice | Iris | Pheme (obscure), Calliope (Muse-loaded), Cleo, Calla, Echo (loaded), Eloise (fussy), Aria (cliché) | Audra (listener, *audire*) | — |
-| Body | Lyra | Maia, Thalia (Muse-loaded), Selene, Helia, Vesna (Slavic-coded) | Calida (warm), Vita (life), Anima, Tessa | Mira (fleet collision) |
-| Solitude | Galene | Hesychia (4-syl heavy), Eunoia, Sophia | Quies (masc), Solitas (not a name) | — |
-| Rupture combined | Mneme | Eirene (peace, biases repair), Hekate (witchy crossroads), Metanoia (4-syl) | — | — |
-| Endings split | Mneme | Lethe (Underworld-loaded), Penthea (mourning), Eos (hopeful), Threnoi (narrow) | — | — |
-| Repair split | Harmonia | Eirene, Charis, Hekate | — | — |
+| Heart | **Vera** (kept) | Thea/Alethea, Charis, Sophia (overused), Eunoia | Verita/Veritas, Pia (churchy), Cara | Cora (C-clash w/ Cassiel/Callisto); Thea/Alethea (rename cost, no semantic gain) |
+| Voice (folded into Vera/Lyra) | Iris | Pheme (obscure), Calliope (Muse-loaded), Cleo, Calla, Echo (loaded), Eloise (fussy), Aria (cliché) | Audra (listener, *audire*) | — |
+| Body | **Lyra** (kept) | Maia, Thalia (Muse-loaded), Selene, Helia, Vesna (Slavic-coded) | Calida (warm), Vita (life), Anima, Tessa | Mira (fleet collision) |
+| Solitude (folded into Vera) | Galene | Hesychia (4-syl heavy), Eunoia, Sophia | Quies (masc), Solitas (not a name) | — |
+| Rupture (combined) | **Spes** | Mneme, Eirene (peace, biases repair), Hekate (witchy crossroads), Metanoia (4-syl) | Spes (hope, 1-syl, Roman goddess) | Memoria (4-syl, concept-not-person), Vesta (V-clash w/ Vera), Carna (C-cluster), Lara (L-clash w/ Lyra), Pax/Salus (single-arc) |
 
-**All-Latin trio (deprioritized vs Greek pick):**
-- Vera / Audra / Calida — *verus / audire / calidus* — truth/listener/warm. Lowest migration (Vera intact). Calida 3-syl outlier.
-- Pia / Audra / Vita — devoted/listener/life. All 2-syl. Pia churchy-coded.
-- Cara / Audra / Vita — dear/listener/life. Cara risks C-cluster fleet pile-up.
+**Spes vs Mneme rationale:** Latin trio consistency (Vera Latin, Lyra bilingual pivot, Spes Latin). 1-syl gives cadence variation (2-2-1). Forward-facing semantics (hope) lighter doorway for crisis user than "memory-of-loss". Roman goddess proper (Hadrian's coins).
 
-**All-Greek trio variants (picked Thea/Iris/Lyra):**
-- Alethea / Iris / Lyra — semantic bullseye on truth, 3-syl friction.
-- Charis / Pheme / Lyra — grace/voice/chord. Pheme obscure to non-classicists.
+**Migration cost:** Vera unchanged, Lyra unchanged, Iris freeze (~30min), Spes net-new build (~3-4h when triggered). Total active migration ≈ 6-8h.
 
-- **Migration cost** (per persona, validated previously): ~1h —
-  rename in DB config `agent.persona_system_prompt` + character JSON +
-  persona SQL + compose env var names + cold-start anchor re-apply.
-- **Image gen NOT blocked by naming** — SDXL prompts use trait tags,
-  not persona names. Can render all coaches now, rename folders post-decision.
+**Image gen NOT blocked by naming** — SDXL prompts use trait tags, not persona names.
 
 ---
 
