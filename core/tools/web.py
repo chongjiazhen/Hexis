@@ -78,9 +78,9 @@ class WebSearchHandler(ToolHandler):
             name="web_search",
             description=(
                 "Search the web for current information. Use for questions about "
-                "recent events, facts you're uncertain about, or topics that may have "
-                "changed since your knowledge cutoff. Returns relevant search results "
-                "with titles, URLs, and snippets."
+                "recent events, facts you're uncertain about, or topics that may "
+                "have changed recently. Returns relevant search results with "
+                "titles, URLs, and snippets."
             ),
             parameters={
                 "type": "object",
@@ -104,7 +104,7 @@ class WebSearchHandler(ToolHandler):
                     },
                     "include_answer": {
                         "type": "boolean",
-                        "description": "Include AI-generated answer summary.",
+                        "description": "Include an answer summary if available.",
                         "default": False,
                     },
                 },
@@ -478,7 +478,7 @@ class WebSummarizeHandler(ToolHandler):
         return ToolSpec(
             name="web_summarize",
             description=(
-                "Fetch a URL and get an AI-generated summary of its content. "
+                "Fetch a URL and get a short summary of its content. "
                 "Useful when you need the key points from a page without reading "
                 "the full content."
             ),
