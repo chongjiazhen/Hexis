@@ -586,3 +586,160 @@ For single-box hobby use w/ fleet already running: **skip OpenCode.** Use Hermes
 - §8.3 OpenCode deep-dive — facts still correct, "use as separate dev tool" recommendation withdrawn.
 - §9 two-tool setup mention — withdrawn.
 - Repos-to-avoid list (§8.6): add OpenCode (was implicitly "use separately", now "skip entirely").
+
+---
+
+## 11. Deployment shape — work-WSL2 sole Hermes, home rig as inference farm
+
+### 11.1 Why not Windows native at home
+
+Hermes Windows native = **early beta, no graduation roadmap.** WSL2 is the project's recommended/road-tested path indefinitely. Dashboard `/chat` pane is WSL2-only (POSIX PTY).
+
+Home rig already runs WSL2 (Docker Desktop requires it). Adding Hermes-in-WSL2 = one more consumer of an already-active subsystem, not a new platform commitment. Native-Windows-Hermes adds early-beta risk for no upside.
+
+**Verdict: never run Hermes on Windows native.** WSL2 only, both boxes.
+
+### 11.2 Phase 1 (initial): single Hermes at work, home rig as inference
+
+```
+┌─ Work box ─────────────┐         ┌─ Home rig ──────────────────┐
+│  WSL2 Ubuntu           │         │  Windows native              │
+│    Hermes (sole inst)  │  ───▶   │    llama.cpp :8080 (q36)     │
+│    Mem0 + PG self-host │ Tailscale│   set-power-mode arbiter    │
+│    SOUL.md + skills    │  tunnel │    Hexis Docker fleet        │
+└────────────────────────┘         │      (Telegram-only personas)│
+                                   └──────────────────────────────┘
+```
+
+**One Hermes. One memory. Home rig = inference farm + Telegram personas.**
+
+**Pros:**
+- No state-sync (single instance).
+- No early-beta-Windows risk.
+- GPU utilization centralized.
+- Home rig stays Hexis-only operationally.
+
+**Tradeoffs:**
+- Home rig SPOF for work coding. Mitigate: configure Hermes failover endpoint = corp cloud LLM.
+- Tailscale RTT 10-50ms adds ~50ms first-token-latency per turn. Imperceptible for coding.
+- `:8080` must be reachable over tailnet — either `--host 0.0.0.0` in serve flags OR `tailscale serve --bg http://localhost:8080` (no rebind needed).
+- Mem0 + PG location: **work-side preferred** for low-latency memory ops; periodic `pg_dump` over tailnet to home rig for backup.
+- Home interactive use = SSH into work WSL2 OR Telegram-to-Hexis-personas. Hermes lives at work-keyboard.
+
+### 11.3 Tailscale setup (~5 min)
+
+1. Home rig: install Tailscale Windows, sign in.
+2. Work WSL2: `curl -fsSL https://tailscale.com/install.sh | sh`, sign in same account.
+3. Verify: `curl http://<home-tailscale-name>:8080/v1/models` from WSL2.
+4. If localhost-only blocks: `tailscale serve --bg http://localhost:8080` on Windows.
+5. Hermes: `hermes model` → openai-compat → `http://<home-tailscale-name>:8080/v1` → `q36`.
+
+### 11.4 Trial → permanent
+
+§9's "Phase 1 work-WSL2 trial + Phase 2 home-native install" is replaced by:
+
+- **Phase 1 (trial, 2 wks):** Work-WSL2 Hermes pointing at corp LLM. Skip Mem0 + local LLM + persona. Pure coding-tool evaluation.
+- **Phase 2 (post-trial-pass, weekend):** Same work-WSL2 Hermes, switch endpoint to home rig over tailnet. Wire Mem0 + PG. Author SOUL.md. Single-instance permanent.
+- **Phase 3 (long-term, optional):** see §12.
+
+Native-Windows-Hermes never happens. Home-keyboard Hermes-interactive never happens (use Telegram-to-Hexis instead).
+
+---
+
+## 12. Long-term sync — two Hermes instances, one Mem0
+
+### 12.1 When this applies
+
+Phase 3 graduation from §11. Adds a **second Hermes-WSL2 instance on the home rig** (same Ubuntu WSL2 distro that hosts Docker Desktop). Both work + home Hermes are the **same persona** with shared continuity.
+
+Trigger: §11 working well, but want to chat w/ Hermes from home keyboard without SSH/tunnel hop into work box.
+
+### 12.2 What syncs, what doesn't
+
+| Layer | Sync strategy |
+|---|---|
+| **Mem0 + PG** | **Centralize at home rig.** Both Hermes-WSL2 instances point at same Mem0 over tailnet (work side) + localhost (home side). Single source of truth for long-term memory. |
+| **`~/.hermes/SOUL.md`** | **Git-version-controlled.** Declarative; rare changes; conflict-free. |
+| **`~/.hermes/skills/`** | **Git-version-controlled.** Skills auto-authored at work → commit → pull at home. |
+| **`~/.hermes/MEMORY.md`** | **Per-instance (local).** Bounded ~2,200-char scratchpad regenerated per turn from Mem0 recalls. Don't sync. |
+| **`~/.hermes/USER.md`** | **Per-instance (local).** ~1,375-char scratchpad. Don't sync. Mem0 owns user facts. |
+| **Session histories** | **Per-instance.** Optional git if you care; usually not. |
+
+**Key insight:** Mem0 IS the sync layer for what matters. Other files are declarative (git, free) or ephemeral (no sync needed).
+
+### 12.3 Architecture
+
+```
+┌─ Work box ───────────────────┐
+│  WSL2 Ubuntu                  │
+│    Hermes instance A          │
+│    ~/.hermes/                 │
+│      SOUL.md  ◀─── git ──┐   │
+│      skills/  ◀─── git ──┤   │
+│      MEMORY.md (local)    │   │
+│      USER.md (local)      │   │
+└──────────┬───────────────┬───┘
+           │ tailnet       │ git
+           │ ↓ Mem0 calls  │ push/pull
+┌──────────▼───────────────▼───┐
+│  Home rig                     │
+│  Windows native               │
+│    llama.cpp :8080            │
+│    Hexis Docker fleet         │
+│  WSL2 Ubuntu                  │
+│    Hermes instance B          │
+│    ~/.hermes/                 │
+│      SOUL.md  ◀── same git ──┘
+│      skills/  ◀── same git
+│  Docker Mem0 + PG (single SoT)│
+│    Hermes A → tailnet         │
+│    Hermes B → localhost       │
+└───────────────────────────────┘
+```
+
+Same persona, different boxes, one being.
+
+### 12.4 Setup steps (Phase 3 graduation)
+
+1. **Migrate Mem0 + PG from work-side to home-rig Docker.** Snapshot/restore PG, point work Hermes at new home Mem0 URL. Verify continuity.
+2. **Install Hermes-WSL2 instance B on home rig** (same install script). Configure same Mem0 URL (localhost-side this time).
+3. **Init git repo** for `~/.hermes/SOUL.md` + `~/.hermes/skills/`. `.gitignore`: `MEMORY.md`, `USER.md`, `sessions/`, `caches/`. Push to private remote.
+4. **At both boxes:** `git clone` into `~/.hermes/` (or symlink the synced files in).
+5. **Workflow:** skill auto-authored → commit → push. Pull on other box → restart Hermes (or `/reload skills`).
+
+### 12.5 Hermes design supports this natively
+
+Two-Hermes-one-Mem0 is the **canonical multi-instance Hermes deployment** per Mem0 docs + Hermes MemoryProvider RFC #3943. Concurrent writes are async-safe. Not inventing anything weird — using documented shape.
+
+### 12.6 Caveats
+
+- **Home rig Mem0 = SPOF for memory.** Home rig down → both Hermes degrade gracefully (MEMORY.md/USER.md local fallback) but lose long-term recall during outage.
+- **Latency over tailnet for Mem0 ops** from work-side: ~50-100ms RTT per recall. Async daemon hides write latency. Net: imperceptible for chat.
+- **Work data sensitivity:** if work conversations contain corp confidential, use Mem0 user/agent scoping to keep work-coding memories out of cross-box recall, OR run separate Mem0 instances per persona scope.
+- **Air-gap fallback:** work with strict egress policy blocking tailnet → fall back to local Mem0 at work, no sync until tailnet restored.
+
+### 12.7 Stack at Phase 3
+
+| Component | License | Where |
+|---|---|---|
+| Hermes instance A | MIT | Work WSL2 |
+| Hermes instance B | MIT | Home WSL2 |
+| Mem0 + PG | Apache 2.0 | Home Docker (single, shared) |
+| llama.cpp `:8080` | MIT | Home Windows native |
+| set-power-mode + models.json | bespoke | Home Windows |
+| Hexis Docker fleet (Telegram) | MIT | Home Docker (own :8080 consumer) |
+| Tailscale | proprietary free | Both boxes |
+| Git repo `~/.hermes/{SOUL.md,skills/}` | n/a | Both boxes |
+
+**1.5 upstreams confirmed.** Hermes (1) + Mem0 (0.5 plugin-coupled). Tailscale/git = plumbing, not upstreams.
+
+### 12.8 Phasing (canonical)
+
+| Phase | Duration | Setup |
+|---|---|---|
+| **0 (current)** | — | Hexis-only home rig. Telegram personas. No Hermes anywhere. |
+| **1 (trial)** | 2 wks | Work-WSL2 Hermes + corp LLM. No Mem0, no local LLM, no persona auth. Pure coding-tool eval. |
+| **2 (single-instance perm)** | ongoing | Work-WSL2 Hermes only. Endpoint = home rig `:8080` via tailnet. Mem0 + PG self-hosted (work-side or home-side TBD). SOUL.md authored. Persona daily-driver = work-keyboard. |
+| **3 (multi-instance sync)** | optional, later | Phase 2 + add home-WSL2 Hermes instance B. Centralize Mem0 at home rig. Git-sync SOUL.md + skills/. Both boxes = same persona. |
+
+Each phase reversible. Phase 3 = nice-to-have, not required. Phase 2 standalone is a complete stack.
