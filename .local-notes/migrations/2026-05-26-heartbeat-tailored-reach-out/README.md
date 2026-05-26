@@ -65,3 +65,85 @@ Outbox payloads now carry `sender_id` but the per-persona queue isolation contra
 - Personas running the OLD handler version are still safe: their outbox payloads have no `sender_id` (back-compat tested in `tests/db/test_heartbeat_reach_out_sender.py::test_reach_out_user_without_sender_id_stays_backward_compat`), and `channels/outbox.py:_deliver_last_active` falls through to the globally most-recent session for unsender'd messages — i.e., the prior behavior.
 - Personas running the NEW handler but on the OLD `gather_turn_context` (i.e., partial migration) will not see `active_senders` in their REPL context. The persona's reasoning will still emit `reach_out_user` with no `sender_id`, again falling through to the globally most-recent session. No data corruption, just no tailored routing.
 - Therefore: rolling per-persona migration is safe; no ordering constraint between personas.
+
+## Smoke procedure
+
+Run after applying the migration to a chosen test persona. Pick a low-traffic persona (e.g. `monika`, `nines`, or a designated probe persona) with at least two recent `channel_sessions` rows from different `sender_id`s in the last 7 days.
+
+### 1. Confirm test persona has multiple active senders
+
+```bash
+docker exec hexis_brain psql -U hexis_user -d hexis_<persona> -c \
+  "SELECT sender_id, channel_id, last_active FROM channel_sessions WHERE last_active > CURRENT_TIMESTAMP - INTERVAL '7 days' ORDER BY last_active DESC LIMIT 10"
+```
+
+Expected: ≥2 distinct `sender_id` values.
+
+### 2. Confirm the persona's heartbeat REPL sees `active_senders`
+
+```bash
+docker exec hexis_brain psql -U hexis_user -d hexis_<persona> -c \
+  "SELECT jsonb_pretty(gather_turn_context()->'active_senders')"
+```
+
+Expected: pretty-printed JSON array with at least the two senders from step 1.
+
+### 3. Watch the heartbeat worker
+
+```bash
+docker logs -f hexis_<persona>_heartbeat_worker
+```
+
+Leave running.
+
+### 4. Wait for a natural heartbeat cycle
+
+DO NOT manually advance `next_heartbeat_at` — see `.local-notes/BUG-heartbeat-clock-drift-consumer-wedge.md` for why fabricated timing evidence is untrustworthy. Heartbeats fire at `last_heartbeat_at + interval + jitter`; check current state with:
+
+```bash
+docker exec hexis_brain psql -U hexis_user -d hexis_<persona> -c \
+  "SELECT last_heartbeat_at, current_energy, should_run_heartbeat() FROM heartbeat_state WHERE id = 1"
+```
+
+When `should_run_heartbeat()` returns `t`, the next worker tick (≤60s) will fire it.
+
+### 5. Inspect emitted outbox messages
+
+After the cycle completes, look for sender-tagged routing in the channel worker logs:
+
+```bash
+docker logs hexis_<persona>_channel_worker --tail 100 | grep -E "outbox|reach_out|deliver|sender_id"
+```
+
+Expected success indicators:
+- One or more `_deliver_last_active` calls referencing distinct `sender_id` values from `active_senders`.
+- Telegram `send` calls to the matching `channel_id` for each `sender_id`.
+- NO unsendable "No active session found" warnings unless the persona reached out to a stranger.
+
+If the persona emitted multiple `reach_out_user` actions in one cycle, expect multiple Telegram sends to different chats.
+
+### 6. Inspect the heartbeat's episodic memory
+
+```sql
+SELECT id, created_at, sender_id, left(content, 160)
+FROM memories
+WHERE type = 'episodic'
+  AND source_attribution->>'kind' = 'heartbeat'
+ORDER BY created_at DESC
+LIMIT 5;
+```
+
+The most recent episodic should contain the `reach_out_user` action(s) emitted, including the chosen `sender_id`(s) in its content.
+
+## Smoke result
+
+<!-- Operator fills in below -->
+
+Persona:
+Datetime (UTC):
+active_senders observed (step 2):
+Heartbeat fire time:
+Sender(s) reached:
+Telegram delivery confirmed?:
+Episodic memory captured?:
+Anomalies / notes:
