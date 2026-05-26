@@ -153,3 +153,35 @@ async def test_reach_out_user_without_sender_id_stays_backward_compat(db_pool):
             assert inner.get("queued") is True
             payload = inner["outbox_message"]["payload"]
             assert payload.get("sender_id") in (None, "")
+
+
+async def test_resolve_sender_timezone_uses_per_sender_config(db_pool):
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("SELECT set_config('channel.sender.alice.timezone', '\"America/Los_Angeles\"'::jsonb)")
+            tz = await conn.fetchval("SELECT resolve_sender_timezone('alice')")
+            assert tz == "America/Los_Angeles"
+
+
+async def test_resolve_sender_timezone_falls_back_to_agent_default(db_pool):
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("SELECT set_config('heartbeat.timezone', '\"Asia/Singapore\"'::jsonb)")
+            tz = await conn.fetchval("SELECT resolve_sender_timezone('unknown-sender')")
+            assert tz == "Asia/Singapore"
+
+
+async def test_resolve_sender_timezone_falls_back_to_utc_when_all_unset(db_pool):
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("DELETE FROM config WHERE key = 'heartbeat.timezone'")
+            tz = await conn.fetchval("SELECT resolve_sender_timezone('whoever')")
+            assert tz == "UTC"
+
+
+async def test_resolve_sender_timezone_handles_null_or_empty_sender(db_pool):
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("SELECT set_config('heartbeat.timezone', '\"Asia/Singapore\"'::jsonb)")
+            assert await conn.fetchval("SELECT resolve_sender_timezone(NULL)") == "Asia/Singapore"
+            assert await conn.fetchval("SELECT resolve_sender_timezone('')") == "Asia/Singapore"
