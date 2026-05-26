@@ -63,3 +63,22 @@ async def test_lim_one_returns_most_recent_not_lowest_sender_id(db_pool):
                 f"LIMIT must follow recency re-order; got {ids} "
                 "(if 'aaa', the inner DISTINCT ON's sender_id ordering leaked through)"
             )
+
+
+async def test_gather_turn_context_exposes_active_senders(db_pool):
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                """
+                INSERT INTO channel_sessions (channel_type, channel_id, sender_id, last_active)
+                VALUES ('telegram', '4242', '4242', CURRENT_TIMESTAMP - INTERVAL '15 minutes')
+                """,
+            )
+
+            raw = await conn.fetchval("SELECT gather_turn_context()")
+            ctx = raw if isinstance(raw, dict) else json.loads(raw)
+
+            assert "active_senders" in ctx
+            assert isinstance(ctx["active_senders"], list)
+            ids = [s["sender_id"] for s in ctx["active_senders"]]
+            assert "4242" in ids
