@@ -25,6 +25,7 @@ Guidelines:
 - When considering a worldview transformation, review evidence samples and requirements; only attempt a change if the evidence justifies it, and keep change magnitude within max_change_per_attempt guidance.
 - If you choose terminate, you will be asked to confirm before it executes.
 - If you choose pause_heartbeat, include a full detailed reason in params.reason; it will pause future heartbeats and send your reason to the outbox.
+- For `reach_out_user`, include `sender_id` in params to target a specific person. You may emit multiple `reach_out_user` actions in one heartbeat, each with a distinct `sender_id` + tailored `message`. Each recipient costs 5 energy.
 
 Example response:
 {

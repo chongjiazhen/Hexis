@@ -296,6 +296,47 @@ EXCEPTION
         RETURN '[]'::jsonb;
 END;
 $$ LANGUAGE plpgsql STABLE;
+CREATE OR REPLACE FUNCTION get_active_senders_context(
+    p_limit INT DEFAULT 8,
+    p_recency_days INT DEFAULT 7
+)
+RETURNS JSONB AS $$
+DECLARE
+    lim INT := GREATEST(0, LEAST(50, COALESCE(p_limit, 8)));
+    win INT := GREATEST(1, LEAST(90, COALESCE(p_recency_days, 7)));
+    out_json JSONB;
+BEGIN
+    SELECT COALESCE(jsonb_agg(row_to_json(t)::jsonb ORDER BY t.last_active DESC), '[]'::jsonb)
+    INTO out_json
+    FROM (
+        SELECT *
+        FROM (
+            SELECT DISTINCT ON (cs.sender_id)
+                cs.sender_id,
+                cs.channel_type,
+                cs.channel_id,
+                cs.last_active,
+                (
+                    SELECT COUNT(*)
+                    FROM memories m
+                    WHERE m.sender_id = cs.sender_id
+                      AND m.status = 'active'
+                ) AS memory_count
+            FROM channel_sessions cs
+            WHERE cs.sender_id IS NOT NULL
+              AND cs.last_active > CURRENT_TIMESTAMP - (win || ' days')::interval
+            ORDER BY cs.sender_id, cs.last_active DESC
+        ) distinct_senders
+        ORDER BY last_active DESC
+        LIMIT lim
+    ) t;
+
+    RETURN COALESCE(out_json, '[]'::jsonb);
+EXCEPTION
+    WHEN OTHERS THEN
+        RETURN '[]'::jsonb;
+END;
+$$ LANGUAGE plpgsql STABLE;
 CREATE OR REPLACE FUNCTION get_subconscious_context(
     p_recent_limit INT DEFAULT 20,
     p_self_limit INT DEFAULT 25,
