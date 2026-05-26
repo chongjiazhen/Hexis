@@ -1,6 +1,7 @@
 *.db
 .states
 .web
+.worktrees/
 assets/external/
 # Python
 __pycache__/
