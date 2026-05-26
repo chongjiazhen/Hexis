@@ -313,7 +313,7 @@ async def build_system_prompt(
             from services.prompt_resources import load_channel_context_prompt
             prompt += "\n\n" + load_channel_context_prompt().strip()
     else:
-        prompt = load_heartbeat_agentic_prompt().strip()
+        prompt = base_prefix + load_heartbeat_agentic_prompt().strip()
 
     # Add dynamic tool descriptions
     tool_context = ToolContext.CHAT if mode == "chat" else ToolContext.HEARTBEAT
