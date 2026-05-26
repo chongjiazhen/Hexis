@@ -276,6 +276,18 @@ function Ensure-GpuServer($Resolved, [int]$Port) {
     # capture pairs with the Wait-PortHealth gate at the call site: together they
     # turn a silent dead :8080 into a loud, diagnosable script failure.
     $errLog = Join-Path $LogDir "serve-$Port-stderr.log"
+    # Rotate prior log so silent mid-task crashes stay diagnosable.
+    # Start-Process -RedirectStandardError always truncates (no -Append); without
+    # rotation, every relaunch wipes the dying process's last words.
+    if (Test-Path $errLog) {
+        $stamp = (Get-Date -Format 'yyyyMMdd_HHmmss')
+        $rotated = Join-Path $LogDir "serve-$Port-stderr.$stamp.log"
+        try { Move-Item -LiteralPath $errLog -Destination $rotated -Force } catch { Write-Host "[warn] could not rotate ${errLog}: $($_.Exception.Message)" }
+        # Prune rotations beyond newest 10 to keep $LogDir bounded.
+        Get-ChildItem -LiteralPath $LogDir -Filter "serve-$Port-stderr.*.log" -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending | Select-Object -Skip 10 |
+            ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
+    }
     $proc = Start-Process -FilePath $LlamaServer `
         -ArgumentList ($Resolved.ModelArgs + @("--host","0.0.0.0","--port","$Port") + $Resolved.Tuning +
                         @("--alias",$Resolved.Alias,"--jinja","--reasoning-budget","0",
