@@ -3,9 +3,13 @@
 @import ~/atelier/guidelines/identifier-canonicalization.md
 @import ~/atelier/guidelines/observability-first.md
 @import ~/atelier/guidelines/concurrency-and-systems.md
-@import ~/atelier/guidelines/spec-lite.md
 @import ~/atelier/guidelines/git-commit-hygiene.md
-@import ~/atelier/guidelines/tdd.md
+
+<!-- Methodology: this repo uses the superpowers plugin for planning/TDD/subagent
+flow (see docs/superpowers/). Atelier spec-lite and tdd guidelines are NOT
+imported here — they conflict with superpowers' brainstorming HARD-GATE and
+test-driven-development Iron Law. Use superpowers for those concerns. -->
+
 
 ## Project Overview
 
