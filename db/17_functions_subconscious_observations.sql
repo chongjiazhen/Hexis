@@ -1209,8 +1209,9 @@ BEGIN
             queued_call := build_outbox_message(
                 'user',
                 jsonb_build_object(
-                    'message', p_params->>'message',
-                    'intent', p_params->>'intent',
+                    'message',     p_params->>'message',
+                    'intent',      p_params->>'intent',
+                    'sender_id',   NULLIF(p_params->>'sender_id', ''),
                     'heartbeat_id', p_heartbeat_id
                 )
             );

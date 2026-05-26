@@ -82,3 +82,50 @@ async def test_gather_turn_context_exposes_active_senders(db_pool):
             assert isinstance(ctx["active_senders"], list)
             ids = [s["sender_id"] for s in ctx["active_senders"]]
             assert "4242" in ids
+
+
+async def test_reach_out_user_carries_sender_id_in_outbox_payload(db_pool):
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            raw = await conn.fetchval(
+                """
+                SELECT execute_heartbeat_action(
+                    gen_random_uuid(),
+                    'reach_out_user',
+                    jsonb_build_object(
+                        'sender_id', '99999',
+                        'message',   'Thinking about you today.',
+                        'intent',    'check_in'
+                    )
+                )
+                """,
+            )
+            res = raw if isinstance(raw, dict) else json.loads(raw)
+
+            inner = res.get("result", {})
+            assert inner.get("queued") is True
+            outbox = inner.get("outbox_message")
+            assert isinstance(outbox, dict)
+            payload = outbox.get("payload", {})
+            assert payload.get("sender_id") == "99999"
+            assert payload.get("message") == "Thinking about you today."
+            assert payload.get("intent") == "check_in"
+
+
+async def test_reach_out_user_without_sender_id_stays_backward_compat(db_pool):
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            raw = await conn.fetchval(
+                """
+                SELECT execute_heartbeat_action(
+                    gen_random_uuid(),
+                    'reach_out_user',
+                    jsonb_build_object('message', 'hi', 'intent', 'check_in')
+                )
+                """,
+            )
+            res = raw if isinstance(raw, dict) else json.loads(raw)
+            inner = res.get("result", {})
+            assert inner.get("queued") is True
+            payload = inner["outbox_message"]["payload"]
+            assert payload.get("sender_id") in (None, "")
