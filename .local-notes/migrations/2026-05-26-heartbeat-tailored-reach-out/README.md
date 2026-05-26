@@ -82,11 +82,17 @@ Expected: ≥2 distinct `sender_id` values.
 ### 2. Confirm the persona's heartbeat REPL sees `active_senders`
 
 ```bash
+# Use whichever function the persona's heartbeat.use_rlm config selects.
+# Fleet default is use_rlm=true (gather_turn_snapshot); both are wired by this migration.
 docker exec hexis_brain psql -U hexis_user -d hexis_<persona> -c \
-  "SELECT jsonb_pretty(gather_turn_context()->'active_senders')"
+  "WITH cfg AS (SELECT COALESCE(get_config_bool('heartbeat.use_rlm'), FALSE) AS use_rlm)
+   SELECT use_rlm,
+          jsonb_pretty(CASE WHEN use_rlm THEN gather_turn_snapshot()->'active_senders'
+                            ELSE gather_turn_context()->'active_senders' END)
+     FROM cfg"
 ```
 
-Expected: pretty-printed JSON array with at least the two senders from step 1.
+Expected: pretty JSON array of active senders, regardless of which path is active.
 
 ### 3. Watch the heartbeat worker
 

@@ -112,6 +112,30 @@ async def test_reach_out_user_carries_sender_id_in_outbox_payload(db_pool):
             assert payload.get("intent") == "check_in"
 
 
+async def test_gather_turn_snapshot_exposes_active_senders(db_pool):
+    """RLM heartbeat path uses gather_turn_snapshot(), not gather_turn_context().
+    active_senders must surface in both."""
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                """
+                INSERT INTO channel_sessions (channel_type, channel_id, sender_id, last_active)
+                VALUES ('telegram', '7777', '7777', CURRENT_TIMESTAMP - INTERVAL '10 minutes')
+                """,
+            )
+
+            raw = await conn.fetchval("SELECT gather_turn_snapshot()")
+            snap = raw if isinstance(raw, dict) else json.loads(raw)
+
+            assert "active_senders" in snap, (
+                f"gather_turn_snapshot() missing active_senders key; "
+                f"keys present = {list(snap.keys())[:20]}"
+            )
+            assert isinstance(snap["active_senders"], list)
+            ids = [s["sender_id"] for s in snap["active_senders"]]
+            assert "7777" in ids
+
+
 async def test_reach_out_user_without_sender_id_stays_backward_compat(db_pool):
     async with db_pool.acquire() as conn:
         async with conn.transaction():
