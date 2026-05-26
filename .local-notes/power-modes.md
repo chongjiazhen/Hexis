@@ -185,3 +185,57 @@ Low-risk, ~2 scripts + 1 editable profile file + a one-line `start.ps1` addition
 (nano `:8082`). No schema change, no worker restart. Blocked only on the 4 open
 items above (mostly your model/VRAM choices). Related: `.local-notes/multi-char-modes.md`
 (Mode A/B/C deployment shapes), `.local-notes/wsl2-docker-migration.md`.
+
+## `power-profiles.psd1` provenance (moved here 2026-05-26)
+
+`hexis-launcher.ps1` Apply rewrites `power-profiles.psd1` end-to-end (the GUI
+is just another editor of the same store), so any prose comments inside the
+psd1 evaporate on the next Apply. Provenance that survives launcher
+overwrites lives here.
+
+### Schema history
+
+- **2026-05-19, commit `d7d2744`** — collapsed `BigModels` from per-entry
+  hashtables (`Alias`/`Path`/`Repo`) to bare key pointers (`@{}`). KEY is now
+  the `C:\llm-serve\models.json` short key; `set-power-mode.ps1`
+  (`Resolve-BigModel` / `Resolve-RegistryGguf`) resolves alias + gguf path +
+  serve tuning from that single registry via HF-cache glob-walk
+  (re-snapshot-safe). A key with no `models.json` entry, or whose gguf is
+  absent from the HF cache, hard-fails cleanly. Legacy `Alias`/`Path`/`Repo`
+  accepted only as fallback for un-backfilled keys. Motivation: pre-collapse
+  entries hardcoded a frozen snapshot `Path` that Xet-hung on stale revs.
+
+### `ActiveBig` history
+
+- `ablx` (gemma-4-26B-A4B abliterix V6, IQ4_XS) — active 2026-05-20.
+- `q36` (Qwen3.6-35B-A3B MoE) — active 2026-05-2X. Reason: dense 24B collapsed
+  under fleet concurrency on `--parallel 1` (~6 instances share the slot,
+  prompt-eval thrash → ~1 tok/s, truncated replies); MoE is ~8× cheaper
+  per-token eval, absorbs the fleet. See CLAUDE.md "Dense vs MoE on 16 GB
+  VRAM".
+
+### Retired models (2026-05-19)
+
+GGUFs offloaded for disk space; snapshot lifecycle owned by `llm-serve`:
+`worldsim`, `pure-soul`, `sentient-mind`, `aeon27`.
+
+To re-promote any of these: re-add the short-key to `BigModels`, ensure a
+live `models.json` entry, ensure the gguf is in the HF cache, THEN flip
+`ActiveBig`. Skipping any of those = hard-fail on next `set-power-mode prime`.
+
+Remaining on disk: `ablx`, `q36`, `cydonia`.
+
+### `Characters` — per-persona Tier overrides
+
+`set-power-mode.ps1` defaults any running persona DB not listed in
+`Characters` to `gpu` tier (shared `ActiveBig` on `BigPort`). Add an entry
+ONLY when a new persona must be pinned to `nano` (CPU `:8082`) instead of
+the GPU slot.
+
+Convention violation = no-op at best, obscures the convention. The list is
+exception-only.
+
+Pruned 2026-05-20: Baymax / Rocky / TARS (frozen 2026-05-19, no containers),
+Warden (inactive), Sam / ENI (default tier matched, entries were no-ops).
+
+Currently empty (all live personas are `gpu`).

@@ -1,11 +1,8 @@
 #
 # power-profiles.psd1 - canonical ECO/PRIME store.
-# Hand-edited 2026-05-19: collapsed to single registry. BigModels values are
-# now bare key pointers (@{}); the KEY is the C:\llm-serve\models.json short
-# key. set-power-mode.ps1 resolves alias + gguf path + serve tuning from that
-# one registry (no more duplicated Alias / frozen snapshot Path here). The
-# launcher's Apply still overwrites this file in the same pointer schema.
-# See .local-notes/power-modes.md.
+# AUTO-WRITTEN by hexis-launcher.ps1 on 2026-05-22 23:45. Hand-editable;
+# the launcher's Apply overwrites this file (the GUI is just another editor
+# of the same store). See .local-notes/power-modes.md.
 #
 @{
     LlamaServer = 'C:\llama.cpp-cuda\llama-server.exe'
@@ -22,27 +19,19 @@
     # applied by Hexis at the conversation layer, not by the weights. Switch
     # model = change ActiveBig + re-run set-power-mode prime. NOT a mode.
     BigPort   = 8080
-    ActiveBig = 'ablx'
-    # Bare key pointers. KEY = models.json short key; set-power-mode.ps1
-    # resolves alias + gguf + tuning from C:\llm-serve\models.json. A key with
-    # no models.json entry hard-fails cleanly if set as ActiveBig.
+    ActiveBig = 'q36'
+    # BigModels values are bare key pointers (@{}). The KEY is the
+    # C:\llm-serve\models.json short key; set-power-mode.ps1 resolves
+    # alias + gguf path + serve tuning from that single registry. A key
+    # with no models.json entry hard-fails cleanly if set as ActiveBig.
     BigModels = @{
-        'ablx'    = @{}   # gemma-4-26B-A4B abliterix V6 (IQ4_XS) - active 2026-05-20
-        'q36'     = @{}
+        'ablx' = @{}
         'cydonia' = @{}
-        # Retired 2026-05-19 (GGUFs offloaded for disk space, snapshot lifecycle
-        # owned by llm-serve): worldsim, pure-soul, sentient-mind, aeon27.
-        # Re-add the key here + ensure a live models.json entry (with the gguf
-        # in the HF cache) before setting any of them as ActiveBig. Remaining on
-        # disk: ablx (active), q36, cydonia.
+        'q36' = @{}
     }
 
-    # Per-persona Tier overrides. set-power-mode.ps1 defaults any running
-    # persona DB not listed here to 'gpu' (shared ActiveBig on BigPort). All
-    # current live personas (Sam + ENI + 10 newchars) are gpu, so the list
-    # is empty. Add an entry ONLY when a new persona needs to be pinned to
-    # 'nano' (CPU :8082) instead of the GPU slot.
-    # Pruned 2026-05-20: Baymax/Rocky/TARS (frozen 2026-05-19, no containers),
-    # Warden (inactive), Sam/ENI (default tier matches, entries were no-ops).
-    Characters = @()
+    # gpu-tier characters all resolve to ActiveBig on BigPort (shared server).
+    # nano-tier characters use the always-on CPU nano (:8082).
+    Characters = @(
+    )
 }
