@@ -185,3 +185,92 @@ async def test_resolve_sender_timezone_handles_null_or_empty_sender(db_pool):
             await conn.execute("SELECT set_config('heartbeat.timezone', '\"Asia/Singapore\"'::jsonb)")
             assert await conn.fetchval("SELECT resolve_sender_timezone(NULL)") == "Asia/Singapore"
             assert await conn.fetchval("SELECT resolve_sender_timezone('')") == "Asia/Singapore"
+
+
+async def test_is_sender_quiet_inside_window_returns_true(db_pool):
+    """With a fixed quiet window 22-06 and the sender's tz pinned so the current
+    local hour falls inside it, returns true."""
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            cur_utc_hour = await conn.fetchval(
+                "SELECT extract(hour FROM CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::INT"
+            )
+            target_local = 23
+            offset = (target_local - cur_utc_hour) % 24
+            tz_name = f"Etc/GMT{('+' if offset == 0 else '-')}{offset if offset else 0}"
+
+            await conn.execute("SELECT set_config('channel.sender.quiet1.timezone', $1::jsonb)", f'"{tz_name}"')
+            await conn.execute("SELECT set_config('channel.sender.quiet1.quiet_start_hour', '22'::jsonb)")
+            await conn.execute("SELECT set_config('channel.sender.quiet1.quiet_end_hour', '6'::jsonb)")
+
+            result = await conn.fetchval("SELECT is_sender_quiet('quiet1')")
+            assert result is True
+
+
+async def test_is_sender_quiet_outside_window_returns_false(db_pool):
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            cur_utc_hour = await conn.fetchval(
+                "SELECT extract(hour FROM CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::INT"
+            )
+            target_local = 14
+            offset = (target_local - cur_utc_hour) % 24
+            tz_name = f"Etc/GMT{('+' if offset == 0 else '-')}{offset if offset else 0}"
+
+            await conn.execute("SELECT set_config('channel.sender.day1.timezone', $1::jsonb)", f'"{tz_name}"')
+            await conn.execute("SELECT set_config('channel.sender.day1.quiet_start_hour', '22'::jsonb)")
+            await conn.execute("SELECT set_config('channel.sender.day1.quiet_end_hour', '6'::jsonb)")
+
+            result = await conn.fetchval("SELECT is_sender_quiet('day1')")
+            assert result is False
+
+
+async def test_is_sender_quiet_handles_non_wrapping_window(db_pool):
+    """Window NOT wrapping midnight (e.g. quiet 13-15 siesta): inside is true,
+    before is false."""
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            cur_utc_hour = await conn.fetchval(
+                "SELECT extract(hour FROM CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::INT"
+            )
+
+            inside_offset = (14 - cur_utc_hour) % 24
+            tz_inside = f"Etc/GMT{('+' if inside_offset == 0 else '-')}{inside_offset if inside_offset else 0}"
+            await conn.execute("SELECT set_config('channel.sender.siesta_in.timezone', $1::jsonb)", f'"{tz_inside}"')
+            await conn.execute("SELECT set_config('channel.sender.siesta_in.quiet_start_hour', '13'::jsonb)")
+            await conn.execute("SELECT set_config('channel.sender.siesta_in.quiet_end_hour', '15'::jsonb)")
+            assert await conn.fetchval("SELECT is_sender_quiet('siesta_in')") is True
+
+            before_offset = (12 - cur_utc_hour) % 24
+            tz_before = f"Etc/GMT{('+' if before_offset == 0 else '-')}{before_offset if before_offset else 0}"
+            await conn.execute("SELECT set_config('channel.sender.siesta_before.timezone', $1::jsonb)", f'"{tz_before}"')
+            await conn.execute("SELECT set_config('channel.sender.siesta_before.quiet_start_hour', '13'::jsonb)")
+            await conn.execute("SELECT set_config('channel.sender.siesta_before.quiet_end_hour', '15'::jsonb)")
+            assert await conn.fetchval("SELECT is_sender_quiet('siesta_before')") is False
+
+
+async def test_is_sender_quiet_fails_open_on_bad_tz(db_pool):
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("SELECT set_config('channel.sender.badtz.timezone', '\"Not/A/Zone\"'::jsonb)")
+            await conn.execute("SELECT set_config('channel.sender.badtz.quiet_start_hour', '0'::jsonb)")
+            await conn.execute("SELECT set_config('channel.sender.badtz.quiet_end_hour', '23'::jsonb)")
+            result = await conn.fetchval("SELECT is_sender_quiet('badtz')")
+            assert result is False
+
+
+async def test_is_sender_quiet_falls_back_to_agent_window(db_pool):
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("SELECT set_config('heartbeat.night_start_hour', '22'::jsonb)")
+            await conn.execute("SELECT set_config('heartbeat.night_end_hour', '6'::jsonb)")
+            cur_utc_hour = await conn.fetchval(
+                "SELECT extract(hour FROM CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::INT"
+            )
+            target_local = 23
+            offset = (target_local - cur_utc_hour) % 24
+            tz_name = f"Etc/GMT{('+' if offset == 0 else '-')}{offset if offset else 0}"
+            await conn.execute("SELECT set_config('channel.sender.fallback1.timezone', $1::jsonb)", f'"{tz_name}"')
+            # NOTE: no per-sender quiet_start/end_hour set — uses agent defaults.
+            result = await conn.fetchval("SELECT is_sender_quiet('fallback1')")
+            assert result is True

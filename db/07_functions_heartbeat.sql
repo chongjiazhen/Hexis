@@ -735,6 +735,44 @@ BEGIN
     END IF;
 END;
 $$ LANGUAGE plpgsql STABLE;
+
+-- TRUE when the recipient's local wall-clock is inside their quiet window.
+-- Per-sender override via channel.sender.<id>.{timezone, quiet_start_hour,
+-- quiet_end_hour}; falls back to agent-wide heartbeat.{timezone,
+-- night_start_hour, night_end_hour}. Bad tz string → fail-open (FALSE).
+CREATE OR REPLACE FUNCTION is_sender_quiet(p_sender_id TEXT)
+RETURNS BOOLEAN AS $$
+DECLARE
+    tz TEXT;
+    cur_hour INT;
+    quiet_start INT;
+    quiet_end INT;
+    safe_sender TEXT := COALESCE(p_sender_id, '');
+BEGIN
+    tz := resolve_sender_timezone(p_sender_id);
+    quiet_start := COALESCE(
+        get_config_int('channel.sender.' || safe_sender || '.quiet_start_hour'),
+        get_config_int('heartbeat.night_start_hour'),
+        23
+    );
+    quiet_end := COALESCE(
+        get_config_int('channel.sender.' || safe_sender || '.quiet_end_hour'),
+        get_config_int('heartbeat.night_end_hour'),
+        8
+    );
+    BEGIN
+        cur_hour := extract(hour FROM (CURRENT_TIMESTAMP AT TIME ZONE tz))::INT;
+    EXCEPTION WHEN OTHERS THEN
+        RETURN FALSE;
+    END;
+    IF quiet_start <= quiet_end THEN
+        RETURN cur_hour >= quiet_start AND cur_hour < quiet_end;
+    ELSE
+        RETURN cur_hour >= quiet_start OR cur_hour < quiet_end;
+    END IF;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
 CREATE OR REPLACE FUNCTION should_run_heartbeat()
 RETURNS BOOLEAN AS $$
 DECLARE
