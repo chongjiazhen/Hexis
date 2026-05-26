@@ -16,7 +16,14 @@ param(
     # Restart ONLY the nano (:8082). Kills existing nano if up, then relaunches
     # with current tuning. Skips DB / chat / embed entirely - safe in ECO where
     # chat :8080 would timeout. Use after editing nano serve flags here.
-    [switch]$NanoOnly
+    [switch]$NanoOnly,
+    # Restart ONLY the embed (:8081). Kills existing embed if up, then relaunches.
+    # Skips DB / chat / nano entirely. Used by watch-embed.ps1 watchdog and after
+    # editing embed serve flags here. Idempotent.
+    [switch]$EmbedOnly,
+    # Skip auto-launching watch-embed.ps1 in the background. Default: launch.
+    # The watchdog polls :8081/health every 30s and re-invokes -EmbedOnly on death.
+    [switch]$NoWatchdog
 )
 
 $ErrorActionPreference = "Stop"
@@ -63,6 +70,25 @@ function Invoke-Docker {
     } finally {
         $ErrorActionPreference = $prev
     }
+}
+
+function Start-Embed {
+    if (Get-PortPid 8081) {
+        Write-Host "[start] embed :8081 already running"
+        return
+    }
+    Write-Host "[start] embed llama-server :8081 ($EmbedRepo) [CPU]"
+    # CPU-bound (--n-gpu-layers 0): embeddinggemma-300M is tiny (~320MB Q8, no
+    # autoregressive gen); CPU latency is fine for DB-cached/batched embeddings.
+    # Keeps the GPU single-tenant for the chat model on :8080.
+    Start-Process -FilePath $LlamaServer `
+        -ArgumentList @("-hf",$EmbedRepo,
+                        "--host","0.0.0.0","--port","8081",
+                        "--ctx-size","4096",
+                        "--batch-size","4096","--ubatch-size","4096",
+                        "--n-gpu-layers","0","--embeddings",
+                        "--alias","embeddinggemma-300m") `
+        -WindowStyle Hidden
 }
 
 function Start-Nano {
@@ -121,7 +147,54 @@ function Wait-Health([string]$Url, [string]$Label, [int]$TimeoutSec = 120) {
     return $false
 }
 
+function Get-WatchdogPid {
+    # Returns PID if watch-embed.ps1 is alive, else $null. Self-heals stale
+    # pid file (process gone, file lingering).
+    $pidFile = Join-Path $Root "logs\watch-embed.pid"
+    if (-not (Test-Path $pidFile)) { return $null }
+    $raw = (Get-Content -LiteralPath $pidFile -Raw -ErrorAction SilentlyContinue).Trim()
+    if (-not $raw) { return $null }
+    $wd = $null
+    if (-not [int]::TryParse($raw, [ref]$wd)) { return $null }
+    $proc = Get-Process -Id $wd -ErrorAction SilentlyContinue
+    if ($proc) { return $wd }
+    # Stale pid file - process gone.
+    Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
+    return $null
+}
+
+function Stop-Watchdog {
+    $wd = Get-WatchdogPid
+    if ($wd) {
+        Stop-Process -Id $wd -Force -ErrorAction SilentlyContinue
+        Write-Host "[stop] watch-embed: killed PID $wd"
+        Remove-Item -LiteralPath (Join-Path $Root "logs\watch-embed.pid") -Force -ErrorAction SilentlyContinue
+    } else {
+        Write-Host "[stop] watch-embed: not running"
+    }
+}
+
+function Start-Watchdog {
+    $wd = Get-WatchdogPid
+    if ($wd) {
+        Write-Host "[start] watch-embed already running (PID $wd)"
+        return
+    }
+    $script = Join-Path $Root "watch-embed.ps1"
+    if (-not (Test-Path $script)) {
+        Write-Host "[warn] watch-embed.ps1 missing; skipping watchdog"
+        return
+    }
+    # Detached: parent (start.ps1) returns to prompt; child loops in background.
+    # Hidden window keeps the desktop clean; logs go to logs\watch-embed.log.
+    $proc = Start-Process -FilePath "powershell.exe" `
+        -ArgumentList @("-NoProfile","-ExecutionPolicy","Bypass","-File",$script) `
+        -WindowStyle Hidden -PassThru
+    Write-Host "[start] watch-embed PID $($proc.Id) (poll 30s; logs/watch-embed.log)"
+}
+
 if ($Stop) {
+    Stop-Watchdog
     Kill-Port 8080 "chat"
     Kill-Port 8081 "embed"
     Kill-Port 8082 "nano"
@@ -144,6 +217,22 @@ if ($NanoOnly) {
         exit 1
     }
     Write-Host "[ready] nano :8082"
+    exit 0
+}
+
+if ($EmbedOnly) {
+    # Bounce only embed (:8081). Used by watch-embed.ps1 watchdog after a
+    # detected crash, and as a manual restart after editing embed serve flags.
+    # Skips DB / chat / nano entirely.
+    Kill-Port 8081 "embed"
+    Start-Sleep -Seconds 1
+    Start-Embed
+    $ok = Wait-Health "http://127.0.0.1:8081/health" "embed :8081" 120
+    if (-not $ok) {
+        Write-Host "[fail] embed :8081 did not become healthy"
+        exit 1
+    }
+    Write-Host "[ready] embed :8081"
     exit 0
 }
 
@@ -201,24 +290,7 @@ if (-not $wantChat) {
 }
 
 # 3. Embed llama-server :8081
-if (Get-PortPid 8081) {
-    Write-Host "[start] embed :8081 already running"
-} else {
-    Write-Host "[start] embed llama-server :8081 ($EmbedRepo) [CPU]"
-    # CPU-bound (--n-gpu-layers 0): embeddinggemma-300M is tiny (~320MB Q8, no
-    # autoregressive gen); CPU latency is fine for DB-cached/batched embeddings.
-    # Keeps the GPU single-tenant for the 35B chat model on :8080 (eliminates
-    # the 8080-vs-8081 CUDA contention on the single 16 GB card). Same pattern
-    # as the always-on nano (:8082, also -ngl 0).
-    Start-Process -FilePath $LlamaServer `
-        -ArgumentList @("-hf",$EmbedRepo,
-                        "--host","0.0.0.0","--port","8081",
-                        "--ctx-size","4096",
-                        "--batch-size","4096","--ubatch-size","4096",
-                        "--n-gpu-layers","0","--embeddings",
-                        "--alias","embeddinggemma-300m") `
-        -WindowStyle Hidden
-}
+Start-Embed
 
 # 4. Nano CPU-1B llama-server :8082 (ECO floor only). CPU -> 0 VRAM.
 # Post 2026-05-20 heartbeat-to-GPU migration, the live fleet routes
@@ -247,6 +319,12 @@ if ($wantNano) {
 if (-not ($chatOk -and $embedOk)) {
     Write-Host "[fail] one or more servers did not become healthy"
     exit 1
+}
+
+# 6. Watchdog for embed (:8081). Auto-launched detached so the parent shell
+# returns. Idempotent: skipped if already running. -NoWatchdog opts out.
+if (-not $NoWatchdog) {
+    Start-Watchdog
 }
 
 Write-Host ""
