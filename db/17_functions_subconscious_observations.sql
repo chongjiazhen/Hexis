@@ -1206,18 +1206,44 @@ BEGIN
             END;
 
         WHEN 'reach_out_user' THEN
-            queued_call := build_outbox_message(
-                'user',
-                jsonb_build_object(
-                    'message',     p_params->>'message',
-                    'intent',      p_params->>'intent',
-                    'sender_id',   NULLIF(p_params->>'sender_id', ''),
-                    'heartbeat_id', p_heartbeat_id
-                )
-            );
-            outbox_messages := outbox_messages || jsonb_build_array(queued_call);
-            result := jsonb_build_object('queued', true, 'outbox_message', queued_call);
-            PERFORM satisfy_drive('connection', 0.3);
+            DECLARE
+                target_sender TEXT := NULLIF(p_params->>'sender_id', '');
+                force_send    BOOLEAN := COALESCE((p_params->>'force')::boolean, FALSE);
+                resolved_tz   TEXT;
+                recipient_hr  INT;
+            BEGIN
+                IF target_sender IS NOT NULL
+                   AND NOT force_send
+                   AND is_sender_quiet(target_sender) THEN
+                    resolved_tz := resolve_sender_timezone(target_sender);
+                    BEGIN
+                        recipient_hr := extract(hour FROM (CURRENT_TIMESTAMP AT TIME ZONE resolved_tz))::INT;
+                    EXCEPTION WHEN OTHERS THEN
+                        recipient_hr := NULL;
+                    END;
+                    result := jsonb_build_object(
+                        'queued',     false,
+                        'reason',     'recipient_quiet_hours',
+                        'sender_id',  target_sender,
+                        'timezone',   resolved_tz,
+                        'local_hour', recipient_hr
+                    );
+                    PERFORM update_energy(action_cost);
+                ELSE
+                    queued_call := build_outbox_message(
+                        'user',
+                        jsonb_build_object(
+                            'message',     p_params->>'message',
+                            'intent',      p_params->>'intent',
+                            'sender_id',   target_sender,
+                            'heartbeat_id', p_heartbeat_id
+                        )
+                    );
+                    outbox_messages := outbox_messages || jsonb_build_array(queued_call);
+                    result := jsonb_build_object('queued', true, 'outbox_message', queued_call);
+                    PERFORM satisfy_drive('connection', 0.3);
+                END IF;
+            END;
 
         WHEN 'reach_out_public' THEN
             queued_call := build_outbox_message(

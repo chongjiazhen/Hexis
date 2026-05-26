@@ -298,3 +298,100 @@ async def test_active_senders_context_includes_timezone_localhour_isquiet(db_poo
             )
             assert row["local_hour"] == (cur_utc_hour + 8) % 24
             assert isinstance(row["is_quiet"], bool)
+
+
+async def test_reach_out_user_skipped_when_recipient_quiet(db_pool):
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("UPDATE heartbeat_state SET current_energy = 20, is_paused = FALSE WHERE id = 1")
+            cur_utc_hour = await conn.fetchval(
+                "SELECT extract(hour FROM CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::INT"
+            )
+            offset = (23 - cur_utc_hour) % 24
+            tz_name = f"Etc/GMT{('+' if offset == 0 else '-')}{offset if offset else 0}"
+            await conn.execute("SELECT set_config('channel.sender.sleepy.timezone', $1::jsonb)", f'"{tz_name}"')
+            await conn.execute("SELECT set_config('heartbeat.night_start_hour', '22'::jsonb)")
+            await conn.execute("SELECT set_config('heartbeat.night_end_hour', '6'::jsonb)")
+
+            raw = await conn.fetchval(
+                """
+                SELECT execute_heartbeat_action(
+                    gen_random_uuid(),
+                    'reach_out_user',
+                    jsonb_build_object(
+                        'sender_id', 'sleepy',
+                        'message',   'hi at midnight',
+                        'intent',    'check_in'
+                    )
+                )
+                """,
+            )
+            res = raw if isinstance(raw, dict) else json.loads(raw)
+            inner = res.get("result", {})
+            assert inner.get("queued") is False
+            assert inner.get("reason") == "recipient_quiet_hours"
+            assert inner.get("sender_id") == "sleepy"
+            outbox = res.get("outbox_messages") or []
+            assert len(outbox) == 0
+
+
+async def test_reach_out_user_delivered_with_force_override(db_pool):
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("UPDATE heartbeat_state SET current_energy = 20, is_paused = FALSE WHERE id = 1")
+            cur_utc_hour = await conn.fetchval(
+                "SELECT extract(hour FROM CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::INT"
+            )
+            offset = (23 - cur_utc_hour) % 24
+            tz_name = f"Etc/GMT{('+' if offset == 0 else '-')}{offset if offset else 0}"
+            await conn.execute("SELECT set_config('channel.sender.urgent.timezone', $1::jsonb)", f'"{tz_name}"')
+            await conn.execute("SELECT set_config('heartbeat.night_start_hour', '22'::jsonb)")
+            await conn.execute("SELECT set_config('heartbeat.night_end_hour', '6'::jsonb)")
+
+            raw = await conn.fetchval(
+                """
+                SELECT execute_heartbeat_action(
+                    gen_random_uuid(),
+                    'reach_out_user',
+                    jsonb_build_object(
+                        'sender_id', 'urgent',
+                        'message',   'emergency',
+                        'intent',    'crisis',
+                        'force',     true
+                    )
+                )
+                """,
+            )
+            res = raw if isinstance(raw, dict) else json.loads(raw)
+            inner = res.get("result", {})
+            assert inner.get("queued") is True
+            assert inner["outbox_message"]["payload"]["sender_id"] == "urgent"
+
+
+async def test_reach_out_user_energy_refunded_on_quiet_skip(db_pool):
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("UPDATE heartbeat_state SET current_energy = 20, is_paused = FALSE WHERE id = 1")
+            cur_utc_hour = await conn.fetchval(
+                "SELECT extract(hour FROM CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::INT"
+            )
+            offset = (23 - cur_utc_hour) % 24
+            tz_name = f"Etc/GMT{('+' if offset == 0 else '-')}{offset if offset else 0}"
+            await conn.execute("SELECT set_config('channel.sender.refund.timezone', $1::jsonb)", f'"{tz_name}"')
+            await conn.execute("SELECT set_config('heartbeat.night_start_hour', '22'::jsonb)")
+            await conn.execute("SELECT set_config('heartbeat.night_end_hour', '6'::jsonb)")
+
+            energy_before = await conn.fetchval("SELECT current_energy FROM heartbeat_state WHERE id = 1")
+            await conn.fetchval(
+                """
+                SELECT execute_heartbeat_action(
+                    gen_random_uuid(),
+                    'reach_out_user',
+                    jsonb_build_object('sender_id', 'refund', 'message', 'x', 'intent', 'x')
+                )
+                """,
+            )
+            energy_after = await conn.fetchval("SELECT current_energy FROM heartbeat_state WHERE id = 1")
+            assert energy_after == energy_before, (
+                f"quiet-skip must refund 5 energy; before={energy_before} after={energy_after}"
+            )
