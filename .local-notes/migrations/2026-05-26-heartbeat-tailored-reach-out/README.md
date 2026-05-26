@@ -52,9 +52,37 @@ ROLLBACK;
 -- expected payload: result.outbox_message.payload.sender_id = '12345'
 ```
 
-## No worker restart required
+## Worker rebuild required for prompt changes
 
-Functions are read fresh per call. Prompts in `services/prompts/` (RLM heartbeat + legacy) are read per turn. Three function-only changes propagate without bouncing any container.
+DB function changes propagate without bouncing any container — `CREATE OR REPLACE` is live the next call.
+
+**Prompt files are NOT.** `services/prompts/*.md` are **baked into the worker image at build time** (`ops/Dockerfile.worker` copies the repo tree). Editing prompts on host disk has no effect on running containers until images are rebuilt. The Task 5 plan note "no rebuild needed — prompts read per turn" was wrong; correcting here.
+
+### Heartbeat worker rebuild
+
+After applying the DB migration, rebuild + recreate every running heartbeat worker so the LLM sees the new `reach_out_user` / `active_senders` instructions:
+
+```powershell
+$svcs = docker ps --format '{{.Names}}' | Select-String '_heartbeat_worker$' | ForEach-Object { $_.ToString() -replace '^hexis_','' }
+docker compose -f docker-compose.yml -f docker-compose.newchars.yml --profile active up -d --no-deps --force-recreate --build $svcs
+```
+
+`--no-deps` is **load-bearing** — without it, `up -d` recreates `hexis_brain` and triggers the per-persona consumer-wedge per `project_heartbeat_persona_collapse_fix` (workers don't reconnect after brain IP change; need a manual `docker restart` to recover).
+
+### Verify rebuild
+
+Pick any rebuilt container:
+
+```bash
+MSYS_NO_PATHCONV=1 docker exec hexis_<persona>_heartbeat_worker grep -c active_senders /app/services/prompts/rlm_heartbeat_system.md
+# expected: 2  (Action Types paragraph + Guidelines bullet)
+```
+
+If `0`, the image was not rebuilt with the new prompts — re-run the rebuild with `--build` set explicitly.
+
+### Channel workers don't need rebuild
+
+`channels/outbox.py:_deliver_last_active` was unchanged by this migration — it already routed by `payload.sender_id`. Channel worker images stay as-is.
 
 ## ACID-for-cognition invariant intact
 
