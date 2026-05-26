@@ -274,3 +274,27 @@ async def test_is_sender_quiet_falls_back_to_agent_window(db_pool):
             # NOTE: no per-sender quiet_start/end_hour set — uses agent defaults.
             result = await conn.fetchval("SELECT is_sender_quiet('fallback1')")
             assert result is True
+
+
+async def test_active_senders_context_includes_timezone_localhour_isquiet(db_pool):
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("SELECT set_config('channel.sender.tzprobe.timezone', '\"Etc/GMT-8\"'::jsonb)")
+            await conn.execute(
+                """
+                INSERT INTO channel_sessions (channel_type, channel_id, sender_id, last_active)
+                VALUES ('telegram', 'tzprobe', 'tzprobe', CURRENT_TIMESTAMP - INTERVAL '5 minutes')
+                """,
+            )
+
+            raw = await conn.fetchval("SELECT get_active_senders_context(8, 7)")
+            rows = raw if isinstance(raw, list) else json.loads(raw)
+            row = next(r for r in rows if r["sender_id"] == "tzprobe")
+            assert row["timezone"] == "Etc/GMT-8"
+            assert isinstance(row["local_hour"], int)
+            assert 0 <= row["local_hour"] <= 23
+            cur_utc_hour = await conn.fetchval(
+                "SELECT extract(hour FROM CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::INT"
+            )
+            assert row["local_hour"] == (cur_utc_hour + 8) % 24
+            assert isinstance(row["is_quiet"], bool)

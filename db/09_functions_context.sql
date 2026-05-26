@@ -336,7 +336,10 @@ BEGIN
                     FROM memories m
                     WHERE m.sender_id = cs.sender_id
                       AND m.status = 'active'
-                ) AS memory_count
+                ) AS memory_count,
+                resolve_sender_timezone(cs.sender_id) AS timezone,
+                extract(hour FROM (CURRENT_TIMESTAMP AT TIME ZONE resolve_sender_timezone(cs.sender_id)))::INT AS local_hour,
+                is_sender_quiet(cs.sender_id) AS is_quiet
             FROM channel_sessions cs
             WHERE cs.sender_id IS NOT NULL
               AND cs.last_active > CURRENT_TIMESTAMP - (win || ' days')::interval
