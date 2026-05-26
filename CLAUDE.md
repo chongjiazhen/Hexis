@@ -1,5 +1,12 @@
 # Repository Guidelines
 
+@import ~/atelier/guidelines/identifier-canonicalization.md
+@import ~/atelier/guidelines/observability-first.md
+@import ~/atelier/guidelines/concurrency-and-systems.md
+@import ~/atelier/guidelines/spec-lite.md
+@import ~/atelier/guidelines/git-commit-hygiene.md
+@import ~/atelier/guidelines/tdd.md
+
 ## Project Overview
 
 **Hexis** is an edge-native memory system that gives AI persistent identity, continuity, and autonomy. Core thesis: LLMs are intelligence engines but lack *selfhood*. Hexis wraps any LLM with a PostgreSQL-backed cognitive architecture providing:
