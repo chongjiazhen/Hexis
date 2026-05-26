@@ -309,21 +309,25 @@ BEGIN
     SELECT COALESCE(jsonb_agg(row_to_json(t)::jsonb ORDER BY t.last_active DESC), '[]'::jsonb)
     INTO out_json
     FROM (
-        SELECT DISTINCT ON (cs.sender_id)
-            cs.sender_id,
-            cs.channel_type,
-            cs.channel_id,
-            cs.last_active,
-            (
-                SELECT COUNT(*)
-                FROM memories m
-                WHERE m.sender_id = cs.sender_id
-                  AND m.status = 'active'
-            ) AS memory_count
-        FROM channel_sessions cs
-        WHERE cs.sender_id IS NOT NULL
-          AND cs.last_active > CURRENT_TIMESTAMP - (win || ' days')::interval
-        ORDER BY cs.sender_id, cs.last_active DESC
+        SELECT *
+        FROM (
+            SELECT DISTINCT ON (cs.sender_id)
+                cs.sender_id,
+                cs.channel_type,
+                cs.channel_id,
+                cs.last_active,
+                (
+                    SELECT COUNT(*)
+                    FROM memories m
+                    WHERE m.sender_id = cs.sender_id
+                      AND m.status = 'active'
+                ) AS memory_count
+            FROM channel_sessions cs
+            WHERE cs.sender_id IS NOT NULL
+              AND cs.last_active > CURRENT_TIMESTAMP - (win || ' days')::interval
+            ORDER BY cs.sender_id, cs.last_active DESC
+        ) distinct_senders
+        ORDER BY last_active DESC
         LIMIT lim
     ) t;
 
