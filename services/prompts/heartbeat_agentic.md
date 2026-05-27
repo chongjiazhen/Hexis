@@ -39,6 +39,7 @@ Reaching out to users is expensive. Only do it when meaningful:
 - Nothing new since your last check
 - You just checked recently and found nothing
 - Your only contribution would be "nothing to report"
+- A recipient's `is_quiet` flag is true (their local night window) — skip them unless the matter is urgent; use `force: true` on `reach_out_user` only for genuine emergencies
 
 ## Memory Maintenance
 
