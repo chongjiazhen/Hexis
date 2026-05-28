@@ -41,38 +41,17 @@ See `.local-notes/guidelines/schema-migration.md` for schema change workflow.
 
 ## Memory Architecture
 
-### Memory Types
-- **Episodic**: Events with action, context, result, emotional valence
-- **Semantic**: Facts with confidence, sources, contradictions
-- **Procedural**: How-to steps with success tracking
-- **Strategic**: Patterns with supporting evidence
-- **Working**: Transient short-term buffer with expiry
+**Types**: episodic, semantic, procedural, strategic, working.
 
-### Key Database Tables
-- `memories` — base table (id, type, content, embedding, importance, trust_level)
-- `clusters` — thematic groupings with centroid embeddings
-- `memory_neighborhoods` — precomputed associative neighbors (hot-path optimization)
-- `memory_graph` (Apache AGE) — graph nodes/edges for multi-hop reasoning
+**Tables**: `memories` (base), `clusters` (thematic, centroid embeddings), `memory_neighborhoods` (precomputed neighbors), `memory_graph` (Apache AGE).
 
-### Key Database Functions
-- `fast_recall(text, limit, p_current_sender)` — primary hot-path retrieval (vector + neighborhood + temporal)
-- `create_semantic_memory()`, `create_episodic_memory()`, etc. — accept `p_sender_id`
-- `get_embedding(text[])` — embeddings via HTTP, cached in DB
-- `run_heartbeat()`, `run_subconscious_maintenance()`
+**Functions**: `fast_recall()` (hot-path retrieval), `create_*_memory()` (sender-scoped), `get_embedding()` (HTTP, cached), `run_heartbeat()`, `run_subconscious_maintenance()`.
 
-### Sender-scoped memory
-
-`memories.sender_id` (nullable) tags conversation-derived memories with their owning DM partner;
-NULL = global (identity/worldview/coaching knowledge, always recalled). `fast_recall` applies a
-+0.1 own-sender relevance boost. Confidentiality is enforced by **persona prompt** (mediator-style
-privilege), NOT a DB partition. Cross-channel sender_id is NOT unified (same person on telegram
-vs discord → separate scopes).
+**Sender scope**: `memories.sender_id` tags DM-partner memories; NULL = global. `fast_recall` gives +0.1 own-sender boost. Cross-channel sender_id is NOT unified.
 
 ## Channels (multi-portal)
 
-Supported: `telegram, discord, slack, signal, whatsapp, imessage, matrix`. Adapter auto-starts
-when credentials resolvable from DB config OR env var. Per-persona credentials via persona-namespaced
-env vars in `docker-compose.newchars.yml`. Allowlist via `channel.{type}.allowed_users` config key.
+`telegram, discord, slack, signal, whatsapp, imessage, matrix`. Adapter auto-starts when credentials in DB config or env var. Per-persona creds via `docker-compose.newchars.yml`. Allowlist: `channel.{type}.allowed_users`.
 
 ## Build, Test, and Development Commands
 
@@ -85,12 +64,11 @@ pytest tests -q                                    # All tests (Docker services 
 hexis status | hexis chat | hexis ingest | hexis mcp
 ```
 
-## Coding Style & Naming Conventions
+## Coding Style
 
-- **Python**: Follow Black formatting; prefer type hints and explicit names
-- **Database authority**: Add/modify SQL in `db/*.sql` rather than duplicating logic in Python
-- **Additive schema changes**: Prefer backwards-compatible changes; avoid renames unless necessary
-- **Stateless workers**: Workers can be killed/restarted without losing state; all state lives in Postgres
+- Python: Black formatting, type hints, explicit names
+- DB authority: schema logic in `db/*.sql`, not duplicated in Python
+- Stateless workers: all state in Postgres, kill/restart safe
 
 ## Fix vs. Design Overreach
 
@@ -100,27 +78,22 @@ Scope the fix to the root cause. Don't re-architect around a symptom.
 2. Does the change fight a deliberate invariant? (e.g. outbox durability = "ACID for cognition")
 3. Prefer observability over deletion — log age + kind at send, don't silently drop.
 
-## Testing Guidelines
+## Testing
 
-- **Framework**: `pytest` + `pytest-asyncio` (session loop scope)
-- **Style**: Integration tests using transactions/rollbacks
-- **Seeding test memories**: `memories` has NOT NULL on `embedding` — use
-  `array_fill(0.1, ARRAY[embedding_dimension()])::vector`
+- `pytest` + `pytest-asyncio` (session loop scope), integration tests with transactions/rollbacks
+- Test seed memories: `array_fill(0.1, ARRAY[embedding_dimension()])::vector` (memories.embedding is NOT NULL)
 
-## Commit & Pull Request Guidelines
+## Commits & PRs
 
-- **Commits**: Short, imperative summaries
-- **Never add `Co-Authored-By` trailers** to commit messages
-- **PRs**: Include rationale, how to run/verify, and any DB reset requirements
-- **Call out changes to**: `db/*.sql`, `docker-compose.yml`, `README.md`
+- Commits: short, imperative, **no `Co-Authored-By` trailers**
+- PRs: include rationale, verification steps, DB reset requirements if any
+- Call out changes to: `db/*.sql`, `docker-compose.yml`, `README.md`
 
-## Configuration & Safety Notes
+## Config & Safety
 
-- **Secrets**: API keys in `.env`, not in Postgres; DB config stores env var *names* only
-- **Heartbeat gating**: Blocked until `agent.is_configured=true` (via `hexis init`)
-- **Consent flow**: Agent signs consent before first LLM use; consent is final
-- **Pause/terminate**: Heartbeat pauses must include a detailed reason queued to the outbox
-- **Never revert or discard files without asking**
+- Secrets in `.env`, not DB; DB config stores env var *names* only
+- Heartbeat gated until `agent.is_configured=true` (via `hexis init`)
+- Never revert or discard files without asking
 
 ## Architecture Principles
 
