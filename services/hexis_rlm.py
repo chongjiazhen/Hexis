@@ -38,6 +38,46 @@ logger = logging.getLogger(__name__)
 
 _CODE_BLOCK_RE = re.compile(r"```repl\s*\n(.*?)\n```", re.DOTALL)
 _FINAL_VAR_RE = re.compile(r"^\s*FINAL_VAR\((.*?)\)", re.MULTILINE | re.DOTALL)
+
+
+async def _load_persona_system_prompt(
+    *, dsn: str | None = None, pool: Any = None
+) -> str:
+    """Fetch ``agent.persona_system_prompt`` from config. Empty on miss/error.
+
+    Cold-start persona anchor (character card system_prompt). Heartbeat and
+    chat RLM paths must prepend this before the generic RLM instructions, or
+    the model has no character voice and falls back to assistant boilerplate.
+    Mirrors services/agent.py:_build_system_prompt persona prefix.
+    """
+    raw: Any = None
+    try:
+        if pool is not None:
+            raw = await pool.fetchval(
+                "SELECT value FROM config WHERE key = 'agent.persona_system_prompt'"
+            )
+        elif dsn is not None:
+            import asyncpg
+
+            conn = await asyncpg.connect(dsn)
+            try:
+                raw = await conn.fetchval(
+                    "SELECT value FROM config WHERE key = 'agent.persona_system_prompt'"
+                )
+            finally:
+                await conn.close()
+        else:
+            return ""
+    except Exception:
+        logger.exception("Failed to load agent.persona_system_prompt")
+        return ""
+
+    if not raw:
+        return ""
+    try:
+        return json.loads(raw) if isinstance(raw, str) else str(raw)
+    except (json.JSONDecodeError, TypeError):
+        return str(raw)
 _FINAL_RE = re.compile(r"^\s*FINAL\((.*)\)\s*$", re.MULTILINE | re.DOTALL)
 
 MAX_OUTPUT_CHARS = 20_000
@@ -366,6 +406,9 @@ async def run_heartbeat_decision(
     personhood_addendum = compose_personhood_prompt("heartbeat")
     if personhood_addendum:
         system_prompt = system_prompt + "\n\n---\n\n" + personhood_addendum
+    persona_psp = await _load_persona_system_prompt(dsn=dsn)
+    if persona_psp:
+        system_prompt = persona_psp.strip() + "\n\n---\n\n" + system_prompt
 
     # Run RLM loop in thread pool
     try:
@@ -557,6 +600,9 @@ async def run_chat_turn(
     personhood_addendum = compose_personhood_prompt("conversation")
     if personhood_addendum:
         system_prompt = system_prompt + "\n\n---\n\n" + personhood_addendum
+    persona_psp = await _load_persona_system_prompt(pool=pool)
+    if persona_psp:
+        system_prompt = persona_psp.strip() + "\n\n---\n\n" + system_prompt
 
     # Run RLM loop
     try:
