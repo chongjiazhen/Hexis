@@ -203,9 +203,12 @@ services:
       <<: *common-env
       POSTGRES_DB: hexis_nines
 
-  # ── Death ──────────────────────────────────────────────────────────────────
+  # ── Death ── ON ICE 2026-05-26 (narratively thin: no grounded world, halo+thirst
+  #           archetype only; DB hexis_death preserved; thaw: drop the frozen
+  #           profile override)
   death_channel_worker:
     <<: *channel-base
+    profiles: ["frozen"]
     container_name: hexis_death_channel_worker
     environment:
       <<: *common-env
@@ -214,6 +217,7 @@ services:
 
   death_heartbeat_worker:
     <<: *worker-base
+    profiles: ["frozen"]
     container_name: hexis_death_heartbeat_worker
     command: ["hexis-worker", "--mode", "heartbeat"]
     environment:
@@ -222,15 +226,19 @@ services:
 
   death_maintenance_worker:
     <<: *worker-base
+    profiles: ["frozen"]
     container_name: hexis_death_maintenance_worker
     command: ["hexis-worker", "--mode", "maintenance"]
     environment:
       <<: *common-env
       POSTGRES_DB: hexis_death
 
-  # ── Cassiel ────────────────────────────────────────────────────────────────
+  # ── Cassiel ── ON ICE 2026-05-26 (narratively thin: world exists only to judge
+  #             {{user}}, no on-screen Cassiel-world; DB hexis_cassiel preserved;
+  #             thaw: drop the frozen profile override)
   cassiel_channel_worker:
     <<: *channel-base
+    profiles: ["frozen"]
     container_name: hexis_cassiel_channel_worker
     environment:
       <<: *common-env
@@ -239,6 +247,7 @@ services:
 
   cassiel_heartbeat_worker:
     <<: *worker-base
+    profiles: ["frozen"]
     container_name: hexis_cassiel_heartbeat_worker
     command: ["hexis-worker", "--mode", "heartbeat"]
     environment:
@@ -247,6 +256,7 @@ services:
 
   cassiel_maintenance_worker:
     <<: *worker-base
+    profiles: ["frozen"]
     container_name: hexis_cassiel_maintenance_worker
     command: ["hexis-worker", "--mode", "maintenance"]
     environment:
