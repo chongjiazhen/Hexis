@@ -1,5 +1,13 @@
 # Schema Migration
 
+## Throwaway DB for migration / schema validation
+
+Spin: `docker compose -p hexistrial -f docker-compose.yml -f docker-compose.trial.yml up -d db` with a `docker-compose.trial.yml` override pinning `container_name: hexis_brain_trial`, port `43816:5432` (43815 = live, 43817 = api, 43818 = anchor-test). Embedding URL stays `host.docker.internal:8081/v1/embeddings` (shared with live).
+
+Tear: `docker compose -p hexistrial -f docker-compose.yml -f docker-compose.trial.yml down -v` — `-p` namespace isolates volumes from live.
+
+Use for: validating migrations on anchor schema, building from a worktree at an old tag, running `pytest tests/db` against an isolated brain without touching live fleet.
+
 ## SQL files are baked into the Docker image
 
 SQL schema files (`db/*.sql`) are **baked into the Docker image at build time**
