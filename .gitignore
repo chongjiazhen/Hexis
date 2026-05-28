@@ -76,3 +76,4 @@ logs/
 .tmp/
 .reference/
 .claude.local.md
+graphify-out/
