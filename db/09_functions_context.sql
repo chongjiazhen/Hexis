@@ -296,6 +296,21 @@ EXCEPTION
         RETURN '[]'::jsonb;
 END;
 $$ LANGUAGE plpgsql STABLE;
+CREATE OR REPLACE FUNCTION resolve_sender_timezone(p_sender_id TEXT)
+RETURNS TEXT AS $$
+DECLARE
+    tz TEXT;
+BEGIN
+    IF p_sender_id IS NULL OR p_sender_id = '' THEN
+        RETURN COALESCE(get_config_text('heartbeat.timezone'), 'UTC');
+    END IF;
+    tz := get_config_text('channel.sender.' || p_sender_id || '.timezone');
+    IF tz IS NULL OR tz = '' THEN
+        tz := get_config_text('heartbeat.timezone');
+    END IF;
+    RETURN COALESCE(tz, 'UTC');
+END;
+$$ LANGUAGE plpgsql STABLE;
 CREATE OR REPLACE FUNCTION get_active_senders_context(
     p_limit INT DEFAULT 8,
     p_recency_days INT DEFAULT 7
@@ -321,7 +336,10 @@ BEGIN
                     FROM memories m
                     WHERE m.sender_id = cs.sender_id
                       AND m.status = 'active'
-                ) AS memory_count
+                ) AS memory_count,
+                resolve_sender_timezone(cs.sender_id) AS timezone,
+                extract(hour FROM (CURRENT_TIMESTAMP AT TIME ZONE resolve_sender_timezone(cs.sender_id)))::INT AS local_hour,
+                is_sender_quiet(cs.sender_id) AS is_quiet
             FROM channel_sessions cs
             WHERE cs.sender_id IS NOT NULL
               AND cs.last_active > CURRENT_TIMESTAMP - (win || ' days')::interval

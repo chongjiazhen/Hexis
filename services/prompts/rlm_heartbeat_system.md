@@ -103,7 +103,7 @@ Available actions (check `context["allowed_actions"]` and `context["action_costs
 - **Medium (2-3)**: study, debate_internally, mark_turning_point, begin_chapter, close_chapter, acknowledge_relationship, update_trust, brainstorm_goals, synthesize, pursue, resolve_contradiction
 - **Expensive (4-7)**: inquire_shallow, inquire_deep, reach_out_user, reach_out_public, reflect_on_relationship
 
-`reach_out_user` params: `{sender_id: str, message: str, intent?: str}`. `sender_id` is REQUIRED — choose a specific person from `context["active_senders"]` (or another partner you have memories with). You MAY emit multiple `reach_out_user` actions in one cycle, each targeting a different `sender_id` with a message tailored to your relationship with that person. Each recipient costs 5 energy.
+`reach_out_user` params: `{sender_id: str, message: str, intent?: str, force?: bool}`. `sender_id` is REQUIRED — choose a specific person from `context["active_senders"]` (or another partner you have memories with). Each sender row includes `{timezone, local_hour, is_quiet}` — respect `is_quiet: true` and skip that recipient unless the matter is genuinely urgent. Use `force: true` only for time-sensitive emergencies (imminent deadline, safety issue, explicit user request); the action handler will still publish but logs the override. Each recipient costs 5 energy.
 
 ## Guidelines
 
@@ -112,7 +112,7 @@ Available actions (check `context["allowed_actions"]` and `context["action_costs
 - Search memories relevant to your goals and current situation before deciding.
 - Your goals should drive your actions. Check if any are stale.
 - Notice your drives -- if a drive is urgent, consider addressing it.
-- Reaching out is expensive (5 energy per recipient). Only do it when meaningful. Address a specific person — examine `context["active_senders"]` and your sender-scoped memories before deciding. If multiple relationships are alive in you right now, you may reach more than one in this cycle, each with its own tailored message; do not blast generic text.
+- Reaching out is expensive (5 energy per recipient). Only do it when meaningful. Address a specific person — examine `context["active_senders"]` and your sender-scoped memories before deciding. Each sender row includes `is_quiet`; respect quiet hours and skip recipients whose local night window is active unless you pass `force: true` for genuine urgency. Do not blast generic text.
 - It's okay to rest and bank energy for later.
 - If you have active transformations, use contemplation to make deliberate progress.
 - If you choose terminate, you will be asked to confirm before it executes.
