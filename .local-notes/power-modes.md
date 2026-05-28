@@ -108,8 +108,8 @@ Tweak this table; the switch script reads a profile file derived from it.
 Notes:
 - Rocky/TARS default = the always-on CPU nano in BOTH modes → they need no GPU
   server ever. Only Sam (12B) and Baymax (3B) consume GPU in PRIME.
-- Exact GGUF repos TBD at implement time: Vesper-12B =
-  `mradermacher/Hexis-Vesper-12B-i1-GGUF:Q6_K` (already in `start.ps1`); llama-3B
+- Exact GGUF repos TBD at implement time: local =
+  `mudler/Qwen3.6-35B-A3B-Claude-4.7-Opus-Reasoning-Distilled-APEX-GGUF:I-Mini` (already in `start.ps1`); llama-3B
   repo = TBD; nano_imp-1B repo = TBD.
 - File format for the switch script: a flat human-editable profile file
   (JSON, or `.psd1`/INI for inline comments — decide at build). One block per

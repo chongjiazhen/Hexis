@@ -30,7 +30,7 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $LlamaServer = "C:\llama.cpp-cuda\llama-server.exe"
 
-$ChatRepo  = "mradermacher/Hexis-Vesper-12B-i1-GGUF:Q6_K"
+$ChatRepo  = "mudler/Qwen3.6-35B-A3B-Claude-4.7-Opus-Reasoning-Distilled-APEX-GGUF:I-Mini"
 $EmbedRepo = "ggml-org/embeddinggemma-300M-GGUF:Q8_0"
 # Always-on CPU nano (1B). The floor every character can fall to in ECO mode.
 # Kept resident in both modes; mode switches never touch it. See set-power-mode.ps1.
@@ -284,8 +284,14 @@ if (-not $wantChat) {
     Start-Process -FilePath $LlamaServer `
         -ArgumentList @("-hf",$ChatRepo,
                         "--host","0.0.0.0","--port","8080",
-                        "--ctx-size","8192","--n-gpu-layers","999",
-                        "--alias","hexis-vesper-12b","--jinja") `
+                        "--ctx-size","65536","--n-gpu-layers","999",
+                        "--flash-attn","true",
+                        "--cache-type-k","q4_0",
+                        "--cache-type-v","q4_0",
+                        "-b","2048","-ub","512",         
+                        "--parallel","1",
+                        "--threads","8",
+                        "--alias","qwen36-35b-a3b-iq3","--jinja") `
         -WindowStyle Hidden
 }
 
