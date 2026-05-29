@@ -414,15 +414,15 @@ async def test_environment_snapshot_invalid_timezone_falls_back_to_utc(db_pool):
             assert snap["agent_timezone"] == "UTC"
             utc_hour = await conn.fetchval("SELECT extract(hour FROM CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::INT")
             assert snap["agent_local_hour"] == utc_hour
+            # Clean up: restore to unset state so the invalid zone doesn't leak
+            # into subsequent tests (get_active_senders_context resolves the
+            # agent-default timezone and raises on 'Not/AZone', silently returning []).
+            await conn.execute("DELETE FROM config WHERE key = 'heartbeat.timezone'")
 
 
 async def test_active_senders_context_exposes_reach_out_signal(db_pool):
     async with db_pool.acquire() as conn:
         async with conn.transaction():
-            # Ensure a valid fallback timezone so AT TIME ZONE doesn't blow up for
-            # senders without a per-sender timezone config (prior test may have set
-            # heartbeat.timezone to an invalid value).
-            await conn.execute("SELECT set_config('heartbeat.timezone', '\"UTC\"'::jsonb)")
             await conn.execute(
                 """
                 INSERT INTO channel_sessions (channel_type, channel_id, sender_id, last_active)
@@ -445,8 +445,6 @@ async def test_active_senders_context_exposes_reach_out_signal(db_pool):
 async def test_active_senders_count_reconciles_to_zero_after_reply(db_pool):
     async with db_pool.acquire() as conn:
         async with conn.transaction():
-            # Ensure a valid fallback timezone (same reason as previous test).
-            await conn.execute("SELECT set_config('heartbeat.timezone', '\"UTC\"'::jsonb)")
             await conn.execute(
                 """
                 INSERT INTO channel_sessions (channel_type, channel_id, sender_id, last_active)
