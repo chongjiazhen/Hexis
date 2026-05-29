@@ -8,6 +8,13 @@ DECLARE
     last_user TIMESTAMPTZ;
     agent_tz  TEXT := COALESCE(get_config_text('heartbeat.timezone'), 'UTC');
 BEGIN
+    -- guard: invalid heartbeat.timezone config must not crash context-gathering
+    BEGIN
+        PERFORM CURRENT_TIMESTAMP AT TIME ZONE agent_tz;
+    EXCEPTION WHEN OTHERS THEN
+        agent_tz := 'UTC';
+    END;
+
     SELECT last_user_contact INTO last_user FROM heartbeat_state WHERE id = 1;
 
     RETURN jsonb_build_object(

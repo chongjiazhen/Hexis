@@ -402,3 +402,15 @@ async def test_environment_snapshot_exposes_agent_local_time(db_pool):
             assert "agent_local_hour" in snap
             utc_hour = await conn.fetchval("SELECT extract(hour FROM CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::INT")
             assert snap["agent_local_hour"] == (utc_hour + 8) % 24
+
+
+async def test_environment_snapshot_invalid_timezone_falls_back_to_utc(db_pool):
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("SELECT set_config('heartbeat.timezone', '\"Not/AZone\"'::jsonb)")
+            # Must NOT raise even though the configured zone is invalid.
+            raw = await conn.fetchval("SELECT get_environment_snapshot()")
+            snap = raw if isinstance(raw, dict) else json.loads(raw)
+            assert snap["agent_timezone"] == "UTC"
+            utc_hour = await conn.fetchval("SELECT extract(hour FROM CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::INT")
+            assert snap["agent_local_hour"] == utc_hour
