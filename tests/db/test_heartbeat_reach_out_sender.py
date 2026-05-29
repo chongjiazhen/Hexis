@@ -597,3 +597,51 @@ async def test_reach_out_user_cooldown_zero_disabled(db_pool):
                 )
                 res = raw if isinstance(raw, dict) else json.loads(raw)
                 assert res["result"].get("queued") is True, f"iteration {i}: {res}"
+
+
+async def test_record_reach_out_sender_initializes_log_entry(db_pool):
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("SELECT record_reach_out_sender('s1')")
+            raw = await conn.fetchval(
+                "SELECT value->'reach_out_sender_log'->'s1' FROM state WHERE key='heartbeat_state'"
+            )
+            entry = raw if isinstance(raw, dict) else json.loads(raw)
+            assert entry["unanswered_count"] == 1
+            assert entry["last_at"] is not None
+
+
+async def test_record_reach_out_sender_increments_when_unanswered(db_pool):
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("UPDATE heartbeat_state SET last_user_contact = NULL WHERE id=1")
+            await conn.execute("SELECT record_reach_out_sender('s2')")
+            await conn.execute("SELECT record_reach_out_sender('s2')")
+            raw = await conn.fetchval(
+                "SELECT value->'reach_out_sender_log'->'s2' FROM state WHERE key='heartbeat_state'"
+            )
+            entry = raw if isinstance(raw, dict) else json.loads(raw)
+            assert entry["unanswered_count"] == 2
+
+
+async def test_record_reach_out_sender_resets_after_user_reply(db_pool):
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("UPDATE heartbeat_state SET last_user_contact = NULL WHERE id=1")
+            await conn.execute("SELECT record_reach_out_sender('s3')")
+            await conn.execute("UPDATE heartbeat_state SET last_user_contact = CURRENT_TIMESTAMP WHERE id=1")
+            await conn.execute("SELECT record_reach_out_sender('s3')")
+            raw = await conn.fetchval(
+                "SELECT value->'reach_out_sender_log'->'s3' FROM state WHERE key='heartbeat_state'"
+            )
+            entry = raw if isinstance(raw, dict) else json.loads(raw)
+            assert entry["unanswered_count"] == 1, "reply since last_at must restart the streak at 1"
+
+
+async def test_can_reach_out_sender_is_removed(db_pool):
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            exists = await conn.fetchval(
+                "SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'can_reach_out_sender')"
+            )
+            assert exists is False, "can_reach_out_sender must be dropped (no longer a gate)"

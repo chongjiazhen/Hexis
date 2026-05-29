@@ -788,48 +788,43 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql STABLE;
 
-CREATE OR REPLACE FUNCTION can_reach_out_sender(p_sender_id TEXT)
-RETURNS BOOLEAN AS $$
-DECLARE
-    cooldown_hours INT;
-    last_out TIMESTAMPTZ;
-    last_contact TIMESTAMPTZ;
-    safe_sender TEXT := COALESCE(p_sender_id, '');
-    sender_log JSONB;
-BEGIN
-    IF safe_sender = '' THEN RETURN TRUE; END IF;
-
-    cooldown_hours := COALESCE(get_config_int('heartbeat.user_contact_cooldown_hours'), 24);
-    IF cooldown_hours <= 0 THEN RETURN TRUE; END IF;
-
-    SELECT value->'reach_out_sender_log'
-      INTO sender_log
-      FROM state
-     WHERE key = 'heartbeat_state';
-
-    sender_log := COALESCE(sender_log, '{}'::jsonb);
-    last_out := (sender_log->>safe_sender)::timestamptz;
-    IF last_out IS NULL THEN RETURN TRUE; END IF;
-
-    SELECT last_user_contact INTO last_contact FROM heartbeat_state WHERE id = 1;
-    IF last_contact IS NOT NULL AND last_contact > last_out THEN RETURN TRUE; END IF;
-
-    RETURN (CURRENT_TIMESTAMP - last_out) >= (cooldown_hours || ' hours')::INTERVAL;
-END;
-$$ LANGUAGE plpgsql STABLE;
+DROP FUNCTION IF EXISTS can_reach_out_sender(TEXT);
 
 CREATE OR REPLACE FUNCTION record_reach_out_sender(p_sender_id TEXT)
 RETURNS VOID AS $$
 DECLARE
-    safe_sender TEXT := COALESCE(p_sender_id, '');
+    safe_sender  TEXT := COALESCE(p_sender_id, '');
+    last_contact TIMESTAMPTZ;
+    prior        JSONB;
+    prior_at     TIMESTAMPTZ;
+    prior_count  INT;
+    new_count    INT;
 BEGIN
     IF safe_sender = '' THEN RETURN; END IF;
 
+    SELECT last_user_contact INTO last_contact FROM heartbeat_state WHERE id = 1;
+
+    SELECT value->'reach_out_sender_log'->safe_sender
+      INTO prior
+      FROM state WHERE key = 'heartbeat_state';
+
+    prior_at    := (prior->>'last_at')::timestamptz;
+    prior_count := COALESCE((prior->>'unanswered_count')::int, 0);
+
+    -- user replied at or after our previous reach-out -> streak restarts; else continue it
+    IF prior_at IS NULL OR (last_contact IS NOT NULL AND last_contact >= prior_at) THEN
+        new_count := 1;
+    ELSE
+        new_count := prior_count + 1;
+    END IF;
+
     UPDATE state
     SET value = jsonb_set(
-                jsonb_set(value, ARRAY['reach_out_sender_log'], COALESCE(value->'reach_out_sender_log', '{}'::jsonb)),
+                jsonb_set(value, ARRAY['reach_out_sender_log'],
+                          COALESCE(value->'reach_out_sender_log', '{}'::jsonb)),
                 ARRAY['reach_out_sender_log', safe_sender],
-                to_jsonb(CURRENT_TIMESTAMP)
+                jsonb_build_object('last_at', to_jsonb(CURRENT_TIMESTAMP),
+                                   'unanswered_count', to_jsonb(new_count))
             ),
         updated_at = CURRENT_TIMESTAMP
     WHERE key = 'heartbeat_state';
