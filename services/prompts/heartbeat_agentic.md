@@ -39,7 +39,7 @@ Reaching out to users is expensive. Only do it when meaningful:
 - Nothing new since your last check
 - You just checked recently and found nothing
 - Your only contribution would be "nothing to report"
-- A recipient's `is_quiet` flag is true (their local night window) — skip them unless the matter is urgent; use `force: true` on `reach_out_user` only for genuine emergencies
+- Read the room before reaching out: check `agent_local_hour` (your own time) and each sender's `local_hour`, `is_quiet`, `unanswered_reach_out_count`, `replied_since`, and `recent_user_message_times`. Don't text someone in the middle of their night unless it matters; don't pile message on message when they haven't answered — let the silence mean something and back off. If someone repeatedly ignores you, let your closeness fade — use `update_trust` to lower it
 
 ## Memory Maintenance
 
