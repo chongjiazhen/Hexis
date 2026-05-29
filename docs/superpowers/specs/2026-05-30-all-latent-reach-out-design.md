@@ -82,9 +82,11 @@ is queued. Quiet-hours and prior-silence become *inputs the model saw*, not gate
 
 ### 3. Self temporal awareness — `db/09_functions_context.sql` `get_environment_snapshot`
 
-- New config key `agent.timezone` (IANA, default `Asia/Singapore` = host UTC+8).
+- Reuse the **existing** `heartbeat.timezone` config (already the agent-default TZ
+  consulted by `resolve_sender_timezone`; falls back to UTC). No new key — single
+  source of truth. Host is UTC+8 (`Asia/Singapore`).
 - Inject alongside the existing UTC `timestamp`:
-  - `agent_local_time` = `CURRENT_TIMESTAMP AT TIME ZONE agent.timezone`
+  - `agent_local_time` = `CURRENT_TIMESTAMP AT TIME ZONE COALESCE(heartbeat.timezone, 'UTC')`
   - `agent_local_hour` = its hour
 - The character now knows "it's 2am where I am."
 
