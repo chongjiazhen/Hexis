@@ -504,3 +504,67 @@ async def test_brake_suppresses_when_streak_exceeds_threshold(db_pool):
             res = raw if isinstance(raw, dict) else json.loads(raw)
             assert res["result"].get("queued") is False
             assert res["result"].get("reason") == "reach_out_max_unanswered"
+
+
+async def test_brake_allows_when_streak_just_below_threshold(db_pool):
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("SELECT set_config('heartbeat.reach_out_max_unanswered', '2'::jsonb)")
+            await conn.execute("UPDATE heartbeat_state SET current_energy = 20, is_paused = FALSE WHERE id=1")
+            await conn.execute("UPDATE heartbeat_state SET last_user_contact = CURRENT_TIMESTAMP - INTERVAL '2 days' WHERE id=1")
+            await conn.execute("SELECT record_reach_out_sender('b3')")  # streak now 1 (< 2)
+            raw = await conn.fetchval(
+                """
+                SELECT execute_heartbeat_action(
+                    gen_random_uuid(), 'reach_out_user',
+                    jsonb_build_object('sender_id','b3','message','hi again','intent','check_in')
+                )
+                """
+            )
+            res = raw if isinstance(raw, dict) else json.loads(raw)
+            assert res["result"].get("queued") is True, "streak below threshold must NOT be braked (>= boundary)"
+
+
+async def test_brake_suppression_refunds_energy(db_pool):
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("SELECT set_config('heartbeat.reach_out_max_unanswered', '2'::jsonb)")
+            await conn.execute("UPDATE heartbeat_state SET current_energy = 20, is_paused = FALSE WHERE id=1")
+            await conn.execute("UPDATE heartbeat_state SET last_user_contact = CURRENT_TIMESTAMP - INTERVAL '2 days' WHERE id=1")
+            await conn.execute("SELECT record_reach_out_sender('b4')")
+            await conn.execute("SELECT record_reach_out_sender('b4')")  # streak now 2 (>= N)
+            energy_before = await conn.fetchval("SELECT current_energy FROM heartbeat_state WHERE id=1")
+            raw = await conn.fetchval(
+                """
+                SELECT execute_heartbeat_action(
+                    gen_random_uuid(), 'reach_out_user',
+                    jsonb_build_object('sender_id','b4','message','hi again','intent','check_in')
+                )
+                """
+            )
+            res = raw if isinstance(raw, dict) else json.loads(raw)
+            assert res["result"].get("queued") is False
+            energy_after = await conn.fetchval("SELECT current_energy FROM heartbeat_state WHERE id=1")
+            assert energy_after == energy_before, "suppressed reach-out must refund action_cost (cost-neutral)"
+
+
+async def test_brake_reconcile_clears_streak_allows_send(db_pool):
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("SELECT set_config('heartbeat.reach_out_max_unanswered', '2'::jsonb)")
+            await conn.execute("UPDATE heartbeat_state SET current_energy = 20, is_paused = FALSE WHERE id=1")
+            await conn.execute("UPDATE heartbeat_state SET last_user_contact = CURRENT_TIMESTAMP - INTERVAL '2 days' WHERE id=1")
+            await conn.execute("SELECT record_reach_out_sender('b5')")
+            await conn.execute("SELECT record_reach_out_sender('b5')")  # streak now 2 (>= N)
+            # user replies after the reach-out — reconcile must clear the streak
+            await conn.execute("UPDATE heartbeat_state SET last_user_contact = CURRENT_TIMESTAMP WHERE id=1")
+            raw = await conn.fetchval(
+                """
+                SELECT execute_heartbeat_action(
+                    gen_random_uuid(), 'reach_out_user',
+                    jsonb_build_object('sender_id','b5','message','hi again','intent','check_in')
+                )
+                """
+            )
+            res = raw if isinstance(raw, dict) else json.loads(raw)
+            assert res["result"].get("queued") is True, "a reply since last_at must reconcile the streak below threshold (brake not permanent)"
