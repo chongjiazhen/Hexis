@@ -390,3 +390,15 @@ async def test_reach_out_not_blocked_during_quiet_hours(db_pool):
             )
             res = raw if isinstance(raw, dict) else json.loads(raw)
             assert res["result"].get("queued") is True, "quiet hours must NOT veto; it is context only"
+
+
+async def test_environment_snapshot_exposes_agent_local_time(db_pool):
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("SELECT set_config('heartbeat.timezone', '\"Asia/Singapore\"'::jsonb)")
+            raw = await conn.fetchval("SELECT get_environment_snapshot()")
+            snap = raw if isinstance(raw, dict) else json.loads(raw)
+            assert "agent_local_time" in snap
+            assert "agent_local_hour" in snap
+            utc_hour = await conn.fetchval("SELECT extract(hour FROM CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::INT")
+            assert snap["agent_local_hour"] == (utc_hour + 8) % 24

@@ -6,11 +6,15 @@ CREATE OR REPLACE FUNCTION get_environment_snapshot()
 RETURNS JSONB AS $$
 DECLARE
     last_user TIMESTAMPTZ;
+    agent_tz  TEXT := COALESCE(get_config_text('heartbeat.timezone'), 'UTC');
 BEGIN
     SELECT last_user_contact INTO last_user FROM heartbeat_state WHERE id = 1;
 
     RETURN jsonb_build_object(
         'timestamp', CURRENT_TIMESTAMP,
+        'agent_timezone', agent_tz,
+        'agent_local_time', (CURRENT_TIMESTAMP AT TIME ZONE agent_tz),
+        'agent_local_hour', extract(hour FROM (CURRENT_TIMESTAMP AT TIME ZONE agent_tz))::INT,
         'time_since_user_hours', CASE
             WHEN last_user IS NULL THEN NULL
             ELSE EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - last_user)) / 3600
