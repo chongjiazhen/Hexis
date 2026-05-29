@@ -300,304 +300,6 @@ async def test_active_senders_context_includes_timezone_localhour_isquiet(db_poo
             assert isinstance(row["is_quiet"], bool)
 
 
-async def test_reach_out_user_skipped_when_recipient_quiet(db_pool):
-    async with db_pool.acquire() as conn:
-        async with conn.transaction():
-            await conn.execute("UPDATE heartbeat_state SET current_energy = 20, is_paused = FALSE WHERE id = 1")
-            cur_utc_hour = await conn.fetchval(
-                "SELECT extract(hour FROM CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::INT"
-            )
-            offset = (23 - cur_utc_hour) % 24
-            tz_name = f"Etc/GMT{('+' if offset == 0 else '-')}{offset if offset else 0}"
-            await conn.execute("SELECT set_config('channel.sender.sleepy.timezone', $1::jsonb)", f'"{tz_name}"')
-            await conn.execute("SELECT set_config('heartbeat.night_start_hour', '22'::jsonb)")
-            await conn.execute("SELECT set_config('heartbeat.night_end_hour', '6'::jsonb)")
-
-            raw = await conn.fetchval(
-                """
-                SELECT execute_heartbeat_action(
-                    gen_random_uuid(),
-                    'reach_out_user',
-                    jsonb_build_object(
-                        'sender_id', 'sleepy',
-                        'message',   'hi at midnight',
-                        'intent',    'check_in'
-                    )
-                )
-                """,
-            )
-            res = raw if isinstance(raw, dict) else json.loads(raw)
-            inner = res.get("result", {})
-            assert inner.get("queued") is False
-            assert inner.get("reason") == "recipient_quiet_hours"
-            assert inner.get("sender_id") == "sleepy"
-            outbox = res.get("outbox_messages") or []
-            assert len(outbox) == 0
-
-
-async def test_reach_out_user_delivered_with_force_override(db_pool):
-    async with db_pool.acquire() as conn:
-        async with conn.transaction():
-            await conn.execute("UPDATE heartbeat_state SET current_energy = 20, is_paused = FALSE WHERE id = 1")
-            cur_utc_hour = await conn.fetchval(
-                "SELECT extract(hour FROM CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::INT"
-            )
-            offset = (23 - cur_utc_hour) % 24
-            tz_name = f"Etc/GMT{('+' if offset == 0 else '-')}{offset if offset else 0}"
-            await conn.execute("SELECT set_config('channel.sender.urgent.timezone', $1::jsonb)", f'"{tz_name}"')
-            await conn.execute("SELECT set_config('heartbeat.night_start_hour', '22'::jsonb)")
-            await conn.execute("SELECT set_config('heartbeat.night_end_hour', '6'::jsonb)")
-
-            raw = await conn.fetchval(
-                """
-                SELECT execute_heartbeat_action(
-                    gen_random_uuid(),
-                    'reach_out_user',
-                    jsonb_build_object(
-                        'sender_id', 'urgent',
-                        'message',   'emergency',
-                        'intent',    'crisis',
-                        'force',     true
-                    )
-                )
-                """,
-            )
-            res = raw if isinstance(raw, dict) else json.loads(raw)
-            inner = res.get("result", {})
-            assert inner.get("queued") is True
-            assert inner["outbox_message"]["payload"]["sender_id"] == "urgent"
-
-
-async def test_reach_out_user_energy_refunded_on_quiet_skip(db_pool):
-    async with db_pool.acquire() as conn:
-        async with conn.transaction():
-            await conn.execute("UPDATE heartbeat_state SET current_energy = 20, is_paused = FALSE WHERE id = 1")
-            cur_utc_hour = await conn.fetchval(
-                "SELECT extract(hour FROM CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::INT"
-            )
-            offset = (23 - cur_utc_hour) % 24
-            tz_name = f"Etc/GMT{('+' if offset == 0 else '-')}{offset if offset else 0}"
-            await conn.execute("SELECT set_config('channel.sender.refund.timezone', $1::jsonb)", f'"{tz_name}"')
-            await conn.execute("SELECT set_config('heartbeat.night_start_hour', '22'::jsonb)")
-            await conn.execute("SELECT set_config('heartbeat.night_end_hour', '6'::jsonb)")
-
-            energy_before = await conn.fetchval("SELECT current_energy FROM heartbeat_state WHERE id = 1")
-            await conn.fetchval(
-                """
-                SELECT execute_heartbeat_action(
-                    gen_random_uuid(),
-                    'reach_out_user',
-                    jsonb_build_object('sender_id', 'refund', 'message', 'x', 'intent', 'x')
-                )
-                """,
-            )
-            energy_after = await conn.fetchval("SELECT current_energy FROM heartbeat_state WHERE id = 1")
-            assert energy_after == energy_before, (
-                f"quiet-skip must refund 5 energy; before={energy_before} after={energy_after}"
-            )
-
-
-async def test_reach_out_user_blocked_by_sender_cooldown(db_pool):
-    """A second reach_out_user to the same sender within the cooldown window
-    must be rejected with reason=sender_cooldown and the message not queued."""
-    async with db_pool.acquire() as conn:
-        async with conn.transaction():
-            await conn.execute(
-                "UPDATE heartbeat_state SET current_energy = 20, is_paused = FALSE, "
-                "reach_out_sender_log = '{}'::jsonb WHERE id = 1"
-            )
-            await conn.execute("SELECT set_config('heartbeat.user_contact_cooldown_hours', '24'::jsonb)")
-
-            # First reach-out succeeds
-            raw1 = await conn.fetchval(
-                """
-                SELECT execute_heartbeat_action(
-                    gen_random_uuid(),
-                    'reach_out_user',
-                    jsonb_build_object('sender_id', 'cooldowntester', 'message', 'first', 'intent', 'check_in')
-                )
-                """,
-            )
-            res1 = raw1 if isinstance(raw1, dict) else json.loads(raw1)
-            assert res1["result"].get("queued") is True, f"first reach-out should queue: {res1}"
-
-            # Second reach-out to same sender blocked by cooldown
-            raw2 = await conn.fetchval(
-                """
-                SELECT execute_heartbeat_action(
-                    gen_random_uuid(),
-                    'reach_out_user',
-                    jsonb_build_object('sender_id', 'cooldowntester', 'message', 'second', 'intent', 'check_in')
-                )
-                """,
-            )
-            res2 = raw2 if isinstance(raw2, dict) else json.loads(raw2)
-            assert res2["result"].get("queued") is False
-            assert res2["result"].get("reason") == "sender_cooldown"
-            assert res2["result"].get("sender_id") == "cooldowntester"
-            outbox2 = res2.get("outbox_messages") or []
-            assert len(outbox2) == 0
-
-
-async def test_reach_out_user_cooldown_reset_by_user_contact(db_pool):
-    """If last_user_contact is newer than the sender's last reach-out,
-    the cooldown is reset and the reach-out succeeds."""
-    async with db_pool.acquire() as conn:
-        async with conn.transaction():
-            await conn.execute(
-                "UPDATE heartbeat_state SET current_energy = 20, is_paused = FALSE, "
-                "reach_out_sender_log = '{}'::jsonb WHERE id = 1"
-            )
-            await conn.execute("SELECT set_config('heartbeat.user_contact_cooldown_hours', '24'::jsonb)")
-
-            # First reach-out succeeds
-            raw1 = await conn.fetchval(
-                """SELECT execute_heartbeat_action(
-                    gen_random_uuid(), 'reach_out_user',
-                    jsonb_build_object('sender_id', 'resettester', 'message', 'first', 'intent', 'x')
-                )""",
-            )
-            res1 = raw1 if isinstance(raw1, dict) else json.loads(raw1)
-            assert res1["result"].get("queued") is True
-
-            # Simulate user contact after the reach-out
-            await conn.execute(
-                "UPDATE heartbeat_state SET last_user_contact = CURRENT_TIMESTAMP WHERE id = 1"
-            )
-
-            # Second reach-out succeeds because user contacted since last reach-out
-            raw2 = await conn.fetchval(
-                """SELECT execute_heartbeat_action(
-                    gen_random_uuid(), 'reach_out_user',
-                    jsonb_build_object('sender_id', 'resettester', 'message', 'second', 'intent', 'x')
-                )""",
-            )
-            res2 = raw2 if isinstance(raw2, dict) else json.loads(raw2)
-            assert res2["result"].get("queued") is True, (
-                f"reach-out after user contact should succeed: {res2}"
-            )
-
-
-async def test_reach_out_user_cooldown_energy_refunded(db_pool):
-    """When sender_cooldown blocks a reach-out, energy must be refunded."""
-    async with db_pool.acquire() as conn:
-        async with conn.transaction():
-            await conn.execute(
-                "UPDATE heartbeat_state SET current_energy = 20, is_paused = FALSE, "
-                "reach_out_sender_log = '{}'::jsonb WHERE id = 1"
-            )
-            await conn.execute("SELECT set_config('heartbeat.user_contact_cooldown_hours', '24'::jsonb)")
-
-            # First reach-out consumes 5 energy
-            await conn.fetchval(
-                """SELECT execute_heartbeat_action(
-                    gen_random_uuid(), 'reach_out_user',
-                    jsonb_build_object('sender_id', 'cooldownrefund', 'message', 'x', 'intent', 'x')
-                )""",
-            )
-            energy_after_first = await conn.fetchval("SELECT current_energy FROM heartbeat_state WHERE id = 1")
-            assert energy_after_first == 15
-
-            # Blocked second reach-out must refund
-            await conn.fetchval(
-                """SELECT execute_heartbeat_action(
-                    gen_random_uuid(), 'reach_out_user',
-                    jsonb_build_object('sender_id', 'cooldownrefund', 'message', 'y', 'intent', 'x')
-                )""",
-            )
-            energy_after_second = await conn.fetchval("SELECT current_energy FROM heartbeat_state WHERE id = 1")
-            assert energy_after_second == 15, (
-                f"cooldown-skip must refund 5 energy; after_first={energy_after_first} "
-                f"after_second={energy_after_second}"
-            )
-
-
-async def test_reach_out_user_cooldown_per_sender_independent(db_pool):
-    """Cooldown is per-sender: reaching out to sender A does not block sender B."""
-    async with db_pool.acquire() as conn:
-        async with conn.transaction():
-            await conn.execute(
-                "UPDATE heartbeat_state SET current_energy = 20, is_paused = FALSE, "
-                "reach_out_sender_log = '{}'::jsonb WHERE id = 1"
-            )
-            await conn.execute("SELECT set_config('heartbeat.user_contact_cooldown_hours', '24'::jsonb)")
-
-            # Reach out to sender_a
-            raw_a = await conn.fetchval(
-                """SELECT execute_heartbeat_action(
-                    gen_random_uuid(), 'reach_out_user',
-                    jsonb_build_object('sender_id', 'sender_a', 'message', 'hi', 'intent', 'x')
-                )""",
-            )
-            res_a = raw_a if isinstance(raw_a, dict) else json.loads(raw_a)
-            assert res_a["result"].get("queued") is True
-
-            # Reach out to sender_b — should NOT be blocked
-            raw_b = await conn.fetchval(
-                """SELECT execute_heartbeat_action(
-                    gen_random_uuid(), 'reach_out_user',
-                    jsonb_build_object('sender_id', 'sender_b', 'message', 'hey', 'intent', 'x')
-                )""",
-            )
-            res_b = raw_b if isinstance(raw_b, dict) else json.loads(raw_b)
-            assert res_b["result"].get("queued") is True, (
-                f"different sender must not be blocked by other sender's cooldown: {res_b}"
-            )
-
-
-async def test_reach_out_user_force_bypasses_cooldown(db_pool):
-    """force=true bypasses the sender cooldown (just like it bypasses quiet hours)."""
-    async with db_pool.acquire() as conn:
-        async with conn.transaction():
-            await conn.execute(
-                "UPDATE heartbeat_state SET current_energy = 20, is_paused = FALSE, "
-                "reach_out_sender_log = '{}'::jsonb WHERE id = 1"
-            )
-            await conn.execute("SELECT set_config('heartbeat.user_contact_cooldown_hours', '24'::jsonb)")
-
-            # First reach-out
-            raw1 = await conn.fetchval(
-                """SELECT execute_heartbeat_action(
-                    gen_random_uuid(), 'reach_out_user',
-                    jsonb_build_object('sender_id', 'forcetestersender', 'message', 'first', 'intent', 'x')
-                )""",
-            )
-            res1 = raw1 if isinstance(raw1, dict) else json.loads(raw1)
-            assert res1["result"].get("queued") is True
-
-            # Second with force=true bypasses cooldown
-            raw2 = await conn.fetchval(
-                """SELECT execute_heartbeat_action(
-                    gen_random_uuid(), 'reach_out_user',
-                    jsonb_build_object('sender_id', 'forcetestersender', 'message', 'forced', 'intent', 'x', 'force', true)
-                )""",
-            )
-            res2 = raw2 if isinstance(raw2, dict) else json.loads(raw2)
-            assert res2["result"].get("queued") is True, (
-                f"force=true must bypass cooldown: {res2}"
-            )
-
-
-async def test_reach_out_user_cooldown_zero_disabled(db_pool):
-    """Setting cooldown to 0 disables the gate entirely."""
-    async with db_pool.acquire() as conn:
-        async with conn.transaction():
-            await conn.execute(
-                "UPDATE heartbeat_state SET current_energy = 20, is_paused = FALSE, "
-                "reach_out_sender_log = '{}'::jsonb WHERE id = 1"
-            )
-            await conn.execute("SELECT set_config('heartbeat.user_contact_cooldown_hours', '0'::jsonb)")
-
-            for i in range(3):
-                raw = await conn.fetchval(
-                    f"""SELECT execute_heartbeat_action(
-                        gen_random_uuid(), 'reach_out_user',
-                        jsonb_build_object('sender_id', 'nocd{i}', 'message', 'x', 'intent', 'x')
-                    )""",
-                )
-                res = raw if isinstance(raw, dict) else json.loads(raw)
-                assert res["result"].get("queued") is True, f"iteration {i}: {res}"
-
 
 async def test_record_reach_out_sender_initializes_log_entry(db_pool):
     async with db_pool.acquire() as conn:
@@ -645,3 +347,46 @@ async def test_can_reach_out_sender_is_removed(db_pool):
                 "SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'can_reach_out_sender')"
             )
             assert exists is False, "can_reach_out_sender must be dropped (no longer a gate)"
+
+
+async def test_reach_out_not_blocked_by_prior_unanswered(db_pool):
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("UPDATE heartbeat_state SET current_energy = 20, is_paused = FALSE WHERE id=1")
+            await conn.execute("UPDATE heartbeat_state SET last_user_contact = NULL WHERE id=1")
+            await conn.execute("SELECT record_reach_out_sender('p1')")  # already 1 unanswered
+            raw = await conn.fetchval(
+                """
+                SELECT execute_heartbeat_action(
+                    gen_random_uuid(), 'reach_out_user',
+                    jsonb_build_object('sender_id','p1','message','still thinking of you','intent','check_in')
+                )
+                """
+            )
+            res = raw if isinstance(raw, dict) else json.loads(raw)
+            assert res["result"].get("queued") is True, "prior unanswered reach-out must NOT veto a new one"
+
+
+async def test_reach_out_not_blocked_during_quiet_hours(db_pool):
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("UPDATE heartbeat_state SET current_energy = 20, is_paused = FALSE WHERE id=1")
+            cur_utc_hour = await conn.fetchval(
+                "SELECT extract(hour FROM CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::INT"
+            )
+            offset = (23 - cur_utc_hour) % 24
+            tz_name = f"Etc/GMT{('+' if offset == 0 else '-')}{offset if offset else 0}"
+            await conn.execute("SELECT set_config('channel.sender.q9.timezone', $1::jsonb)", f'"{tz_name}"')
+            await conn.execute("SELECT set_config('channel.sender.q9.quiet_start_hour', '22'::jsonb)")
+            await conn.execute("SELECT set_config('channel.sender.q9.quiet_end_hour', '6'::jsonb)")
+            assert await conn.fetchval("SELECT is_sender_quiet('q9')") is True
+            raw = await conn.fetchval(
+                """
+                SELECT execute_heartbeat_action(
+                    gen_random_uuid(), 'reach_out_user',
+                    jsonb_build_object('sender_id','q9','message','late night thought','intent','check_in')
+                )
+                """
+            )
+            res = raw if isinstance(raw, dict) else json.loads(raw)
+            assert res["result"].get("queued") is True, "quiet hours must NOT veto; it is context only"
