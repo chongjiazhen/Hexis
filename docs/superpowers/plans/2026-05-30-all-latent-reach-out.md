@@ -18,9 +18,9 @@
 
 - The `hexis_brain` Postgres container must be up with a test database whose schema is loaded from `db/*.sql`. Full fleet is NOT required — a single brain DB suffices (DB-function tests use transaction rollback). The fresh `hexis_memory` DB created after the 2026-05-29 reinit works as a test target, or spin a throwaway per `.local-notes/guidelines/schema-migration.md`.
 - Tests run with: `pytest tests/db/test_heartbeat_reach_out_sender.py -q` (Docker services up).
-- After each SQL function change, **reload the changed file into the test DB** before running tests, e.g.:
-  `docker exec -i hexis_brain psql -U hexis_user -d <testdb> -f - < db/07_functions_heartbeat.sql`
-  (the test DB must have the function definitions current; `CREATE OR REPLACE` is idempotent).
+- **No manual SQL reload needed.** `tests/conftest.py::temp_test_db` (module-scoped, autouse) creates a fresh `tmp_test_<uuid>` DB per module and loads **all working-tree `db/*.sql`** into it before tests run. Editing a `db/*.sql` file and re-running pytest is sufficient — the schema is rebuilt from the working tree. (Ignore any "reload via `psql -f`" phrasing in older task steps below; just edit the file and run pytest.)
+- **Base branch:** `feat/all-latent-reach-out` is now rebased **onto `3c2ffea`** (lineage `dd5108d ← 3c2ffea ← spec ← plan`), so all `3c2ffea` cooldown plumbing (`can_reach_out_sender`, `record_reach_out_sender`, `reach_out_sender_log`, the `db/90` view column, the `db/00` seed, and the `heartbeat_state_update_trigger` non-NULL-merge fix) is **already present**. Execution *transforms* this (gate → telemetry), it does not rebuild it.
+- **Task 0 is OBSOLETE** — the trigger fix it ported is already in `3c2ffea`. Skip it; start at Task 1.
 
 ## File Structure
 
