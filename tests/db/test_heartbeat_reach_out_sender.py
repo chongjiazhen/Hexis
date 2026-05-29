@@ -414,3 +414,52 @@ async def test_environment_snapshot_invalid_timezone_falls_back_to_utc(db_pool):
             assert snap["agent_timezone"] == "UTC"
             utc_hour = await conn.fetchval("SELECT extract(hour FROM CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::INT")
             assert snap["agent_local_hour"] == utc_hour
+
+
+async def test_active_senders_context_exposes_reach_out_signal(db_pool):
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            # Ensure a valid fallback timezone so AT TIME ZONE doesn't blow up for
+            # senders without a per-sender timezone config (prior test may have set
+            # heartbeat.timezone to an invalid value).
+            await conn.execute("SELECT set_config('heartbeat.timezone', '\"UTC\"'::jsonb)")
+            await conn.execute(
+                """
+                INSERT INTO channel_sessions (channel_type, channel_id, sender_id, last_active)
+                VALUES ('telegram', 'sig1', 'sig1', CURRENT_TIMESTAMP - INTERVAL '10 minutes')
+                ON CONFLICT (channel_type, channel_id, sender_id) DO UPDATE SET last_active = EXCLUDED.last_active
+                """
+            )
+            await conn.execute("UPDATE heartbeat_state SET last_user_contact = NULL WHERE id=1")
+            await conn.execute("SELECT record_reach_out_sender('sig1')")  # 1 unanswered
+
+            raw = await conn.fetchval("SELECT get_active_senders_context(50, 7)")
+            senders = raw if isinstance(raw, list) else json.loads(raw)
+            row = next(s for s in senders if s["sender_id"] == "sig1")
+            assert row["unanswered_reach_out_count"] == 1
+            assert row["replied_since"] is False
+            assert row["hours_since_my_last_reach_out"] is not None
+            assert "recent_user_message_times" in row
+
+
+async def test_active_senders_count_reconciles_to_zero_after_reply(db_pool):
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            # Ensure a valid fallback timezone (same reason as previous test).
+            await conn.execute("SELECT set_config('heartbeat.timezone', '\"UTC\"'::jsonb)")
+            await conn.execute(
+                """
+                INSERT INTO channel_sessions (channel_type, channel_id, sender_id, last_active)
+                VALUES ('telegram', 'sig2', 'sig2', CURRENT_TIMESTAMP - INTERVAL '5 minutes')
+                ON CONFLICT (channel_type, channel_id, sender_id) DO UPDATE SET last_active = EXCLUDED.last_active
+                """
+            )
+            await conn.execute("UPDATE heartbeat_state SET last_user_contact = NULL WHERE id=1")
+            await conn.execute("SELECT record_reach_out_sender('sig2')")
+            # user replies AFTER the reach-out (persisted count still 1, but display must reconcile)
+            await conn.execute("UPDATE heartbeat_state SET last_user_contact = CURRENT_TIMESTAMP WHERE id=1")
+            raw = await conn.fetchval("SELECT get_active_senders_context(50, 7)")
+            senders = raw if isinstance(raw, list) else json.loads(raw)
+            row = next(s for s in senders if s["sender_id"] == "sig2")
+            assert row["replied_since"] is True
+            assert row["unanswered_reach_out_count"] == 0, "displayed count must reconcile to 0 after a reply"

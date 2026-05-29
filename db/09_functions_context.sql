@@ -350,7 +350,37 @@ BEGIN
                 ) AS memory_count,
                 resolve_sender_timezone(cs.sender_id) AS timezone,
                 extract(hour FROM (CURRENT_TIMESTAMP AT TIME ZONE resolve_sender_timezone(cs.sender_id)))::INT AS local_hour,
-                is_sender_quiet(cs.sender_id) AS is_quiet
+                is_sender_quiet(cs.sender_id) AS is_quiet,
+                -- per-sender reach-out telemetry (from heartbeat_state.reach_out_sender_log)
+                (
+                    SELECT EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP -
+                        (s.value->'reach_out_sender_log'->cs.sender_id->>'last_at')::timestamptz)) / 3600
+                    FROM state s WHERE s.key = 'heartbeat_state'
+                ) AS hours_since_my_last_reach_out,
+                (
+                    SELECT (hs.last_user_contact IS NOT NULL
+                        AND hs.last_user_contact >= (s.value->'reach_out_sender_log'->cs.sender_id->>'last_at')::timestamptz)
+                    FROM state s, heartbeat_state hs
+                    WHERE s.key = 'heartbeat_state' AND hs.id = 1
+                ) AS replied_since,
+                (
+                    SELECT CASE
+                        WHEN (hs.last_user_contact IS NOT NULL
+                              AND hs.last_user_contact >= (s.value->'reach_out_sender_log'->cs.sender_id->>'last_at')::timestamptz)
+                        THEN 0
+                        ELSE COALESCE((s.value->'reach_out_sender_log'->cs.sender_id->>'unanswered_count')::int, 0)
+                    END
+                    FROM state s, heartbeat_state hs
+                    WHERE s.key = 'heartbeat_state' AND hs.id = 1
+                ) AS unanswered_reach_out_count,
+                (
+                    SELECT COALESCE(jsonb_agg(t2.created_at ORDER BY t2.created_at DESC), '[]'::jsonb)
+                    FROM (
+                        SELECT m.created_at FROM memories m
+                        WHERE m.sender_id = cs.sender_id AND m.status = 'active'
+                        ORDER BY m.created_at DESC LIMIT 5
+                    ) t2
+                ) AS recent_user_message_times
             FROM channel_sessions cs
             WHERE cs.sender_id IS NOT NULL
               AND cs.last_active > CURRENT_TIMESTAMP - (win || ' days')::interval
