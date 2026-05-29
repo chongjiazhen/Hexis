@@ -1208,20 +1208,48 @@ BEGIN
         WHEN 'reach_out_user' THEN
             DECLARE
                 target_sender TEXT := NULLIF(p_params->>'sender_id', '');
+                max_unanswered INT := COALESCE(get_config_int('heartbeat.reach_out_max_unanswered'), 0);
+                cur_streak INT := 0;
+                last_contact TIMESTAMPTZ;
+                last_at TIMESTAMPTZ;
             BEGIN
-                queued_call := build_outbox_message(
-                    'user',
-                    jsonb_build_object(
-                        'message',     p_params->>'message',
-                        'intent',      p_params->>'intent',
-                        'sender_id',   target_sender,
-                        'heartbeat_id', p_heartbeat_id
-                    )
-                );
-                outbox_messages := outbox_messages || jsonb_build_array(queued_call);
-                result := jsonb_build_object('queued', true, 'outbox_message', queued_call);
-                PERFORM satisfy_drive('connection', 0.3);
-                PERFORM record_reach_out_sender(target_sender);
+                IF target_sender IS NOT NULL AND max_unanswered > 0 THEN
+                    SELECT (value->'reach_out_sender_log'->target_sender->>'last_at')::timestamptz,
+                           COALESCE((value->'reach_out_sender_log'->target_sender->>'unanswered_count')::int, 0)
+                      INTO last_at, cur_streak
+                      FROM state WHERE key = 'heartbeat_state';
+                    SELECT last_user_contact INTO last_contact FROM heartbeat_state WHERE id = 1;
+                    -- reconcile: a reply since last_at clears the streak (>= for frozen-clock parity)
+                    IF last_at IS NOT NULL AND last_contact IS NOT NULL AND last_contact >= last_at THEN
+                        cur_streak := 0;
+                    END IF;
+                END IF;
+
+                IF max_unanswered > 0 AND cur_streak >= max_unanswered THEN
+                    RAISE NOTICE 'reach_out_user suppressed by brake: sender=% streak=% max=%',
+                        target_sender, cur_streak, max_unanswered;
+                    result := jsonb_build_object(
+                        'queued', false,
+                        'reason', 'reach_out_max_unanswered',
+                        'sender_id', target_sender,
+                        'unanswered_count', cur_streak
+                    );
+                    PERFORM update_energy(action_cost);   -- refund: nothing was sent
+                ELSE
+                    queued_call := build_outbox_message(
+                        'user',
+                        jsonb_build_object(
+                            'message',     p_params->>'message',
+                            'intent',      p_params->>'intent',
+                            'sender_id',   target_sender,
+                            'heartbeat_id', p_heartbeat_id
+                        )
+                    );
+                    outbox_messages := outbox_messages || jsonb_build_array(queued_call);
+                    result := jsonb_build_object('queued', true, 'outbox_message', queued_call);
+                    PERFORM satisfy_drive('connection', 0.3);
+                    PERFORM record_reach_out_sender(target_sender);
+                END IF;
             END;
 
         WHEN 'reach_out_public' THEN

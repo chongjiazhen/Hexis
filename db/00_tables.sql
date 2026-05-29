@@ -594,7 +594,7 @@ INSERT INTO config (key, value, description) VALUES
     ('heartbeat.allowed_actions', '["observe","review_goals","remember","recall","connect","reprioritize","reflect","contemplate","meditate","study","debate_internally","maintain","mark_turning_point","begin_chapter","close_chapter","acknowledge_relationship","update_trust","reflect_on_relationship","resolve_contradiction","accept_tension","brainstorm_goals","inquire_shallow","synthesize","reach_out_user","inquire_deep","reach_out_public","fast_ingest","slow_ingest","hybrid_ingest","pause_heartbeat","terminate","rest"]'::jsonb, 'Allowed heartbeat actions'),
     ('heartbeat.max_active_goals', '3'::jsonb, 'Maximum concurrent active goals'),
     ('heartbeat.goal_stale_days', '7'::jsonb, 'Days before a goal is flagged as stale'),
-    ('heartbeat.user_contact_cooldown_hours', '24'::jsonb, 'Minimum hours between unsolicited reach-outs to the same sender; reset when user initiates contact'),
+    ('heartbeat.reach_out_max_unanswered', '0'::jsonb, 'Dormant circuit breaker: if >0, suppress reach-out to a sender whose unanswered streak >= this. 0 = off (latent judgment only).'),
     ('heartbeat.cost_observe', '0'::jsonb, 'Free - always performed'),
     ('heartbeat.cost_review_goals', '0'::jsonb, 'Free - always performed'),
     ('heartbeat.cost_remember', '0'::jsonb, 'Free - always performed'),

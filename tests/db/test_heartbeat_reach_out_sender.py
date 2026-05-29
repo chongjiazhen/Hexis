@@ -463,3 +463,44 @@ async def test_active_senders_count_reconciles_to_zero_after_reply(db_pool):
             row = next(s for s in senders if s["sender_id"] == "sig2")
             assert row["replied_since"] is True
             assert row["unanswered_reach_out_count"] == 0, "displayed count must reconcile to 0 after a reply"
+
+
+async def test_brake_off_by_default_allows_repeated_reach_out(db_pool):
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("DELETE FROM config WHERE key='heartbeat.reach_out_max_unanswered'")
+            await conn.execute("UPDATE heartbeat_state SET current_energy = 20, is_paused = FALSE WHERE id=1")
+            await conn.execute("UPDATE heartbeat_state SET last_user_contact = CURRENT_TIMESTAMP - INTERVAL '2 days' WHERE id=1")
+            for _ in range(5):
+                await conn.execute("SELECT record_reach_out_sender('b1')")
+            raw = await conn.fetchval(
+                """
+                SELECT execute_heartbeat_action(
+                    gen_random_uuid(), 'reach_out_user',
+                    jsonb_build_object('sender_id','b1','message','hi again','intent','check_in')
+                )
+                """
+            )
+            res = raw if isinstance(raw, dict) else json.loads(raw)
+            assert res["result"].get("queued") is True
+
+
+async def test_brake_suppresses_when_streak_exceeds_threshold(db_pool):
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("SELECT set_config('heartbeat.reach_out_max_unanswered', '2'::jsonb)")
+            await conn.execute("UPDATE heartbeat_state SET current_energy = 20, is_paused = FALSE WHERE id=1")
+            await conn.execute("UPDATE heartbeat_state SET last_user_contact = CURRENT_TIMESTAMP - INTERVAL '2 days' WHERE id=1")
+            await conn.execute("SELECT record_reach_out_sender('b2')")
+            await conn.execute("SELECT record_reach_out_sender('b2')")  # streak now 2 (>= N)
+            raw = await conn.fetchval(
+                """
+                SELECT execute_heartbeat_action(
+                    gen_random_uuid(), 'reach_out_user',
+                    jsonb_build_object('sender_id','b2','message','hi again','intent','check_in')
+                )
+                """
+            )
+            res = raw if isinstance(raw, dict) else json.loads(raw)
+            assert res["result"].get("queued") is False
+            assert res["result"].get("reason") == "reach_out_max_unanswered"
