@@ -509,25 +509,40 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION heartbeat_state_update_trigger()
 RETURNS TRIGGER AS $$
 DECLARE
+    current_state JSONB;
     merged JSONB;
 BEGIN
-    merged := jsonb_build_object(
-        'current_energy', NEW.current_energy,
-        'last_heartbeat_at', NEW.last_heartbeat_at,
-        'next_heartbeat_at', NEW.next_heartbeat_at,
-        'heartbeat_count', NEW.heartbeat_count,
-        'last_user_contact', NEW.last_user_contact,
-        'affective_state', COALESCE(NEW.affective_state, '{}'::jsonb),
-        'is_paused', COALESCE(NEW.is_paused, FALSE),
-        'init_stage', COALESCE(NEW.init_stage, 'not_started'),
-        'init_data', COALESCE(NEW.init_data, '{}'::jsonb),
-        'init_started_at', NEW.init_started_at,
-        'init_completed_at', NEW.init_completed_at,
-        'active_heartbeat_id', CASE WHEN NEW.active_heartbeat_id IS NULL THEN NULL ELSE NEW.active_heartbeat_id::text END,
-        'active_heartbeat_number', NEW.active_heartbeat_number,
-        'active_actions', COALESCE(NEW.active_actions, '[]'::jsonb),
-        'active_reasoning', NEW.active_reasoning
-    );
+    -- Read current state so partial updates don't clobber other keys
+    current_state := get_state('heartbeat_state');
+    IF current_state IS NULL THEN
+        current_state := '{}'::jsonb;
+    END IF;
+
+    merged := current_state;
+
+    -- Only set keys where NEW provides a non-NULL value
+    IF NEW.current_energy IS NOT NULL THEN merged := jsonb_set(merged, ARRAY['current_energy'], to_jsonb(NEW.current_energy)); END IF;
+    IF NEW.last_heartbeat_at IS NOT NULL THEN merged := jsonb_set(merged, ARRAY['last_heartbeat_at'], to_jsonb(NEW.last_heartbeat_at)); END IF;
+    IF NEW.next_heartbeat_at IS NOT NULL THEN merged := jsonb_set(merged, ARRAY['next_heartbeat_at'], to_jsonb(NEW.next_heartbeat_at)); END IF;
+    IF NEW.heartbeat_count IS NOT NULL THEN merged := jsonb_set(merged, ARRAY['heartbeat_count'], to_jsonb(NEW.heartbeat_count)); END IF;
+    IF NEW.last_user_contact IS NOT NULL THEN merged := jsonb_set(merged, ARRAY['last_user_contact'], to_jsonb(NEW.last_user_contact)); END IF;
+    IF NEW.affective_state IS NOT NULL THEN merged := jsonb_set(merged, ARRAY['affective_state'], NEW.affective_state);
+    ELSE merged := jsonb_set(merged, ARRAY['affective_state'], COALESCE(merged->'affective_state', '{}'::jsonb)); END IF;
+    IF NEW.is_paused IS NOT NULL THEN merged := jsonb_set(merged, ARRAY['is_paused'], to_jsonb(NEW.is_paused));
+    ELSE merged := jsonb_set(merged, ARRAY['is_paused'], to_jsonb(COALESCE((merged->>'is_paused')::boolean, false))); END IF;
+    IF NEW.init_stage IS NOT NULL THEN merged := jsonb_set(merged, ARRAY['init_stage'], to_jsonb(NEW.init_stage));
+    ELSE merged := jsonb_set(merged, ARRAY['init_stage'], to_jsonb(COALESCE(merged->>'init_stage', 'not_started'))); END IF;
+    IF NEW.init_data IS NOT NULL THEN merged := jsonb_set(merged, ARRAY['init_data'], NEW.init_data);
+    ELSE merged := jsonb_set(merged, ARRAY['init_data'], COALESCE(merged->'init_data', '{}'::jsonb)); END IF;
+    IF NEW.init_started_at IS NOT NULL THEN merged := jsonb_set(merged, ARRAY['init_started_at'], to_jsonb(NEW.init_started_at)); END IF;
+    IF NEW.init_completed_at IS NOT NULL THEN merged := jsonb_set(merged, ARRAY['init_completed_at'], to_jsonb(NEW.init_completed_at)); END IF;
+    IF NEW.active_heartbeat_id IS NOT NULL THEN merged := jsonb_set(merged, ARRAY['active_heartbeat_id'], to_jsonb(NEW.active_heartbeat_id::text)); END IF;
+    IF NEW.active_heartbeat_number IS NOT NULL THEN merged := jsonb_set(merged, ARRAY['active_heartbeat_number'], to_jsonb(NEW.active_heartbeat_number)); END IF;
+    IF NEW.active_actions IS NOT NULL THEN merged := jsonb_set(merged, ARRAY['active_actions'], NEW.active_actions);
+    ELSE merged := jsonb_set(merged, ARRAY['active_actions'], COALESCE(merged->'active_actions', '[]'::jsonb)); END IF;
+    IF NEW.active_reasoning IS NOT NULL THEN merged := jsonb_set(merged, ARRAY['active_reasoning'], to_jsonb(NEW.active_reasoning)); END IF;
+    IF NEW.reach_out_sender_log IS NOT NULL THEN merged := jsonb_set(merged, ARRAY['reach_out_sender_log'], NEW.reach_out_sender_log); END IF;
+
     PERFORM set_state('heartbeat_state', merged);
     RETURN NEW;
 END;
@@ -772,6 +787,54 @@ BEGIN
     END IF;
 END;
 $$ LANGUAGE plpgsql STABLE;
+
+CREATE OR REPLACE FUNCTION can_reach_out_sender(p_sender_id TEXT)
+RETURNS BOOLEAN AS $$
+DECLARE
+    cooldown_hours INT;
+    last_out TIMESTAMPTZ;
+    last_contact TIMESTAMPTZ;
+    safe_sender TEXT := COALESCE(p_sender_id, '');
+    sender_log JSONB;
+BEGIN
+    IF safe_sender = '' THEN RETURN TRUE; END IF;
+
+    cooldown_hours := COALESCE(get_config_int('heartbeat.user_contact_cooldown_hours'), 24);
+    IF cooldown_hours <= 0 THEN RETURN TRUE; END IF;
+
+    SELECT value->'reach_out_sender_log'
+      INTO sender_log
+      FROM state
+     WHERE key = 'heartbeat_state';
+
+    sender_log := COALESCE(sender_log, '{}'::jsonb);
+    last_out := (sender_log->>safe_sender)::timestamptz;
+    IF last_out IS NULL THEN RETURN TRUE; END IF;
+
+    SELECT last_user_contact INTO last_contact FROM heartbeat_state WHERE id = 1;
+    IF last_contact IS NOT NULL AND last_contact > last_out THEN RETURN TRUE; END IF;
+
+    RETURN (CURRENT_TIMESTAMP - last_out) >= (cooldown_hours || ' hours')::INTERVAL;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+CREATE OR REPLACE FUNCTION record_reach_out_sender(p_sender_id TEXT)
+RETURNS VOID AS $$
+DECLARE
+    safe_sender TEXT := COALESCE(p_sender_id, '');
+BEGIN
+    IF safe_sender = '' THEN RETURN; END IF;
+
+    UPDATE state
+    SET value = jsonb_set(
+                jsonb_set(value, ARRAY['reach_out_sender_log'], COALESCE(value->'reach_out_sender_log', '{}'::jsonb)),
+                ARRAY['reach_out_sender_log', safe_sender],
+                to_jsonb(CURRENT_TIMESTAMP)
+            ),
+        updated_at = CURRENT_TIMESTAMP
+    WHERE key = 'heartbeat_state';
+END;
+$$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION should_run_heartbeat()
 RETURNS BOOLEAN AS $$

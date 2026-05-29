@@ -1229,6 +1229,15 @@ BEGIN
                         'local_hour', recipient_hr
                     );
                     PERFORM update_energy(action_cost);
+                ELSIF target_sender IS NOT NULL
+                      AND NOT force_send
+                      AND NOT can_reach_out_sender(target_sender) THEN
+                    result := jsonb_build_object(
+                        'queued',    false,
+                        'reason',    'sender_cooldown',
+                        'sender_id', target_sender
+                    );
+                    PERFORM update_energy(action_cost);
                 ELSE
                     queued_call := build_outbox_message(
                         'user',
@@ -1242,6 +1251,7 @@ BEGIN
                     outbox_messages := outbox_messages || jsonb_build_array(queued_call);
                     result := jsonb_build_object('queued', true, 'outbox_message', queued_call);
                     PERFORM satisfy_drive('connection', 0.3);
+                    PERFORM record_reach_out_sender(target_sender);
                 END IF;
             END;
 

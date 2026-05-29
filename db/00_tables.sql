@@ -594,7 +594,7 @@ INSERT INTO config (key, value, description) VALUES
     ('heartbeat.allowed_actions', '["observe","review_goals","remember","recall","connect","reprioritize","reflect","contemplate","meditate","study","debate_internally","maintain","mark_turning_point","begin_chapter","close_chapter","acknowledge_relationship","update_trust","reflect_on_relationship","resolve_contradiction","accept_tension","brainstorm_goals","inquire_shallow","synthesize","reach_out_user","inquire_deep","reach_out_public","fast_ingest","slow_ingest","hybrid_ingest","pause_heartbeat","terminate","rest"]'::jsonb, 'Allowed heartbeat actions'),
     ('heartbeat.max_active_goals', '3'::jsonb, 'Maximum concurrent active goals'),
     ('heartbeat.goal_stale_days', '7'::jsonb, 'Days before a goal is flagged as stale'),
-    ('heartbeat.user_contact_cooldown_hours', '4'::jsonb, 'Minimum hours between unsolicited user contact'),
+    ('heartbeat.user_contact_cooldown_hours', '24'::jsonb, 'Minimum hours between unsolicited reach-outs to the same sender; reset when user initiates contact'),
     ('heartbeat.cost_observe', '0'::jsonb, 'Free - always performed'),
     ('heartbeat.cost_review_goals', '0'::jsonb, 'Free - always performed'),
     ('heartbeat.cost_remember', '0'::jsonb, 'Free - always performed'),
@@ -825,7 +825,8 @@ VALUES
             'active_heartbeat_id', NULL,
             'active_heartbeat_number', NULL,
             'active_actions', '[]'::jsonb,
-            'active_reasoning', NULL
+            'active_reasoning', NULL,
+            'reach_out_sender_log', '{}'::jsonb
         )
     ),
     (
