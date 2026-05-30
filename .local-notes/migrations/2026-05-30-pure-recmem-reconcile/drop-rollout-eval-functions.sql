@@ -4,21 +4,19 @@
 -- and their config toggles. RecMem becomes the only memory-formation path.
 --
 -- ============================================================================
--- !! ORDERING GATE — DO NOT APPLY STANDALONE !!
+-- ORDERING GATE
 -- ============================================================================
--- services/chat.py still defines + calls these functions:
---     _record_recmem_rollout_event   -> record_recmem_rollout_event(...)
---     _log_dual_write_comparison     -> record_recmem_dual_write_comparison(...)
--- (chat.py:32-149, inherited from upstream, NOT yet removed on our branch).
+-- [CLEARED 2026-05-30] chat.py rollout/dual-write helpers (_record_recmem_rollout_event,
+-- _log_dual_write_comparison) were removed in the pure-RecMem merge (936224d), so the
+-- "live chat calls a dropped function" hazard no longer applies.
 --
--- Applying this migration BEFORE the chat.py hand-merge lands = live chat path
--- calls a dropped function -> runtime error on every turn.
---
--- Correct sequence:
---   1. Hand-merge upstream 244ba5c chat.py deletions (remove the helpers above).
---   2. Rebuild + roll out workers (--no-deps --force-recreate, per prompt-baked rule).
---   3. THEN apply this migration to each live hexis_<P> DB.
+-- Remaining sequence before applying to a live DB:
+--   1. Rebuild + roll out workers (--no-deps --force-recreate, per prompt-baked rule)
+--      so worker images no longer reference the dropped functions.
+--   2. THEN apply this migration to each live hexis_<P> DB.
 -- Propagate via DROP FUNCTION (live CREATE OR REPLACE split rule) — NOT down -v.
+-- Current live state: only hexis_memory exists (fleet wiped), empty — applies when
+-- personas are rebuilt; no live DB depends on these functions today.
 -- ============================================================================
 --
 -- BEHAVIORAL NOTE: removing the toggles below makes RecMem unconditional. Check
