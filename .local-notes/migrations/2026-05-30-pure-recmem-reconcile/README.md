@@ -32,10 +32,28 @@ auto-merge likely, worst case 1-2 hand-resolved hunks.
 
 ## Sequence (do NOT reorder)
 
-1. [done] cherry-pick HMX.
-2. [todo] hand-merge `244ba5c` chat.py deletions; rebuild+roll out workers.
+1. [done] cherry-pick HMX (`81ce1fc`).
+2. [done] rebase onto post-all-latent `home-rig-local`; cherry-pick `244ba5c`
+   pure-RecMem (`936224d`). 3 conflicts resolved (chat.py / conversation.py /
+   cognitive_memory_api.py). All .py compile. Worker rebuild+rollout still
+   [todo] — deferred (user: do not activate workers yet).
 3. [todo] apply `drop-rollout-eval-functions.sql` to each live `hexis_<P>` DB.
+   Live state 2026-05-30: only `hexis_memory` exists (fleet wiped, see
+   db-wipe-recovery), empty (memories=0), recmem worker/hydrate/enabled all
+   false. So no live regression; migration applies when personas rebuilt.
 4. [open] OAuth decision (`1e6183e`) — separate, no philosophy block.
 
-Timing: hold step 2 until all-latent reach-out lands — both touch chat.py /
-heartbeat; concurrent edits = avoidable conflict storm.
+## Tracked follow-up — restore sender-scope on RecMem read path
+
+Decision A (2026-05-30): landed full pure-RecMem; `hydrate()` now routes through
+`_recall_recmem` → `recmem_recall_context()`, which has **no sender param** and
+drops the +0.1 own-sender boost the eager `_recall_memories`/`fast_recall` path
+gave. Safe now (empty DB), but sender-scope is a personhood feature (per-DM-partner
+memory). **Before recmem goes live with real personas:**
+- add `p_sender TEXT DEFAULT NULL` to `recmem_recall_context` (db/31) + own-sender
+  `+0.1` score bump `WHERE sender_id = p_sender`;
+- thread `current_sender` through `_recall_recmem` and `hydrate()`'s `_fetch_memories`.
+Write-path sender-scope already preserved (conversation.py PR-C prefix).
+
+Timing note (historical): step 2 was gated on all-latent reach-out landing —
+both touched chat.py/heartbeat. All-latent landed in `home-rig-local`; gate cleared.
