@@ -295,6 +295,24 @@ Path traveled: trinity Greek (Thea/Iris/Lyra) → pentad (+Galene +Mneme) → au
   enabled; revisit when reasoning-trace handling on the RLM path is worth the
   latency/leak tradeoff (cf. `fix/llm-strip-reasoning`).
 
+### Framework weaknesses → operational backlog (filed 2026-05-30)
+
+From the personhood-review weaknesses triage
+(`research/home-rig-local-vs-upstream-personhood-review.md` §Framework-weaknesses + §Verdict).
+Product-positioning weaknesses (commodity, monolith, no-eval) consciously closed as
+out-of-scope for a personal fleet. These remain as ops, not framework defects:
+
+- **W3 recall quality guard** — superseded/poison memories surface in recall; scoped in
+  `ops/spec-recall-quality-guard.md`. Patch 1 (exclude `superseded_by`) ship-anytime; Patch 2
+  (eco-poisoning) gated on the `origin=eco` measurement. **Actionable now.**
+- **W8 weak-model brittleness** — scaffolding leak / loop / plumbing-recite on small local
+  models. NOT a one-shot fix; it's the standing hardening mode (anti-collapse guards, ECO slim
+  path, reasoning/assessment strips). No new work item — keep hardening as failures surface.
+- **W7 cross-channel identity not unified** — `sender_id` scopes DM memory but isn't unified
+  across channels; same human on Telegram + Discord = split memory scopes. Dormant: fleet is
+  ~1 channel per persona today. **Trip-wire:** if any persona starts spanning channels for the
+  same human, revisit (would need a sender-identity map / alias table). Until then, leave.
+
 ### Housekeeping — `_inbox-test` deleted (2026-05-25)
 - Scratch file `.local-notes/_inbox-test` (untracked) deleted after
   content-diff vs this inbox. All actionable items either DUP of current

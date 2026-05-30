@@ -75,9 +75,21 @@ reconsolidation + reflection pipelines. The weaknesses are elsewhere:
    (Hermes `MemoryProvider`, OpenPersona faculty `local|Mem0|Zep`). Cost: zero incremental
    adoption, PL/pgSQL hard to test/iterate/contribute, single-Postgres scaling ceiling, no
    managed-service story. "Schema authority" is elegant but raises the contribution bar.
-3. **Naive recall ranking bottlenecks the rich model.** `fast_recall` = pure HNSW cosine
-   (`db/00_tables.sql:1029`) + sender boost + precomputed neighborhoods. No reranker, no hybrid
-   BM25+vector (grep: empty). The sophisticated stored model is retrieved by plain cosine.
+3. **Recall honors *similarity* but not the *quality signals it already stores*.**
+   *(Corrected 2026-05-30 — earlier "pure cosine" claim grepped the wrong function.)*
+   `fast_recall` (`db/04_functions_core.sql:75`) is NOT naive — it blends 7 signals
+   (vector 0.5 / graph-association 0.2 / temporal 0.15 / importance×decay×recency 0.05 /
+   trust 0.1 / affective-congruence 0.05 / +0.1 own-sender). The real gaps are narrower:
+   - **(a) Cosine-only candidate gate.** Seeds = top-K by cosine (`LIMIT GREATEST(p_limit,5)`),
+     then graph-expanded. No lexical/hybrid entry path → recall ceiling = embedding quality; a
+     keyword-exact but semantically-distant memory never seeds.
+   - **(b) No supersession/quality exclusion at recall.** Final WHERE = `status='active'` +
+     `valid_until` + `trust_level >= min_trust` only. Does **NOT** exclude
+     `superseded_by IS NOT NULL` (`db/04:237-239`) — superseded memories still surface, and the
+     `superseded_by` / `CONTRADICTS` machinery is ignored on the hot path. The rich stored model
+     is honored at *write* time but not at *read* time.
+   - **(c) Hand-tuned, unevaluated weights** (overlaps W4). The one quality lever that exists —
+     `memory.recall_min_trust_level` — is dormant at default 0.0.
 4. **No published recall eval.** Competitors ship LongMemEval numbers (MemMachine 93.0%, Mem0
    token-efficiency). RecMem added an internal harness but no comparative score — can't prove
    the depth beats Mem0. Unfalsifiable sophistication.
@@ -108,6 +120,45 @@ extension found", §13.4) — which is exactly where the home-rig personhood fea
 
 Strategic implication (already reached in §13.6): don't compete on memory (saturated); the
 loop *is* the personhood, the memory is just substrate. Ties straight back to the thesis.
+
+## Verdict: should we address the weaknesses?
+
+The "not upstream owner" worry **dissolves** the question rather than complicating it:
+
+1. **Ownership isn't the blocker.** home-rig-local is ours; DB functions propagate live via
+   `CREATE OR REPLACE`, prompts rebuild workers — no upstream nod needed. "Not owner" would
+   only matter if we wanted these merged upstream, but §13.6 killed the memory-market play, so
+   there's no reason to upstream them. The constraint was never permission — it's
+   leverage-vs-effort for a personal fleet.
+2. **Most weaknesses are *product* weaknesses that don't apply to a personal Telegram fleet.**
+
+Triage by "does it degrade the actual fleet":
+
+| Weakness | Matters for personal fleet? | Verdict |
+|---|---|---|
+| W1 commodity positioning | No — not selling | **Ignore** |
+| W2 monolith / no pluggable iface | No — single user, adoption moot | **Ignore** |
+| W4 no published eval | No — nobody to prove it to | **Ignore** |
+| W5 shallow temporal/decay | Partly — emergent `update_trust` decay exists | **Done enough** |
+| W6 cold-start fragility | Mostly addressed by family-B anchor | **Done enough** |
+| W7 cross-channel identity | Only if same human across channels; fleet is ~1 channel/persona | **File operational** |
+| W8 weak-model brittleness | Yes — central daily constraint | **File operational (ongoing)** |
+| **W3 recall ignores stored quality signals** | **Yes — superseded/poison memories surface in replies** | **Fix (small local patch)** |
+
+- **Don't** run "address the weaknesses" as a program — that's reframing the framework to win
+  a market we've exited. Ambitious *and* pointless.
+- **W3 is the one with real leverage** and dovetails with the eco-tagged-memory experiment
+  (nano-origin memories can poison recall; `fast_recall` has no supersession/origin exclusion).
+  Smaller than first thought — recall is already a blend; the fix is exclusion gates + reusing
+  the dormant trust floor, not a reranker rebuild. Scoped in
+  `.local-notes/ops/spec-recall-quality-guard.md`.
+- **W7 + W8 are operational, not framework defects** — file as ongoing fleet ops (weak-model
+  hardening is already the standing mode; cross-channel unification only bites if a persona
+  spans channels for the same human).
+- **Highest-value move is NOT fixing weaknesses** — it's leaning into the strength (the
+  cognitive loop: heartbeat / consent / energy / all-latent reach-out). That effort compounds
+  and is unique; memory-layer parity fights a saturated market for zero user-facing gain. The
+  home-rig work already does this; keep doing it.
 
 ## Bottom line
 
