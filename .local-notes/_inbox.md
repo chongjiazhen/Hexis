@@ -290,6 +290,11 @@ Path traveled: trinity Greek (Thea/Iris/Lyra) → pentad (+Galene +Mneme) → au
 ### Voice I/O
 - text-to-speech, speech-to-text — unexplored. No spec.
 
+### RLM "allow thinking" path (deferred decision — folded from `think.md` 2026-05-30)
+- Leave "allow thinking on RLM path" as a deliberate later decision. Not yet
+  enabled; revisit when reasoning-trace handling on the RLM path is worth the
+  latency/leak tradeoff (cf. `fix/llm-strip-reasoning`).
+
 ### Housekeeping — `_inbox-test` deleted (2026-05-25)
 - Scratch file `.local-notes/_inbox-test` (untracked) deleted after
   content-diff vs this inbox. All actionable items either DUP of current
