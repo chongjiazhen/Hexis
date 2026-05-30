@@ -234,6 +234,12 @@ class CognitiveMemory:
 
         async def _fetch_memories():
             async with self._pool.acquire() as conn:
+                # TODO(sender-scope): pure-RecMem hydrate dropped the +0.1 own-sender
+                # boost (recmem_recall_context has no sender param). `current_sender`
+                # is accepted by hydrate() but unused here. Before recmem goes live
+                # with personas, add p_sender to recmem_recall_context (db/31) and
+                # thread current_sender through _recall_recmem. See
+                # .local-notes/migrations/2026-05-30-pure-recmem-reconcile/README.md
                 return await self._recall_recmem(conn, query, memory_limit, session_id=session_id)
 
         async def _fetch_partial():
