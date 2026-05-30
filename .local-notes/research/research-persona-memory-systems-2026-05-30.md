@@ -65,6 +65,24 @@ dumb storage." Explicitly anti-Postgres: *"No Redis. No Pinecone. No Postgres."*
 - Architectural irony: MuninnDB is *more* committed to brain-as-engine (custom engine)
   while Hexis is *more* committed to brain-as-being. Different axes of the same thesis.
 
+**IP / patent (added 2026-05-30) ⬛ README + muninndb.com:**
+- **US Provisional Patent No. 63/991,402**, filed **2026-02-26** (4 days after repo
+  created 2026-02-22). By MJ Bonanno / Scrypster. Confers "patent pending" only —
+  provisional = unexamined 12-month placeholder, not a granted patent.
+- Claimed scope = the *cognitive primitives*: Ebbinghaus decay, Hebbian learning,
+  Bayesian confidence, semantic triggers. README ties patent auto-Apache-2.0 to
+  2030-02-26 (same date as code license flip).
+- **Not a Hexis crib.** No reference to Hexis in README/docs/patent; no code lineage;
+  no shared naming. Convergent DB-as-brain idea, independent build. The claimed
+  primitives are decades-old prior art (Ebbinghaus 1885, Hebb 1949, Bayes 1763) —
+  Hexis never claimed them either, so nothing of Hexis's was annexed.
+- **No threat to Hexis.** Hexis runs Postgres + pgvector + AGE, not Muninn's engram
+  engine. Hexis differentiators (energy, consent, heartbeat, persona) sit outside the
+  claimed scope. Generic-primitive provisional invites heavy prior-art challenge if
+  ever prosecuted to a full filing.
+- **Defensive note:** if Hexis ever needs prior-art ammunition, public Hexis commit
+  dates / posts pre-2026-02-26 are the lever. No action needed now.
+
 ---
 
 ## Hermes Agent memory model (corrected) 🟫
