@@ -330,7 +330,9 @@ out-of-scope for a personal fleet. These remain as ops, not framework defects:
 - **W3 recall quality guard** — low-quality/poison memories surface in recall; scoped in
   `ops/spec-recall-quality-guard.md`. Only live work = eco-poisoning, gated on the `origin=eco`
   measurement (then dial trust). The "exclude `superseded_by`" idea was dropped — that column is
-  dead schema (never written). **Measurement actionable once eco-write lands.**
+  dead schema (never written). **Eco-write SHIPPED (`a7cf5ca`); measurement query ready at
+  `ops/measure-eco-poisoning.sql`** — run once eco traffic accumulates (needs persona DBs +
+  embed :8081). Persona DBs currently absent (post `down -v` wipe), so no eco data yet.
 - **Parked design — wire supersession** — `superseded_by` (`db/00:185`) declared but never set.
   If memory correction/dedup wanted, pick a writer (reconsolidation verdict / contradiction-
   resolution / explicit "corrects" path). Real feature, not a patch. Low priority.

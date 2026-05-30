@@ -42,14 +42,9 @@ Wiring supersession (pick a writer: reconsolidation / contradiction-resolution /
 
 The eco-write change (`handoff-eco-memory-write-tagged.md`) writes nano-origin memories tagged
 `metadata.origin='eco'` at **normal trust** (deliberate: no thumb on scale). Do NOT add an origin
-filter yet. First measure whether eco memories actually poison recall:
-
-```sql
--- how many eco memories exist
-SELECT count(*) FROM memories WHERE metadata->>'origin'='eco';
--- are eco memories being recalled? (run fast_recall on representative queries,
--- check whether origin=eco ids appear in the top-K, and at what rank)
-```
+filter yet. First measure whether eco memories actually poison recall — runnable query
+suite at **`ops/measure-eco-poisoning.sql`** (A volume / B eco shape / C single-probe /
+D multi-query exposure). Sections A+B need only the DB; C+D need embed `:8081` up.
 
 **If** the data shows eco memories surfacing and degrading replies, the fix reuses existing
 machinery — **no new fast_recall code**:
