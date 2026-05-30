@@ -256,19 +256,69 @@ async def _remember_conversation(
     source_identity: str | None = None,
     sender_id: str | None = None,
     background_dsn: str | None = None,
+    origin: str = "prime",
 ) -> None:
     if not user_message and not assistant_message:
         return
     # sender_id IS upstream's source_identity in their RecMem framing. Explicit
     # source_identity wins if set; otherwise fall back to sender_id.
     effective_identity = source_identity if source_identity is not None else sender_id
+    # origin tags which path wrote the turn ('prime' = full RLM/agent, 'eco' =
+    # slim nano path). Lets eco-origin memories be measured/filtered downstream.
     await mem_client.record_chat_turn_memory(
         user_message,
         assistant_message,
         session_id=session_id,
         source_identity=effective_identity,
-        context={"metadata": {"type": "conversation"}},
+        context={"metadata": {"type": "conversation", "origin": origin}},
     )
+
+
+async def _eco_remember(
+    *,
+    user_message: str,
+    assistant_text: str,
+    history: list[dict[str, Any]],
+    session_id: str | None,
+    sender_id: str | None,
+    pool: Any | None,
+    dsn: str | None,
+) -> None:
+    """Persist an eco turn tagged origin='eco'.
+
+    Skips the fallback reply (a degradation signal, not a real turn). Non-fatal:
+    a failed write must never break the user-facing reply. Experiment posture —
+    observe nano-origin memories via the tag rather than writing them off.
+    """
+    if not assistant_text or assistant_text == ECO_FALLBACK_REPLY:
+        return
+    try:
+        eco_identity = _conversation_source_identity(session_id, history, user_message, assistant_text)
+        if pool is not None:
+            await _remember_conversation(
+                CognitiveMemory(pool),
+                user_message=user_message,
+                assistant_message=assistant_text,
+                session_id=session_id,
+                source_identity=eco_identity,
+                sender_id=sender_id,
+                background_dsn=dsn,
+                origin="eco",
+            )
+        else:
+            async with CognitiveMemory.connect(dsn) as mem_client:
+                await _remember_conversation(
+                    mem_client,
+                    user_message=user_message,
+                    assistant_message=assistant_text,
+                    session_id=session_id,
+                    source_identity=eco_identity,
+                    sender_id=sender_id,
+                    background_dsn=dsn,
+                    origin="eco",
+                )
+    except Exception as exc:
+        logger.warning(f"ECO memory-write failed (non-fatal): {exc}")
 
 
 def _conversation_source_identity(session_id: str | None, history: list[dict[str, Any]] | None, user_message: str, assistant_message: str) -> str | None:
@@ -343,6 +393,15 @@ async def chat_turn(
             assistant_text = ""
         if not assistant_text:
             assistant_text = ECO_FALLBACK_REPLY
+        await _eco_remember(
+            user_message=user_message,
+            assistant_text=assistant_text,
+            history=history,
+            session_id=session_id,
+            sender_id=sender_id,
+            pool=pool,
+            dsn=dsn,
+        )
         new_history = list(history)
         new_history.append({"role": "user", "content": user_message})
         new_history.append({"role": "assistant", "content": assistant_text})
@@ -501,6 +560,15 @@ async def stream_chat_turn(
             text = ""
         if not text:
             text = ECO_FALLBACK_REPLY
+        await _eco_remember(
+            user_message=user_message,
+            assistant_text=text,
+            history=history,
+            session_id=session_id,
+            sender_id=sender_id,
+            pool=pool,
+            dsn=dsn,
+        )
         yield text
         return
 

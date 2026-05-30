@@ -75,6 +75,127 @@ async def test_remember_conversation_calls_record_chat_turn_memory():
     assert mem.record_chat_turn_memory_calls[0][0][0] == "remember this important preference"
 
 
+async def test_remember_conversation_defaults_origin_prime():
+    mem = _RememberMem()
+
+    await chat_mod._remember_conversation(  # noqa: SLF001
+        mem,
+        user_message="hi",
+        assistant_message="hello",
+    )
+
+    _args, kwargs = mem.record_chat_turn_memory_calls[0]
+    assert kwargs["context"]["metadata"]["origin"] == "prime"
+
+
+async def test_remember_conversation_threads_origin_into_metadata():
+    mem = _RememberMem()
+
+    await chat_mod._remember_conversation(  # noqa: SLF001
+        mem,
+        user_message="hi",
+        assistant_message="hello",
+        origin="eco",
+    )
+
+    _args, kwargs = mem.record_chat_turn_memory_calls[0]
+    assert kwargs["context"]["metadata"]["origin"] == "eco"
+
+
+async def test_chat_turn_eco_writes_tagged_memory(monkeypatch):
+    mem = _RememberMem()
+
+    @asynccontextmanager
+    async def fake_connect(_dsn, **_kwargs):
+        yield mem
+
+    async def fake_power(_pool, _dsn):
+        return "eco"
+
+    async def fake_slim(**_kwargs):
+        return "eco voice reply"
+
+    monkeypatch.setattr(chat_mod.CognitiveMemory, "connect", fake_connect)
+    monkeypatch.setattr(chat_mod, "_read_power_mode", fake_power)
+    monkeypatch.setattr(chat_mod, "_eco_slim_chat", fake_slim)
+
+    result = await chat_mod.chat_turn(
+        user_message="hi",
+        history=[],
+        llm_config={"provider": "openai", "model": "nano"},
+        dsn="postgresql://unused",
+        pool=None,
+    )
+
+    assert result["assistant"] == "eco voice reply"
+    assert len(mem.record_chat_turn_memory_calls) == 1
+    _args, kwargs = mem.record_chat_turn_memory_calls[0]
+    assert kwargs["context"]["metadata"]["origin"] == "eco"
+
+
+async def test_chat_turn_eco_fallback_skips_memory(monkeypatch):
+    mem = _RememberMem()
+
+    @asynccontextmanager
+    async def fake_connect(_dsn, **_kwargs):
+        yield mem
+
+    async def fake_power(_pool, _dsn):
+        return "eco"
+
+    async def fake_slim(**_kwargs):
+        return ""  # empty -> fallback reply, no memory write
+
+    monkeypatch.setattr(chat_mod.CognitiveMemory, "connect", fake_connect)
+    monkeypatch.setattr(chat_mod, "_read_power_mode", fake_power)
+    monkeypatch.setattr(chat_mod, "_eco_slim_chat", fake_slim)
+
+    result = await chat_mod.chat_turn(
+        user_message="hi",
+        history=[],
+        llm_config={"provider": "openai", "model": "nano"},
+        dsn="postgresql://unused",
+        pool=None,
+    )
+
+    assert result["assistant"] == chat_mod.ECO_FALLBACK_REPLY
+    assert len(mem.record_chat_turn_memory_calls) == 0
+
+
+async def test_stream_chat_turn_eco_writes_tagged_memory(monkeypatch):
+    mem = _RememberMem()
+
+    @asynccontextmanager
+    async def fake_connect(_dsn, **_kwargs):
+        yield mem
+
+    async def fake_power(_pool, _dsn):
+        return "eco"
+
+    async def fake_slim(**_kwargs):
+        return "eco stream reply"
+
+    monkeypatch.setattr(chat_mod.CognitiveMemory, "connect", fake_connect)
+    monkeypatch.setattr(chat_mod, "_read_power_mode", fake_power)
+    monkeypatch.setattr(chat_mod, "_eco_slim_chat", fake_slim)
+
+    chunks = [
+        chunk
+        async for chunk in chat_mod.stream_chat_turn(
+            user_message="hi",
+            history=[],
+            llm_config={"provider": "openai", "model": "nano"},
+            dsn="postgresql://unused",
+            pool=None,
+        )
+    ]
+
+    assert "".join(chunks) == "eco stream reply"
+    assert len(mem.record_chat_turn_memory_calls) == 1
+    _args, kwargs = mem.record_chat_turn_memory_calls[0]
+    assert kwargs["context"]["metadata"]["origin"] == "eco"
+
+
 async def test_chat_turn_basic_flow(monkeypatch, db_pool):
     async with db_pool.acquire() as conn:
         await conn.execute(
