@@ -327,9 +327,13 @@ From the personhood-review weaknesses triage
 Product-positioning weaknesses (commodity, monolith, no-eval) consciously closed as
 out-of-scope for a personal fleet. These remain as ops, not framework defects:
 
-- **W3 recall quality guard** — superseded/poison memories surface in recall; scoped in
-  `ops/spec-recall-quality-guard.md`. Patch 1 (exclude `superseded_by`) ship-anytime; Patch 2
-  (eco-poisoning) gated on the `origin=eco` measurement. **Actionable now.**
+- **W3 recall quality guard** — low-quality/poison memories surface in recall; scoped in
+  `ops/spec-recall-quality-guard.md`. Only live work = eco-poisoning, gated on the `origin=eco`
+  measurement (then dial trust). The "exclude `superseded_by`" idea was dropped — that column is
+  dead schema (never written). **Measurement actionable once eco-write lands.**
+- **Parked design — wire supersession** — `superseded_by` (`db/00:185`) declared but never set.
+  If memory correction/dedup wanted, pick a writer (reconsolidation verdict / contradiction-
+  resolution / explicit "corrects" path). Real feature, not a patch. Low priority.
 - **W8 weak-model brittleness** — scaffolding leak / loop / plumbing-recite on small local
   models. NOT a one-shot fix; it's the standing hardening mode (anti-collapse guards, ECO slim
   path, reasoning/assessment strips). No new work item — keep hardening as failures surface.

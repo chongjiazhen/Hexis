@@ -58,10 +58,12 @@ Context: persistent-memory market is now crowded (Mem0, Zep/Graphiti, Letta, Mem
 SillyTavern built-in Vector Storage / Smart Memory). Assessment of the *base* framework, not
 the home-rig additions. Refs: `research-pivot-stack-eval-2026-05-25.md` §1, §13.
 
-Note the memory *model* is NOT the weak part — it's richer than the commodity systems:
-`superseded_by` supersession chains (`db/00_tables.sql:185`), a `CONTRADICTS` graph edge +
-`ValueConflictNode` + a deliberate `resolve_contradiction` heartbeat action, plus
-reconsolidation + reflection pipelines. The weaknesses are elsewhere:
+Note the memory *model* is NOT the weak part — it's richer than the commodity systems: a
+`CONTRADICTS` graph edge + `ValueConflictNode` + a deliberate `resolve_contradiction` heartbeat
+action (wired — edges created in `db/05`, `db/16`, `db/17`), plus real reconsolidation
+(`db/21`) + reflection pipelines. *(Caveat: the `superseded_by` column (`db/00:185`) is declared
+but never written — supersession is aspirational schema, not wired machinery. See W3.)* The
+weaknesses are elsewhere:
 
 1. **Competes on the commodity axis, hides its novel parts.** Brands as "DB is the brain"
    (storage + typed recall) — exactly what Mem0/Zep/Letta/MemMachine + ST's built-ins now do
@@ -83,11 +85,12 @@ reconsolidation + reflection pipelines. The weaknesses are elsewhere:
    - **(a) Cosine-only candidate gate.** Seeds = top-K by cosine (`LIMIT GREATEST(p_limit,5)`),
      then graph-expanded. No lexical/hybrid entry path → recall ceiling = embedding quality; a
      keyword-exact but semantically-distant memory never seeds.
-   - **(b) No supersession/quality exclusion at recall.** Final WHERE = `status='active'` +
-     `valid_until` + `trust_level >= min_trust` only. Does **NOT** exclude
-     `superseded_by IS NOT NULL` (`db/04:237-239`) — superseded memories still surface, and the
-     `superseded_by` / `CONTRADICTS` machinery is ignored on the hot path. The rich stored model
-     is honored at *write* time but not at *read* time.
+   - **(b) No origin/quality gate at recall.** Final WHERE = `status='active'` + `valid_until`
+     + `trust_level >= min_trust` only (`db/04:237-239`). No way to down-weight low-quality
+     memories (e.g. the eco-tagged nano-origin writes) except the dormant trust floor. *(Note:
+     `superseded_by` is NOT a real gap — the column is never written (W3 caveat above), so there
+     are no superseded rows to exclude. Wiring supersession is a parked design item, not a recall
+     fix.)*
    - **(c) Hand-tuned, unevaluated weights** (overlaps W4). The one quality lever that exists —
      `memory.recall_min_trust_level` — is dormant at default 0.0.
 4. **No published recall eval.** Competitors ship LongMemEval numbers (MemMachine 93.0%, Mem0
@@ -143,14 +146,14 @@ Triage by "does it degrade the actual fleet":
 | W6 cold-start fragility | Mostly addressed by family-B anchor | **Done enough** |
 | W7 cross-channel identity | Only if same human across channels; fleet is ~1 channel/persona | **File operational** |
 | W8 weak-model brittleness | Yes — central daily constraint | **File operational (ongoing)** |
-| **W3 recall ignores stored quality signals** | **Yes — superseded/poison memories surface in replies** | **Fix (small local patch)** |
+| **W3 recall ignores stored quality signals** | **Yes — low-quality/poison memories surface in replies** | **Fix (small local patch — origin/trust)** |
 
 - **Don't** run "address the weaknesses" as a program — that's reframing the framework to win
   a market we've exited. Ambitious *and* pointless.
 - **W3 is the one with real leverage** and dovetails with the eco-tagged-memory experiment
-  (nano-origin memories can poison recall; `fast_recall` has no supersession/origin exclusion).
-  Smaller than first thought — recall is already a blend; the fix is exclusion gates + reusing
-  the dormant trust floor, not a reranker rebuild. Scoped in
+  (nano-origin memories can poison recall; `fast_recall` has no origin/quality gate beyond the
+  dormant trust floor). Smaller than first thought — recall is already a blend; the fix reuses
+  the existing trust factor + floor, not a reranker rebuild. Scoped in
   `.local-notes/ops/spec-recall-quality-guard.md`.
 - **W7 + W8 are operational, not framework defects** — file as ongoing fleet ops (weak-model
   hardening is already the standing mode; cross-channel unification only bites if a persona

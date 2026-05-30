@@ -23,29 +23,22 @@ So recall is a real reranker. The gaps are narrow:
 
 - **(a) cosine-only seed gate** — no lexical/hybrid entry; a keyword-exact, semantically-distant
   memory never seeds. Recall ceiling = embedding quality.
-- **(b) no supersession/quality exclusion** — final WHERE (`db/04:237-239`) ignores
-  `superseded_by IS NOT NULL`. Superseded memories surface; `superseded_by` / `CONTRADICTS`
-  machinery is honored at write time, ignored at read time.
+- **(b) no origin/quality gate** — final WHERE (`db/04:237-239`) filters only `status='active'`,
+  `valid_until`, `trust_level >= min_trust`. No lever to down-weight low-quality memories (the
+  eco-tagged nano writes) except the dormant trust floor (`memory.recall_min_trust_level`,
+  default 0.0).
 - **(c) hand-tuned weights, never evaluated** — can't know 0.5/0.2/0.15/… is right.
 
-## Scope — measure first, smallest patch that honors stored signals
+**Correction (2026-05-30):** an earlier draft of this spec proposed a "Patch 1" to exclude
+`superseded_by IS NOT NULL` from recall. **Dropped** — grep proves `superseded_by` (`db/00:185`)
+is *declared but never written* anywhere in `db/` `core/` `services/`. Supersession is aspirational
+schema, not wired machinery, so the exclusion would guard a state that never occurs (no-op).
+Wiring supersession (pick a writer: reconsolidation / contradiction-resolution / explicit
+"corrects" path) is a separate **parked design item**, not a recall fix.
 
-### Patch 1 — exclude superseded (correctness, do regardless) ✅ ship
+## Scope — measure first, reuse existing trust machinery
 
-Add to `fast_recall`:
-- seeds CTE WHERE (`db/04:135-138`): `AND m.superseded_by IS NULL` — so superseded rows don't
-  consume the ~10-row cosine seed gate.
-- final WHERE (`db/04:237-239`): `AND m.superseded_by IS NULL` — belt-and-suspenders (graph
-  expansion can pull a superseded id in via associations/temporal).
-
-Audit the sibling recall paths for the same gap (do NOT assume; grep + read each):
-`db/31_functions_recmem.sql`, `db/35_functions_recmem_ops.sql`, any `recall_memories*`.
-Apply the same exclusion where they surface memories to the model.
-
-This is a pure-correctness fix: the system already *declares* a memory dead via `superseded_by`
-but keeps recalling it. Live-propagatable (`CREATE OR REPLACE`), no `down -v`, no worker rebuild.
-
-### Patch 2 — eco-poisoning: measure, don't pre-fix ⏳ gated on data
+### Patch — eco-poisoning: measure, don't pre-fix ⏳ gated on data (the only live recall work)
 
 The eco-write change (`handoff-eco-memory-write-tagged.md`) writes nano-origin memories tagged
 `metadata.origin='eco'` at **normal trust** (deliberate: no thumb on scale). Do NOT add an origin
@@ -68,11 +61,18 @@ The existing trust factor (×0.1) + trust floor then down-weight/exclude eco mem
 automatically. This keeps the experiment honest (write normal, observe, then dial) and avoids
 hard-coding an origin special-case.
 
-### Patch 3 — hybrid lexical seed channel (optional, larger) 🔲 defer
+### Optional, larger — hybrid lexical seed channel 🔲 defer
 
-Only if Patch-1 + real use show recall *missing* keyword-exact memories. Add a `to_tsvector` GIN
+Only if real use shows recall *missing* keyword-exact memories (gap (a)). Add a `to_tsvector` GIN
 index on `memories.content` + union a `ts_rank`/BM25 seed set into the `seeds` CTE so lexical
 matches enter candidates alongside cosine seeds. Bigger surface; not justified until observed.
+
+### Parked design item — wire supersession
+
+`superseded_by` is dead schema (never written). If memory correction/dedup is wanted, pick a
+writer (reconsolidation verdict, contradiction-resolution, or an explicit "this corrects that"
+path) that sets `superseded_by`, *then* add the recall exclusion. Real feature, not a patch —
+out of scope here; recorded so the unwired column isn't mistaken for working machinery.
 
 ### NOT in scope — tuning the 7 weights
 
@@ -81,11 +81,9 @@ recall baseline first (ties to W4). Weight-tuning without an eval is guessing.
 
 ## Tests (`tests/db/`)
 
-1. A memory with `superseded_by` set is **excluded** from `fast_recall` even when its cosine
-   similarity would otherwise rank it top-K. (new)
-2. `trust_level < memory.recall_min_trust_level` excludes a memory when the floor is raised >0.
+1. `trust_level < memory.recall_min_trust_level` excludes a memory when the floor is raised >0.
    (may already be covered — verify, else add)
-3. (later, after Patch 2 data) eco-origin recall measured / down-weighted.
+2. (later, after eco data) eco-origin recall measured / down-weighted via lowered trust.
 
 ## Propagation
 
