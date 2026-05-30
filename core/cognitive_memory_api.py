@@ -234,13 +234,11 @@ class CognitiveMemory:
 
         async def _fetch_memories():
             async with self._pool.acquire() as conn:
-                # TODO(sender-scope): pure-RecMem hydrate dropped the +0.1 own-sender
-                # boost (recmem_recall_context has no sender param). `current_sender`
-                # is accepted by hydrate() but unused here. Before recmem goes live
-                # with personas, add p_sender to recmem_recall_context (db/31) and
-                # thread current_sender through _recall_recmem. See
-                # .local-notes/migrations/2026-05-30-pure-recmem-reconcile/README.md
-                return await self._recall_recmem(conn, query, memory_limit, session_id=session_id)
+                return await self._recall_recmem(
+                    conn, query, memory_limit,
+                    session_id=session_id,
+                    current_sender=current_sender,
+                )
 
         async def _fetch_partial():
             if not include_partial:
@@ -528,6 +526,7 @@ class CognitiveMemory:
         epi_limit: int | None = None,
         sem_limit: int | None = None,
         session_id: UUID | str | None = None,
+        current_sender: str | None = None,
     ) -> list[Memory]:
         async with self._pool.acquire() as conn:
             return await self._recall_recmem(
@@ -538,6 +537,7 @@ class CognitiveMemory:
                 epi_limit=epi_limit,
                 sem_limit=sem_limit,
                 session_id=session_id,
+                current_sender=current_sender,
             )
 
     async def link_to_source_unit(
@@ -1166,6 +1166,7 @@ class CognitiveMemory:
         epi_limit: int | None = None,
         sem_limit: int | None = None,
         session_id: UUID | str | None = None,
+        current_sender: str | None = None,
     ) -> list[Memory]:
         rows = await conn.fetch(
             """
@@ -1175,7 +1176,8 @@ class CognitiveMemory:
                 $2::int,
                 $3::int,
                 $4::int,
-                $5::uuid
+                $5::uuid,
+                $6::text
             )
             """,
             query,
@@ -1183,6 +1185,7 @@ class CognitiveMemory:
             int(epi_limit if epi_limit is not None else max(1, min(limit, 5))),
             int(sem_limit if sem_limit is not None else max(1, min(limit * 2, 10))),
             _uuid_text_or_none(session_id),
+            current_sender,
         )
 
         derived_sources: set[UUID] = set()
