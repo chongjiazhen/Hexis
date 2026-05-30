@@ -3,7 +3,7 @@
 Centralized "what's on our plate" so nothing gets dropped. Newest context at
 top of each item. Untracked scratch (lives in `.local-notes/`).
 
-Last updated: 2026-05-25
+Last updated: 2026-05-30
 
 ---
 
@@ -272,6 +272,31 @@ Path traveled: trinity Greek (Thea/Iris/Lyra) → pentad (+Galene +Mneme) → au
 - **Pre-existing gap surfaced (not spike):** `memories.sender_id` not
   populated by chat path (CLAUDE.md flags "RLM path not sender-scoped
   yet"). Chat path stores session tag in `source_attribution.ref` instead.
+
+### 7. Apply `drop-rollout-eval-functions.sql` to live persona DBs (PINNED 2026-05-30)
+
+- **What:** live-DB half of the pure-RecMem reconcile (upstream `244ba5c`,
+  merged `936224d`). File: `.local-notes/migrations/2026-05-30-pure-recmem-reconcile/drop-rollout-eval-functions.sql`.
+  Drops 11 rollout/eval/dual-write functions + deletes 7 `memory.recmem_*` config rows.
+  Full context + sequence: same dir's `README.md`.
+- **Why pinned:** `db/*.sql` source already pure-RecMem (merge), but a
+  *pre-existing populated* DB still has the old functions installed; `CREATE OR
+  REPLACE` can't remove them → needs this explicit `DROP` (split rule). NOT
+  `down -v` (data wipe).
+- **When it's NEEDED:** only for a DB that predates pure-RecMem AND holds data
+  worth keeping. A persona rebuilt fresh from source gets the new schema and
+  does NOT need this.
+- **Current state (2026-05-30):** only `hexis_memory` exists (fleet WIPED,
+  empty). So nothing *requires* it today. Optional smoke-test: apply on
+  `hexis_memory` to validate the 11 DROP signatures parse (low risk, empty,
+  recreatable from source).
+- **CAVEAT — ordering:** the old "don't break live chat" gate is CLEARED (chat.py
+  helpers removed in `936224d`). Remaining rule: **rebuild worker images before
+  starting any worker** against a migrated DB — a pre-merge worker image calls
+  the dropped functions and errors. Sequence: rebuild workers → apply migration →
+  (re)start workers.
+- **Apply (per DB):** `docker exec -i hexis_brain psql -U hexis_user -d hexis_<P> -v ON_ERROR_STOP=1 -f - < .local-notes/migrations/2026-05-30-pure-recmem-reconcile/drop-rollout-eval-functions.sql`
+- **Related:** sender-scope follow-up B = DONE (`9f5eae1`), separate from this.
 
 ---
 
