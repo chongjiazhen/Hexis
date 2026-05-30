@@ -49,17 +49,18 @@ auto-merge likely, worst case 1-2 hand-resolved hunks.
    false. So no live regression; migration applies when personas rebuilt.
 4. [open] OAuth decision (`1e6183e`) — separate, no philosophy block.
 
-## Tracked follow-up — restore sender-scope on RecMem read path
+## Follow-up B — restore sender-scope on RecMem read path — DONE (`9f5eae1`)
 
-Decision A (2026-05-30): landed full pure-RecMem; `hydrate()` now routes through
-`_recall_recmem` → `recmem_recall_context()`, which has **no sender param** and
-drops the +0.1 own-sender boost the eager `_recall_memories`/`fast_recall` path
-gave. Safe now (empty DB), but sender-scope is a personhood feature (per-DM-partner
-memory). **Before recmem goes live with real personas:**
-- add `p_sender TEXT DEFAULT NULL` to `recmem_recall_context` (db/31) + own-sender
-  `+0.1` score bump `WHERE sender_id = p_sender`;
-- thread `current_sender` through `_recall_recmem` and `hydrate()`'s `_fetch_memories`.
-Write-path sender-scope already preserved (conversation.py PR-C prefix).
+Decision A (2026-05-30) landed full pure-RecMem; `hydrate()` routes through
+`_recall_recmem`. Surprise on impl: `recmem_recall_context` **already** implements
+the +0.1 own-sender boost (PR-B, db/31:964 `p_current_sender`) across all tiers +
+the `own`/`cross_partner` confidentiality column. The gap was purely the Python
+wrappers dropping `current_sender`. So B = pure plumbing, **no SQL, no migration**:
+- `_recall_recmem`: accept `current_sender`, pass as 6th SQL arg (`$6::text`).
+- `hydrate()`: thread `current_sender` into `_recall_recmem` (was dropped under pure RecMem).
+- `hydrate_recmem()`: accept + thread `current_sender` (public-API parity).
+Tests: `tests/core/test_recmem_sender_scope.py` (4, mock-conn arg assertions, green).
+Write-path sender-scope was already preserved (conversation.py PR-C prefix).
 
 Timing note (historical): step 2 was gated on all-latent reach-out landing —
 both touched chat.py/heartbeat. All-latent landed in `home-rig-local`; gate cleared.
