@@ -298,20 +298,12 @@ async def _flush_trimmed_to_memory(
 
     stored = 0
     try:
-        from core.cognitive_memory_api import CognitiveMemory, MemoryType
+        from core.cognitive_memory_api import CognitiveMemory
 
         async with CognitiveMemory.connect(dsn) as mem:
-            recmem_enabled = False
-            try:
-                async with mem._pool.acquire() as conn:
-                    recmem_enabled = bool(await conn.fetchval("SELECT COALESCE(get_config_bool('memory.recmem_enabled'), false)"))
-            except Exception:
-                recmem_enabled = False
-
             for idx, (user_text, assistant_text) in enumerate(pairs):
-                # Estimate importance -- only store if worth remembering
                 combined = (user_text + " " + assistant_text).lower()
-                importance = 0.3  # baseline for compaction-saved memories
+                importance = 0.3
 
                 learning_signals = [
                     "remember", "don't forget", "important", "note that",
@@ -323,7 +315,6 @@ async def _flush_trimmed_to_memory(
                 if len(user_text) > 200 or len(assistant_text) > 500:
                     importance = max(importance, 0.5)
 
-                # Skip very short, likely unimportant exchanges
                 if importance < 0.4 and len(user_text) + len(assistant_text) < 100:
                     continue
 
@@ -335,32 +326,19 @@ async def _flush_trimmed_to_memory(
                     "trust": 0.85,
                 }
 
-                if recmem_enabled:
-                    # PR-C: preserve real sender through compaction flush. Synthetic
-                    # suffix is the idempotency disambiguator, not the identity.
-                    digest = hashlib.sha256(f"{user_text}\x1e{assistant_text}".encode("utf-8")).hexdigest()[:16]
-                    identity_prefix = sender_id or "session"
-                    await mem.remember_turn_raw(
-                        user_text,
-                        assistant_text,
-                        session_id=session_id,
-                        source_identity=f"{identity_prefix}:compaction:{session_id}:{idx}:{digest}",
-                        importance=importance,
-                        source_attribution=source_attr,
-                        metadata={"type": "conversation", "source": "compaction_flush"},
-                    )
-                else:
-                    content = f"User: {user_text}\n\nAssistant: {assistant_text}"
-                    await mem.remember(
-                        content,
-                        type=MemoryType.EPISODIC,
-                        importance=importance,
-                        emotional_valence=0.0,
-                        context={"type": "conversation", "source": "compaction_flush"},
-                        source_attribution=source_attr,
-                        trust_level=0.85,
-                        sender_id=sender_id,
-                    )
+                # PR-C: preserve real sender through compaction flush. Synthetic
+                # suffix is the idempotency disambiguator, not the identity.
+                digest = hashlib.sha256(f"{user_text}\x1e{assistant_text}".encode("utf-8")).hexdigest()[:16]
+                identity_prefix = sender_id or "session"
+                await mem.remember_turn_raw(
+                    user_text,
+                    assistant_text,
+                    session_id=session_id,
+                    source_identity=f"{identity_prefix}:compaction:{session_id}:{idx}:{digest}",
+                    importance=importance,
+                    source_attribution=source_attr,
+                    metadata={"type": "conversation", "source": "compaction_flush"},
+                )
                 stored += 1
 
         if stored:
