@@ -280,6 +280,28 @@ def _allowed_tools_for_mode(
     return names or None
 
 
+# Persona format reminder, appended at the VERY END of the assembled system
+# prompt (after conversation prompt, tool specs, personhood modules and the
+# agent-profile JSON) so it sits closest to generation and wins on recency. The
+# persona anchor is prepended at the top, ~13KB before the generation point; on
+# mundane/practical user turns the model satisfies the literal request and
+# silently drops rigid persona formats (mandatory blocks, telemetry readouts).
+# This re-asserts the persona's required output form for the current turn.
+# No-op for format-light personas (the directive is conditional on the persona
+# specifying a structure). Only appended when a persona anchor is present.
+PERSONA_FORMAT_SUFFIX = (
+    "\n\n---\n\n"
+    "OUTPUT FORMAT (highest priority — applies to THIS reply):\n"
+    "Re-read the persona definition at the top of this prompt. If it specifies a "
+    "required reply structure — mandatory blocks, telemetry/readout lines, a fixed "
+    "layout, or a voice constraint — you MUST produce it in full this turn, including "
+    "when the user's message is mundane, practical, or low-drama (a technical "
+    "question, a status update, a tired one-liner). Do NOT collapse into a plain "
+    "helpful-assistant answer that drops the persona's format. Stay fully in the "
+    "persona's required form."
+)
+
+
 async def build_system_prompt(
     mode: Literal["chat", "heartbeat"],
     registry: "ToolRegistry | None",
@@ -364,6 +386,11 @@ async def build_system_prompt(
     if agent_profile:
         prompt += "\n\n## Agent Profile\n" + json.dumps(agent_profile, separators=(", ", ": "))
 
+    # Persona format reminder LAST — closest to generation, beats the recency of
+    # the generic scaffold above. Only when a persona anchor is present.
+    if persona_system_prompt:
+        prompt += PERSONA_FORMAT_SUFFIX
+
     return prompt
 
 
@@ -426,6 +453,21 @@ async def run_agent(
             )
             if raw_psp:
                 persona_system_prompt = json.loads(raw_psp) if isinstance(raw_psp, str) else str(raw_psp)
+        except Exception:
+            pass
+
+        # Optional concrete per-persona format reminder (agent.persona_format_reminder).
+        # Appended as the LAST thing the model reads (after attach_chat_context's
+        # recalled-memory block), where a generic mid-prompt mandate loses. For
+        # rigid-format personas (mandatory blocks, telemetry) this restates the
+        # required structure verbatim so it survives practical/mundane turns.
+        persona_format_reminder = ""
+        try:
+            raw_pfr = await conn.fetchval(
+                "SELECT value FROM config WHERE key = 'agent.persona_format_reminder'"
+            )
+            if raw_pfr:
+                persona_format_reminder = json.loads(raw_pfr) if isinstance(raw_pfr, str) else str(raw_pfr)
         except Exception:
             pass
 
@@ -511,6 +553,13 @@ async def run_agent(
         system_prompt = attach_chat_context(
             system_prompt, subconscious_output, memory_context
         )
+        # Persona format mandate LAST — after the recalled-memory block, so it is
+        # the final instruction the model reads and wins on recency. Prefer the
+        # concrete per-persona restatement; fall back to the generic suffix.
+        if persona_format_reminder:
+            system_prompt += "\n\n---\n\n" + persona_format_reminder.strip()
+        elif persona_system_prompt:
+            system_prompt += PERSONA_FORMAT_SUFFIX
         enriched_user_message = user_message
     else:
         enriched_parts: list[str] = []

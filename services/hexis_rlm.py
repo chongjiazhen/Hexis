@@ -39,6 +39,27 @@ logger = logging.getLogger(__name__)
 _CODE_BLOCK_RE = re.compile(r"```repl\s*\n(.*?)\n```", re.DOTALL)
 _FINAL_VAR_RE = re.compile(r"^\s*FINAL_VAR\((.*?)\)", re.MULTILINE | re.DOTALL)
 
+# Persona format reminder, appended at the VERY END of the assembled system
+# prompt (after the generic RLM scaffold) so it sits closest to generation and
+# wins on recency. The persona anchor is prepended at the top, ~13KB before the
+# generation point; on mundane/practical user turns the model satisfies the
+# literal request and silently drops rigid persona formats (mandatory blocks,
+# telemetry readouts). This suffix re-asserts the persona's required output form
+# for the current turn. No-op for format-light personas (the directive is
+# conditional on the persona specifying a structure). Only applied when a
+# persona anchor is present.
+PERSONA_FORMAT_SUFFIX = (
+    "\n\n---\n\n"
+    "OUTPUT FORMAT (highest priority — applies to THIS reply):\n"
+    "Re-read the persona definition at the top of this prompt. If it specifies a "
+    "required reply structure — mandatory blocks, telemetry/readout lines, a fixed "
+    "layout, or a voice constraint — you MUST produce it in full this turn, including "
+    "when the user's message is mundane, practical, or low-drama (a technical "
+    "question, a status update, a tired one-liner). Do NOT collapse into a plain "
+    "helpful-assistant answer that drops the persona's format. Stay fully in the "
+    "persona's required form."
+)
+
 
 async def _load_persona_system_prompt(
     *, dsn: str | None = None, pool: Any = None
@@ -409,6 +430,7 @@ async def run_heartbeat_decision(
     persona_psp = await _load_persona_system_prompt(dsn=dsn)
     if persona_psp:
         system_prompt = persona_psp.strip() + "\n\n---\n\n" + system_prompt
+        system_prompt = system_prompt + PERSONA_FORMAT_SUFFIX
 
     # Run RLM loop in thread pool
     try:
@@ -603,6 +625,7 @@ async def run_chat_turn(
     persona_psp = await _load_persona_system_prompt(pool=pool)
     if persona_psp:
         system_prompt = persona_psp.strip() + "\n\n---\n\n" + system_prompt
+        system_prompt = system_prompt + PERSONA_FORMAT_SUFFIX
 
     # Run RLM loop
     try:
