@@ -81,11 +81,18 @@ function Start-Embed {
     # CPU-bound (--n-gpu-layers 0): embeddinggemma-300M is tiny (~320MB Q8, no
     # autoregressive gen); CPU latency is fine for DB-cached/batched embeddings.
     # Keeps the GPU single-tenant for the chat model on :8080.
+    # --parallel 8 + continuous batching: default --parallel 1 serialized all
+    # concurrent embed requests under the full 9-persona x 3-worker fleet load,
+    # so queued requests hit the get_embedding 5s curl timeout before their turn
+    # -> "Embedding service not available" -> chat write-path wedge. embeddinggemma
+    # is a tiny forward-pass model; 8 cont-batched slots absorb the burst cheaply.
+    # --ctx-size is now total KV across slots, so scale it with --parallel (8*4096).
     Start-Process -FilePath $LlamaServer `
         -ArgumentList @("-hf",$EmbedRepo,
                         "--host","0.0.0.0","--port","8081",
-                        "--ctx-size","4096",
+                        "--ctx-size","32768",
                         "--batch-size","4096","--ubatch-size","4096",
+                        "--parallel","8","--cont-batching",
                         "--n-gpu-layers","0","--embeddings",
                         "--alias","embeddinggemma-300m") `
         -WindowStyle Hidden
