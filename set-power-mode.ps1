@@ -288,8 +288,13 @@ function Ensure-GpuServer($Resolved, [int]$Port) {
             Sort-Object LastWriteTime -Descending | Select-Object -Skip 10 |
             ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
     }
+    # --no-mmproj: some BigModels snapshots (e.g. q36 mudler APEX) ship a sibling
+    # mmproj.gguf. llama-server's --mmproj-auto then loads it, enters multimodal
+    # mode, and runs a 1472x1472 vision warmup whose CUDA compute buffer pushes a
+    # 16 GB card past OOM on top of the ~13 GB weights + KV. Chat is text-only;
+    # disable the projector. No-op for text-only models (nothing to disable).
     $proc = Start-Process -FilePath $LlamaServer `
-        -ArgumentList ($Resolved.ModelArgs + @("--host","0.0.0.0","--port","$Port") + $Resolved.Tuning +
+        -ArgumentList ($Resolved.ModelArgs + @("--host","0.0.0.0","--port","$Port","--no-mmproj") + $Resolved.Tuning +
                         @("--alias",$Resolved.Alias,"--jinja","--reasoning-budget","0",
                           "--repeat-penalty","1.1","--repeat-last-n","256")) `
         -RedirectStandardError $errLog `

@@ -288,8 +288,12 @@ if (-not $wantChat) {
     Write-Host "[start] chat :8080 already running"
 } else {
     Write-Host "[start] chat llama-server :8080 ($ChatRepo)"
+    # --no-mmproj: $ChatRepo (mudler q36 APEX) ships a sibling mmproj.gguf that
+    # -hf auto-pulls; llama-server then loads it as a multimodal model and runs a
+    # 1472x1472 vision warmup whose CUDA compute buffer OOMs the 16 GB card on top
+    # of the ~13 GB weights + 64K-ctx KV. Chat is text-only; skip the projector.
     Start-Process -FilePath $LlamaServer `
-        -ArgumentList @("-hf",$ChatRepo,
+        -ArgumentList @("-hf",$ChatRepo,"--no-mmproj",
                         "--host","0.0.0.0","--port","8080",
                         "--ctx-size","65536","--n-gpu-layers","999",
                         "--flash-attn","true",
