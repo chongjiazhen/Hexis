@@ -119,6 +119,22 @@ def _tokenize_for_mdv2(text: str) -> list[tuple]:
             i += 1
             continue
 
+        # Blockquote: a line beginning with '>' (optionally '> '). MarkdownV2
+        # renders consecutive '>'-prefixed lines as one quote block; the leading
+        # '>' must stay UNescaped while line content is escaped/inline-parsed
+        # normally. Only triggers at line start so mid-line '>' still escapes.
+        if ch == ">" and (i == 0 or text[i - 1] == "\n"):
+            j = i + 1
+            if j < n and text[j] == " ":
+                j += 1
+            eol = text.find("\n", j)
+            if eol == -1:
+                eol = n
+            flush_text()
+            tokens.append(("blockquote", text[j:eol]))
+            i = eol  # leave the newline as text to preserve the line break
+            continue
+
         # Inline code: `...` (single backtick, no newline inside)
         if ch == "`":
             close_idx = text.find("`", i + 1)
@@ -146,6 +162,25 @@ def _tokenize_for_mdv2(text: str) -> list[tuple]:
             buf.append(ch)
             i += 1
             continue
+
+        # Bold (CommonMark **...**): models overwhelmingly emit double-asterisk
+        # bold, but Telegram MarkdownV2 bold is a SINGLE *. Convert a clean
+        # **...** pair (inline, non-empty) to a bold token so it renders instead
+        # of leaking literal asterisks. Checked before the single-* case so the
+        # pair is consumed as one unit.
+        if text.startswith("**", i):
+            close_idx = text.find("**", i + 2)
+            if (
+                close_idx != -1
+                and close_idx > i + 2
+                and "\n" not in text[i + 2:close_idx]
+            ):
+                inner = text[i + 2:close_idx]
+                flush_text()
+                tokens.append(("bold", inner))
+                i = close_idx + 2
+                continue
+            # Not a clean ** pair: fall through to single-* / literal handling.
 
         # Bold: *...* — paired single asterisks, no newline inside, non-empty
         # content. We require the closing * to NOT be immediately followed by
@@ -203,6 +238,11 @@ def _render_tokens_mdv2(tokens: list[tuple]) -> str:
             # Always emit bare fences (no language hint) — matches the prior
             # legacy-Markdown sanitizer behavior and keeps Telegram happy.
             out.append("```\n" + _escape_code(tok[1]) + "\n```")
+        elif kind == "blockquote":
+            # Leading '>' is the literal MarkdownV2 quote marker (unescaped);
+            # the line content is re-tokenized so inline markup still renders.
+            inner_tokens = _tokenize_for_mdv2(tok[1])
+            out.append(">" + _render_tokens_mdv2(inner_tokens))
         elif kind == "bold":
             inner_tokens = _tokenize_for_mdv2(tok[1])
             out.append("*" + _render_tokens_mdv2(inner_tokens) + "*")
