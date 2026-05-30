@@ -52,6 +52,63 @@ Character *is* the agent (latent judgment, not DB veto) · persistent identity/c
 
 **Infra (K, M, N) is thesis-neutral** — buys the local-only autonomy the thesis requires (no cloud puppeteer) without itself carrying personhood content.
 
+## Framework weaknesses (original/upstream base, in the 2026 memory-system landscape)
+
+Context: persistent-memory market is now crowded (Mem0, Zep/Graphiti, Letta, MemMachine, +
+SillyTavern built-in Vector Storage / Smart Memory). Assessment of the *base* framework, not
+the home-rig additions. Refs: `research-pivot-stack-eval-2026-05-25.md` §1, §13.
+
+Note the memory *model* is NOT the weak part — it's richer than the commodity systems:
+`superseded_by` supersession chains (`db/00_tables.sql:185`), a `CONTRADICTS` graph edge +
+`ValueConflictNode` + a deliberate `resolve_contradiction` heartbeat action, plus
+reconsolidation + reflection pipelines. The weaknesses are elsewhere:
+
+1. **Competes on the commodity axis, hides its novel parts.** Brands as "DB is the brain"
+   (storage + typed recall) — exactly what Mem0/Zep/Letta/MemMachine + ST's built-ins now do
+   (Smart Memory independently reinvented the working/episodic/semantic/strategic taxonomy,
+   §13.2). On that axis Hexis is merely adequate; its differentiated machinery (contradiction
+   resolution, reconsolidation, reflection-as-action) is unbenchmarked + unmarketed —
+   "invisible in every roundup" (§1).
+2. **Monolithic Postgres = biggest structural weakness.** All-or-nothing adoption (whole DB:
+   PL/pgSQL logic, Apache AGE, pgvector, triggers). No pluggable memory interface (grep: none)
+   — Hexis *is* the memory, vs competitors' `pip install mem0` libraries / pluggable providers
+   (Hermes `MemoryProvider`, OpenPersona faculty `local|Mem0|Zep`). Cost: zero incremental
+   adoption, PL/pgSQL hard to test/iterate/contribute, single-Postgres scaling ceiling, no
+   managed-service story. "Schema authority" is elegant but raises the contribution bar.
+3. **Naive recall ranking bottlenecks the rich model.** `fast_recall` = pure HNSW cosine
+   (`db/00_tables.sql:1029`) + sender boost + precomputed neighborhoods. No reranker, no hybrid
+   BM25+vector (grep: empty). The sophisticated stored model is retrieved by plain cosine.
+4. **No published recall eval.** Competitors ship LongMemEval numbers (MemMachine 93.0%, Mem0
+   token-efficiency). RecMem added an internal harness but no comparative score — can't prove
+   the depth beats Mem0. Unfalsifiable sophistication.
+5. **Shallow temporal/relational despite the graph.** Has AGE + `CONTRADICTS`, but relationship
+   edges are LLM-set with no decay/bi-temporal machinery (all-latent design doc admits this).
+   Zep/Graphiti win purpose-built multi-hop temporal reasoning.
+6. **Cold-start identity fragility.** Family-B anchor work exists *because* the framework
+   collapses to generic voice before memory hydrates. OpenHuman "reads you first" (day-1 context
+   from 118 OAuth connectors, §1.4); Hexis has nothing on cold turn-1 but the card.
+7. **Cross-channel identity not unified.** `sender_id` scopes DM memory, but cross-channel
+   `sender_id` is NOT unified (CLAUDE.md). Same human on Telegram + Discord = two separate
+   memory scopes — a gap for a "persistent identity" system.
+8. **Weak-model brittleness.** Prompt architecture leaks scaffolding / loops / recites plumbing
+   on small local models (the anti-collapse guards, ECO slim path, reasoning-trace + session-
+   assessment strips all prop this up). Base framework assumed a capable model; the local-only
+   mandate forces constant hardening.
+
+### The reframe that matters
+
+The weaknesses cluster **precisely in the layer Hexis brands itself on** (memory / DB-as-brain),
+now a commodity. Durable value is the **orthogonal** cognitive-loop layer the memory market
+doesn't touch — **heartbeat + consent/refusal + energy budgeting** (the "3-feature wedge, no ST
+extension found", §13.4) — which is exactly where the home-rig personhood features (A, F) live.
+
+> Hexis isn't a weak memory system — it's a **strong autonomy/selfhood system mispackaged and
+> mismarketed as a memory system**, on a monolith nobody can adopt piecemeal, unproven against
+> the benchmarks it invites comparison to.
+
+Strategic implication (already reached in §13.6): don't compete on memory (saturated); the
+loop *is* the personhood, the memory is just substrate. Ties straight back to the thesis.
+
 ## Bottom line
 
 home-rig-local's net divergence from upstream **advances the personhood thesis**, led by the all-latent reach-out arc (A) and identity-anchor work (B). One real continuity edge remains — eco's no-memory-write — and one self-corrected regression (tz-gate veto). No family actively betrays the thesis under current code.
