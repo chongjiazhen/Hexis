@@ -25,6 +25,11 @@
 
 BEGIN;
 
+-- 0. Dependent view (db/90) — must drop before its backing function ----------
+-- recmem_rollout_health depends on get_recmem_rollout_metrics(); upstream
+-- 244ba5c removed this view too. Drop first or the function DROP errors.
+DROP VIEW IF EXISTS recmem_rollout_health;
+
 -- 1. Rollout / dual-write event recorders (db/31) ----------------------------
 DROP FUNCTION IF EXISTS record_recmem_rollout_event(
     TEXT, UUID, TEXT, UUID, TEXT, BOOLEAN, BOOLEAN, UUID, FLOAT, TEXT, JSONB);
