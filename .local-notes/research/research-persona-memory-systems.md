@@ -1,5 +1,10 @@
 # Research note — persistent-memory character/persona systems vs Hexis
 
+> **⚠️ PARTIALLY SUPERSEDED 2026-05-30** — see `research-persona-memory-systems-2026-05-30.md`.
+> Disproved/stale here: "Hexis alone on DB-is-the-brain" (MuninnDB now does it),
+> "OpenPersona has no memory store" (now has local+Mem0/Zep), "OpenPersona = highest threat"
+> (27 stars, slowing). Deep-dives below = still-useful background.
+
 **Date:** 2026-05-21
 **Scope:** survey of comparable projects; deep-dive on the four closest (persona + persistent memory + selfhood).
 **Why:** competitive/architectural landscape for Hexis. What others do; where Hexis is unique.
