@@ -10,9 +10,15 @@ Baselines: fork-merge-base `27eb5e2` (2026-05-23) · live upstream `4948ea6`.
 
 | Commit | What | Philosophy | Action |
 |---|---|---|---|
-| `4948ea6` HMX v1.7 | memory-exchange spec (`plans/hmx.md`, doc-only) | **Extends** vision — consent-gated portable selfhood | **DONE** — cherry-picked (`4c61aa6`) |
-| `244ba5c` pure RecMem | rip out A/B + eval + dual-write + rollout; RecMem unconditional | **Most aligned** — one canonical brain path, no hedging | **PARTIAL** — DB half drafted (`drop-rollout-eval-functions.sql`); code half = chat.py hand-merge, deferred |
-| `1e6183e` PKCE OAuth | Anthropic OAuth + Claude Code cred auto-detect | **Neutral** — neuron-summoning, zero brain-logic in API. NOT a divergence | **DEFERRED** — take or shelf on rig-grounds (local-only is operational, not philosophical) |
+| `4948ea6` HMX v1.7 | memory-exchange spec (`plans/hmx.md`, doc-only) | **Extends** vision — consent-gated portable selfhood | **DONE** — merged (`81ce1fc`→`3392f30`) |
+| `244ba5c` pure RecMem | rip out A/B + eval + dual-write + rollout; RecMem unconditional | **Most aligned** — one canonical brain path, no hedging | **DONE** — merged (`936224d`→`3392f30`); sender-scope follow-up tracked |
+| `1e6183e` PKCE OAuth | adds `core/auth/anthropic_oauth.py` only | **Neutral** — neuron-summoning, zero brain-logic | **DECLINED (low-value)** — we already have a working Anthropic auth path (`core/auth/anthropic_setup_token.py`, shared w/ upstream). 1e6183e is an *additive* 2nd method (PKCE OAuth + auto-detect Claude Code creds vs manual setup-token). Low value on local-only rig. NOT a gap. |
+
+Auth note (correcting an earlier overclaim): the multi-provider `core/auth/`
+subsystem (chutes, qwen, minimax, openai_codex, github_copilot, google×2,
+anthropic_setup_token) is **upstream's, shared** — not our divergence. The ONLY
+auth file we lack is `anthropic_oauth.py` (the 1e6183e addition). So on auth we
+are one optional file *behind* upstream, not ahead.
 
 ## RecMem (`244ba5c`) — collision analysis
 
