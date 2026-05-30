@@ -31,6 +31,10 @@ venv/
 env/
 ENV/
 
+# uv lockfile — kept local for reproducibility; untracked to match upstream's
+# lockless pyproject posture and avoid reconcile-merge noise
+uv.lock
+
 # IDE
 .idea/
 .vscode/
