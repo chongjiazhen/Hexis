@@ -246,7 +246,15 @@ function Ensure-NanoServer() {
                         "--mlock",
                         "--parallel","1",
                         "--threads","$NanoThreads","--threads-batch","$NanoThreads",
-                        "--alias",$NanoAlias,"--jinja") `
+                        "--alias",$NanoAlias,"--jinja",
+                        # Qwen3 ships hybrid thinking ON by default. --reasoning off
+                        # sets template non-thinking mode: no <think> tag AND no CoT
+                        # narration bleeding into content. NOT --chat-template-kwargs
+                        # '{"enable_thinking":false}' (Start-Process -ArgumentList
+                        # mangles the embedded quotes -> server dies on launch); NOT
+                        # --reasoning-budget 0 alone (cuts the tag but the model still
+                        # narrates its reasoning in the content channel).
+                        "--reasoning","off") `
         -WindowStyle Hidden -PassThru
     try {
         $nanoProc.PriorityClass = [System.Diagnostics.ProcessPriorityClass]::BelowNormal

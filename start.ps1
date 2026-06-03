@@ -34,7 +34,7 @@ $ChatRepo  = "mudler/Qwen3.6-35B-A3B-Claude-4.7-Opus-Reasoning-Distilled-APEX-GG
 $EmbedRepo = "ggml-org/embeddinggemma-300M-GGUF:Q8_0"
 # Always-on CPU nano (1B). The floor every character can fall to in ECO mode.
 # Kept resident in both modes; mode switches never touch it. See set-power-mode.ps1.
-$NanoRepo  = "SicariusSicariiStuff/Nano_Imp_1B_GGUF:Q6_K"
+$NanoRepo  = "unsloth/Qwen3-0.6B-GGUF:Q8_0"
 
 function Get-PortPid([int]$Port) {
     $c = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
@@ -126,7 +126,15 @@ function Start-Nano {
                         "--mlock",
                         "--parallel","1",
                         "--threads","$NanoThreads","--threads-batch","$NanoThreads",
-                        "--alias","nano-imp-1b","--jinja") `
+                        "--alias","qwen3-0.6b","--jinja",
+                        # Qwen3 ships hybrid thinking ON by default. --reasoning off
+                        # sets template non-thinking mode: no <think> tag AND no CoT
+                        # narration bleeding into content. NOT --chat-template-kwargs
+                        # '{"enable_thinking":false}' (Start-Process -ArgumentList
+                        # mangles the embedded quotes -> server dies on launch); NOT
+                        # --reasoning-budget 0 alone (cuts the tag but the model still
+                        # narrates its reasoning in the content channel).
+                        "--reasoning","off") `
         -WindowStyle Hidden -PassThru
     try {
         $nanoProc.PriorityClass = [System.Diagnostics.ProcessPriorityClass]::BelowNormal

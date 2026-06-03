@@ -10,7 +10,7 @@
     DockerHost  = 'host.docker.internal'
     Provider    = 'openai_compatible'
     ApiKeyEnv   = 'OPENAI_API_KEY'
-    Nano  = @{ Alias = 'nano-imp-1b'; Repo = 'SicariusSicariiStuff/Nano_Imp_1B_GGUF:Q6_K'; Port = 8082 }
+    Nano  = @{ Alias = 'qwen3-0.6b'; Repo = 'unsloth/Qwen3-0.6B-GGUF:Q8_0'; Port = 8082 }
     Embed = @{ Port = 8081 }
 
     # --- Single GPU slot -------------------------------------------------
