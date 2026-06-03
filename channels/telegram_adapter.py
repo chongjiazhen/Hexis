@@ -492,6 +492,23 @@ class TelegramAdapter(ChannelAdapter):
         if hasattr(message, "message_thread_id") and message.message_thread_id:
             topic_id = str(message.message_thread_id)
 
+        # Reply/quote context: what a Telegram participant sees rendered above the
+        # reply. message.quote (Bot API 7.0+) = the exact highlighted slice when the
+        # user quotes part of a message; else the full referenced message text (or
+        # caption for media). is_bot author = the persona itself (DM self-quote).
+        reply_to_text = None
+        reply_to_sender = None
+        reply_to_is_self = False
+        rtm = message.reply_to_message
+        if rtm is not None:
+            q = getattr(message, "quote", None)
+            reply_to_text = (getattr(q, "text", None) if q else None) or rtm.text or rtm.caption
+            rf = getattr(rtm, "from_user", None)
+            if rf is not None:
+                reply_to_is_self = bool(getattr(rf, "is_bot", False))
+                if not reply_to_is_self:
+                    reply_to_sender = rf.full_name or rf.username
+
         channel_msg = ChannelMessage(
             channel_type="telegram",
             channel_id=str(chat.id),
@@ -500,6 +517,9 @@ class TelegramAdapter(ChannelAdapter):
             content=content or "",
             message_id=str(message.message_id),
             reply_to_id=str(message.reply_to_message.message_id) if message.reply_to_message else None,
+            reply_to_text=reply_to_text,
+            reply_to_sender=reply_to_sender,
+            reply_to_is_self=reply_to_is_self,
             thread_id=topic_id,
             attachments=attachments,
             metadata={

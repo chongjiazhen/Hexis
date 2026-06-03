@@ -388,6 +388,29 @@ async def _update_session(
     )
 
 
+def _prepend_reply_quote(user_content: str, msg: ChannelMessage) -> str:
+    """Prepend a quote block when the user replied to / quoted a specific earlier
+    message — the same context a participant sees rendered above the reply.
+
+    Mirrors how the platform presents it to a human: the quoted snippet, attributed
+    to its author (you, the agent itself, or another sender), above the new message.
+    Content comes from the adapter (captured off the platform update), so this works
+    even for quotes of messages we never logged. A partial-quote slice is preferred
+    over the full referenced message (handled upstream in the adapter).
+    """
+    quoted = getattr(msg, "reply_to_text", None)
+    if not quoted:
+        return user_content
+    if getattr(msg, "reply_to_is_self", False):
+        who = "your earlier message"
+    elif getattr(msg, "reply_to_sender", None):
+        who = msg.reply_to_sender
+    else:
+        who = "an earlier message"
+    note = f'[replying to {who}: "{quoted}"]'
+    return f"{note}\n\n{user_content}" if user_content else note
+
+
 async def _log_message(
     conn: asyncpg.Connection,
     session_id: str,
@@ -477,6 +500,9 @@ async def process_channel_message(
             if descs:
                 attachment_note = "[User attached: " + "; ".join(descs) + "]"
                 user_content = f"{attachment_note}\n\n{user_content}" if user_content else attachment_note
+
+        # Inject reply/quote context the same way a participant sees it.
+        user_content = _prepend_reply_quote(user_content, msg)
 
         # Run the conversation turn
         from services.chat import chat_turn
@@ -578,6 +604,9 @@ async def stream_channel_message(
             if descs:
                 attachment_note = "[User attached: " + "; ".join(descs) + "]"
                 user_content = f"{attachment_note}\n\n{user_content}" if user_content else attachment_note
+
+        # Inject reply/quote context the same way a participant sees it.
+        user_content = _prepend_reply_quote(user_content, msg)
 
         coalescer = StreamCoalescer(
             adapter,

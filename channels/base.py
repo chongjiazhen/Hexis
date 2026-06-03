@@ -46,6 +46,12 @@ class ChannelMessage:
     content: str  # Text content
     message_id: str  # Platform message ID (for replies)
     reply_to_id: str | None = None
+    # Reply/quote context — the snippet a participant sees rendered above the
+    # reply. Captured from the platform update (not a DB lookup) so it survives
+    # for quotes of messages we never logged.
+    reply_to_text: str | None = None  # quoted content (partial-quote slice if any, else full referenced msg)
+    reply_to_sender: str | None = None  # display name of the quoted message's author (None if self)
+    reply_to_is_self: bool = False  # quoted message was authored by the agent/bot
     thread_id: str | None = None
     attachments: list[Any] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)

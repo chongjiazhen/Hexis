@@ -23,6 +23,45 @@ import pytest
 pytestmark = [pytest.mark.asyncio(loop_scope="session")]
 
 
+class TestReplyQuoteInjection:
+    """_prepend_reply_quote renders the quoted snippet a participant sees above a reply."""
+
+    def _msg(self, **kw):
+        from channels.base import ChannelMessage
+
+        base = dict(
+            channel_type="telegram", channel_id="c", sender_id="u",
+            sender_name="Alice", content="ok", message_id="m",
+        )
+        base.update(kw)
+        return ChannelMessage(**base)
+
+    async def test_no_reply_unchanged(self):
+        from channels.conversation import _prepend_reply_quote
+
+        assert _prepend_reply_quote("hi", self._msg(content="hi")) == "hi"
+
+    async def test_quote_other_sender(self):
+        from channels.conversation import _prepend_reply_quote
+
+        msg = self._msg(reply_to_text="scared off?", reply_to_sender="Bob")
+        assert _prepend_reply_quote("no", msg) == '[replying to Bob: "scared off?"]\n\nno'
+
+    async def test_self_quote_is_second_person(self):
+        from channels.conversation import _prepend_reply_quote
+
+        # Replying to the agent's own earlier message -> "your earlier message"
+        msg = self._msg(reply_to_text="you up?", reply_to_is_self=True)
+        out = _prepend_reply_quote("ya", msg)
+        assert out == '[replying to your earlier message: "you up?"]\n\nya'
+
+    async def test_unknown_sender_fallback(self):
+        from channels.conversation import _prepend_reply_quote
+
+        msg = self._msg(reply_to_text="x")
+        assert _prepend_reply_quote("y", msg) == '[replying to an earlier message: "x"]\n\ny'
+
+
 # ============================================================================
 # Base Types
 # ============================================================================
