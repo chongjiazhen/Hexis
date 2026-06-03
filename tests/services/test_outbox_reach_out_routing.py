@@ -74,6 +74,78 @@ async def test_payload_sender_id_routes_to_that_users_session(db_pool):
             )
 
 
+async def test_successful_reach_out_is_persisted(db_pool):
+    """A delivered reach-out persists three ways via record_reach_out:
+    transcript (channel_messages), history continuity, tagged cognitive memory.
+
+    Guards the gap where outbox deliveries bypassed prepare/finalize_channel_turn
+    + record_chat_turn_memory, leaving the agent with no record of its outreach.
+    """
+    async with db_pool.acquire() as conn:
+        await conn.execute("DELETE FROM channel_sessions WHERE sender_id = 'carol'")
+        await conn.execute("DELETE FROM subconscious_units WHERE source_identity = 'carol'")
+        await conn.execute(
+            """
+            INSERT INTO channel_sessions (channel_type, channel_id, sender_id, last_active)
+            VALUES ('telegram', 'CCC', 'carol', CURRENT_TIMESTAMP)
+            """,
+        )
+
+    try:
+        manager = AsyncMock()
+        manager.send = AsyncMock(return_value="msg-2")
+        consumer = ChannelOutboxConsumer(manager, db_pool)
+
+        body = {
+            "kind": "user",
+            "payload": {
+                "message": "hey, you still around?",
+                "sender_id": "carol",
+                "intent": "heartbeat",
+            },
+        }
+        await consumer._process_message(body)
+        assert manager.send.await_count == 1
+
+        async with db_pool.acquire() as conn:
+            # 1. transcript: outbound row tagged kind=reach_out, trigger=heartbeat
+            msg = await conn.fetchrow(
+                """
+                SELECT direction, metadata FROM channel_messages cm
+                JOIN channel_sessions cs ON cs.id = cm.session_id
+                WHERE cs.sender_id = 'carol' ORDER BY cm.created_at DESC LIMIT 1
+                """,
+            )
+            assert msg is not None, "no channel_messages row persisted"
+            meta = msg["metadata"]
+            meta = json.loads(meta) if isinstance(meta, str) else meta
+            assert msg["direction"] == "outbound"
+            assert meta.get("kind") == "reach_out"
+            assert meta.get("trigger") == "heartbeat"
+            assert meta.get("origin") == "prime"
+
+            # 2. continuity: assistant turn appended to history
+            hist = await conn.fetchval(
+                "SELECT history FROM channel_sessions WHERE sender_id = 'carol'"
+            )
+            hist = json.loads(hist) if isinstance(hist, str) else hist
+            assert hist and hist[-1]["role"] == "assistant"
+            assert hist[-1]["content"] == "hey, you still around?"
+
+            # 3. cognitive memory: tagged reach_out subconscious unit
+            unit_kind = await conn.fetchval(
+                """
+                SELECT metadata->>'kind' FROM subconscious_units
+                WHERE source_identity = 'carol' ORDER BY created_at DESC LIMIT 1
+                """,
+            )
+            assert unit_kind == "reach_out", f"expected reach_out memory, got {unit_kind!r}"
+    finally:
+        async with db_pool.acquire() as conn:
+            await conn.execute("DELETE FROM channel_sessions WHERE sender_id = 'carol'")
+            await conn.execute("DELETE FROM subconscious_units WHERE source_identity = 'carol'")
+
+
 async def test_quiet_gated_reach_out_never_reaches_channel(db_pool):
     """When the SQL gate skips a quiet reach-out, no outbox message is emitted,
     so the channel-side consumer should never see anything to deliver."""

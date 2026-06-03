@@ -148,6 +148,10 @@ class ChannelOutboxConsumer:
 
         delivery_mode = str(payload.get("delivery_mode") or "last_active")
         outbox_msg_id = str(body.get("id") or "")
+        # What fired this proactive send — payload.intent is the semantic signal
+        # (kind is generically 'user' for all outbox user messages). Used to tag
+        # the persisted reach-out (metadata.trigger).
+        trigger = str(payload.get("intent") or kind or "reach_out")
 
         # I.2: Check for domain-based delivery routing from cron delivery info
         delivery_info = payload.get("delivery") or body.get("delivery")
@@ -177,7 +181,7 @@ class ChannelOutboxConsumer:
                 if routed:
                     return
             # Default: last_active
-            await self._deliver_last_active(content, payload, outbox_msg_id)
+            await self._deliver_last_active(content, payload, outbox_msg_id, trigger)
 
     async def _deliver_by_domain(
         self, content: str, payload: dict, domain: str, outbox_msg_id: str
@@ -232,7 +236,7 @@ class ChannelOutboxConsumer:
         except Exception as e:
             await self._log_delivery(outbox_msg_id, channel_type, target_id, thread_id, content, "direct", False, str(e))
 
-    async def _deliver_last_active(self, content: str, payload: dict, outbox_msg_id: str) -> None:
+    async def _deliver_last_active(self, content: str, payload: dict, outbox_msg_id: str, trigger: str = "reach_out") -> None:
         """Send to the sender's most recently active channel session."""
         sender_id = str(payload.get("sender_id") or payload.get("target_user") or "")
 
@@ -240,7 +244,7 @@ class ChannelOutboxConsumer:
             if sender_id:
                 row = await conn.fetchrow(
                     """
-                    SELECT channel_type, channel_id, sender_id
+                    SELECT id, channel_type, channel_id, sender_id
                     FROM channel_sessions
                     WHERE sender_id = $1
                     ORDER BY last_active DESC NULLS LAST
@@ -252,7 +256,7 @@ class ChannelOutboxConsumer:
                 # No specific sender — use the globally most recent session
                 row = await conn.fetchrow(
                     """
-                    SELECT channel_type, channel_id, sender_id
+                    SELECT id, channel_type, channel_id, sender_id
                     FROM channel_sessions
                     ORDER BY last_active DESC NULLS LAST
                     LIMIT 1
@@ -270,8 +274,28 @@ class ChannelOutboxConsumer:
         try:
             await self._manager.send(channel_type, channel_id, content)
             await self._log_delivery(outbox_msg_id, channel_type, channel_id, resolved_sender, content, "last_active", True)
+            # Persist the reach-out only on a SUCCESSFUL send (success-gated):
+            # transcript + history continuity + tagged cognitive memory.
+            await self._persist_reach_out(row["id"], content, trigger)
         except Exception as e:
             await self._log_delivery(outbox_msg_id, channel_type, channel_id, resolved_sender, content, "last_active", False, str(e))
+
+    async def _persist_reach_out(self, session_id: Any, content: str, trigger: str) -> None:
+        """Persist a proactive reach-out via the record_reach_out DB function.
+
+        The inbound-reply path persists through prepare/finalize_channel_turn +
+        record_chat_turn_memory; the outbox path skipped all of it, leaving the
+        agent with no transcript and no memory of its own outreach. Non-fatal: a
+        failed persist must never affect delivery (the send already succeeded).
+        """
+        try:
+            async with self._pool.acquire() as conn:
+                await conn.execute(
+                    "SELECT record_reach_out($1::uuid, $2::text, $3::text, $4::text)",
+                    str(session_id), content, trigger, "prime",
+                )
+        except Exception:
+            logger.exception("Failed to persist reach-out (non-fatal)")
 
     async def _deliver_broadcast(self, content: str, payload: dict, outbox_msg_id: str) -> None:
         """Send to all active channel sessions."""

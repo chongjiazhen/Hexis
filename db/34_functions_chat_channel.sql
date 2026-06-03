@@ -338,3 +338,78 @@ BEGIN
     RETURN jsonb_build_object('session_id', p_session_id, 'history_count', jsonb_array_length(v_history), 'flush', flush_result);
 END;
 $$;
+
+-- Persist a proactive reach-out: an outbound the agent INITIATED with no inbound
+-- prompt (heartbeat / cron / alert), delivered via the outbox path.
+--
+-- The inbound-reply path persists through prepare_channel_turn +
+-- finalize_channel_turn + record_chat_turn_memory. Outbox deliveries bypassed
+-- all three, so a reach-out left NO transcript and NO memory — the agent had no
+-- record it ever reached out (and the next inbound reply saw a discontinuous
+-- history). This closes the gap atomically:
+--   1. transcript        -> channel_messages (outbound, tagged)
+--   2. continuity        -> append the assistant turn to channel_sessions.history
+--                           so the next inbound reply sees what was sent
+--   3. cognitive memory  -> record_chat_turn_memory (assistant-only turn, tagged
+--                           origin/kind/trigger) so recall surfaces "I reached out"
+--
+-- Caller MUST invoke this only after a SUCCESSFUL user-facing send — never on a
+-- failed, silent, or webhook delivery (a memory of saying something that never
+-- arrived is a false memory). Tags mirror the eco/prime quality axis:
+--   metadata.origin  = composing model tier ('prime' — heartbeat runs in prime)
+--   metadata.kind    = 'reach_out' (proactive) vs the implicit 'reply' (reactive)
+--   metadata.trigger = what fired it (intent: heartbeat / cron / alert)
+CREATE OR REPLACE FUNCTION record_reach_out(
+    p_session_id UUID,
+    p_content TEXT,
+    p_trigger TEXT DEFAULT 'reach_out',
+    p_origin TEXT DEFAULT 'prime'
+) RETURNS JSONB
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_sender_id TEXT;
+    v_tags JSONB;
+    v_mem JSONB;
+BEGIN
+    IF p_session_id IS NULL OR COALESCE(p_content, '') = '' THEN
+        RETURN jsonb_build_object('skipped', true, 'reason', 'empty');
+    END IF;
+
+    SELECT sender_id INTO v_sender_id
+    FROM channel_sessions WHERE id = p_session_id;
+    IF NOT FOUND THEN
+        RETURN jsonb_build_object('skipped', true, 'reason', 'no_session');
+    END IF;
+
+    v_tags := jsonb_build_object(
+        'type', 'conversation',
+        'origin', COALESCE(NULLIF(p_origin, ''), 'prime'),
+        'kind', 'reach_out',
+        'trigger', COALESCE(NULLIF(p_trigger, ''), 'reach_out')
+    );
+
+    -- 1. transcript
+    INSERT INTO channel_messages (session_id, direction, content, platform_message_id, metadata)
+    VALUES (p_session_id, 'outbound', p_content, NULL, v_tags);
+
+    -- 2. continuity: append the assistant turn so the next inbound reply has context
+    UPDATE channel_sessions
+    SET history = COALESCE(history, '[]'::jsonb)
+                  || jsonb_build_object('role', 'assistant', 'content', p_content),
+        last_active = CURRENT_TIMESTAMP
+    WHERE id = p_session_id;
+
+    -- 3. cognitive memory: assistant-only turn (empty user = proactive), tagged.
+    -- source_identity = sender_id scopes the memory to that DM partner.
+    v_mem := record_chat_turn_memory(
+        '',
+        p_content,
+        p_session_id::text,
+        v_sender_id,
+        jsonb_build_object('metadata', v_tags)
+    );
+
+    RETURN jsonb_build_object('logged', true, 'sender_id', v_sender_id, 'memory', v_mem);
+END;
+$$;
