@@ -22,8 +22,11 @@
   flag workers gate on; `set-power-mode.ps1 eco|prime` flips it atomically with
   `llm.*` configs. In ECO: chat path bypasses RLM + tool stack via
   `services.chat._eco_slim_chat` (persona prompt + small anchor + last 8 turns →
-  direct LLM, no tools, **no memory write**); heartbeat timer skips entirely. Slim
-  failures → `ECO_FALLBACK_REPLY`. PRIME restores full RLM + memory writes.
+  direct LLM, no tools, no recall). The turn **is** still persisted via
+  `_eco_remember` → `record_chat_turn_memory`, written to `subconscious_units`
+  tagged `metadata.origin='eco'` (vs `'prime'`) so eco/prime quality stays
+  measurable; heartbeat timer skips entirely. Slim failures → `ECO_FALLBACK_REPLY`.
+  PRIME restores full RLM + agentic tool use.
 - **Cold re-arm** (apply a new ActiveBig alias/tuning to a running :8080):
   `.\set-power-mode.ps1 eco` then `.\set-power-mode.ps1 prime` (`prime` alone
   skips relaunch if :8080 is up). Verify three-way — server `--alias` == char DB

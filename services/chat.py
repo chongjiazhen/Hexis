@@ -375,11 +375,12 @@ async def chat_turn(
 
     # ECO mode: bypass RLM + tool-agent stack entirely (the heavy prompt
     # template makes 1B emit code-REPL garbage). Use a slim direct LLM call
-    # with persona_system_prompt + tiny anchor only. No tools, no recall, no
-    # memory write — interactive but minimal.
+    # with persona_system_prompt + tiny anchor only. No tools, no recall. The
+    # turn IS still persisted via _eco_remember (tagged metadata.origin='eco')
+    # so eco vs prime quality stays measurable downstream.
     is_eco = (await _read_power_mode(pool, dsn) == 'eco')
     if is_eco:
-        logger.info("ECO mode: chat_turn -> slim direct LLM (no RLM, no tools, no memory write)")
+        logger.info("ECO mode: chat_turn -> slim direct LLM (no RLM, no tools; turn persisted tagged origin=eco)")
         try:
             assistant_text = await _eco_slim_chat(
                 user_message=user_message,
