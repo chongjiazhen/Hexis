@@ -61,6 +61,13 @@ def test_case_insensitive_marker():
     assert classify_decline("[decline:ice:x]") is not None
 
 
+def test_mixed_case_register_normalized():
+    # IGNORECASE matches the register group; it must be lowered + rendered correctly.
+    d = classify_decline("[DECLINE:Warm:x] catch you later")
+    assert d.register == "warm"
+    assert d.visible_text == "catch you later"
+
+
 def test_cool_empty_reason_renders_bare_declined():
     d = classify_decline("[DECLINE:cool:]")
     assert d.reason is None
