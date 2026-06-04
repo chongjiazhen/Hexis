@@ -98,9 +98,16 @@ emit                    adapter.send(assistant_text)
 ```
 
 The parse + render + decline-memory step is a single post-generation hook applied
-to `assistant_text` in `chat_turn`, after each path produces its text and before
-`_remember_conversation`/return. One insertion point per path (ECO return, RLM
-return, run_agent return) calls the same helper.
+to `assistant_text` after each path produces its text and before
+`_remember_conversation`/return. Insertion points:
+- `chat_turn`: ECO, RLM (×2 sub-branches), run_agent.
+- `stream_chat_turn`: ECO single-chunk, and the buffered agent path. **The
+  streaming variant buffers the full reply (`full_text`) before yielding a single
+  chunk** (session-assessment capture needs the complete reply; Telegram's
+  StreamCoalescer batches anyway), so the same post-generation hook applies — no
+  token-level decline handling needed. This path is load-bearing: the channel
+  manager uses streaming for any adapter with `edit_message` capability
+  (**Telegram included**), so the live fleet's reactive chat flows through here.
 
 - Inbound is logged in `prepare_channel_turn` *before* the turn runs, so a
   declined message is recorded regardless.
@@ -177,9 +184,10 @@ sender_id is not unified in hexis).
 
 ## 9. Change surface (anticipated)
 
-- `services/chat.py` — `classify_decline` parser + the post-generation hook in
-  `chat_turn` applied at all three return points (ECO, RLM, run_agent);
-  `chat.decline.enabled` read.
+- `services/chat.py` — the post-generation hook applied at every return point of
+  BOTH `chat_turn` (ECO, RLM ×2, run_agent) and `stream_chat_turn` (ECO,
+  buffered agent path); `chat.decline.enabled` read. (`classify_decline` lives in
+  `services/decline.py`.)
 - `db/34_functions_chat_channel.sql` — decline memory write helper (or reuse
   `record_chat_turn_memory` with a decline kind) + `chat_decline_log` view
   (DB authority for the memory shape).
