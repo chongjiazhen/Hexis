@@ -344,6 +344,28 @@ out-of-scope for a personal fleet. These remain as ops, not framework defects:
   ~1 channel per persona today. **Trip-wire:** if any persona starts spanning channels for the
   same human, revisit (would need a sender-identity map / alias table). Until then, leave.
 
+### ECO engine re-eval — could Qwen3-0.6B ride run_agent? (raised 2026-06-04)
+
+**Question:** ECO currently uses bespoke `_eco_slim_chat` (services/chat.py:69) —
+bypasses BOTH RLM and run_agent (no tools, no recall). Reason it bypasses
+run_agent too: old finding (`project_eco_floor_unviable.md`, v2→v3) — the
+**tool-definition block itself** made nano-imp-1b emit code-completion garbage,
+so v3 stripped ALL scaffold, not just RLM's REPL.
+
+**Why revisit:** ECO model changed since (nano-imp-1b → `unsloth/Qwen3-0.6B-GGUF:Q8_0`
+clean instruct, see `project_eco_nano_qwen3_swap.md`). The "tool block confuses
+ECO model" finding is from the OLD model. run_agent is lighter than RLM (one
+tool-call loop vs multi-iteration REPL + code exec). So Qwen3-0.6B *might* drive
+run_agent → ECO regains tools + recall instead of the fully-stripped slim path.
+
+**Test:** re-run `tools/probe-eco/probe-all.sh` (or equiv) with ECO pointed at
+run_agent path (`chat.use_rlm=false`, power_mode logic) on Qwen3-0.6B. Compare
+persona-voice hold + REPL/tool confusion vs current `_eco_slim_chat`.
+
+**Scope note:** separate from C2 (per-message response autonomy) — C2 hooks
+`assistant_text` regardless of engine, doesn't need this. Don't fold in. If
+pursued, would restore ECO tools/recall (bigger ECO character change).
+
 ### Housekeeping — `_inbox-test` deleted (2026-05-25)
 - Scratch file `.local-notes/_inbox-test` (untracked) deleted after
   content-diff vs this inbox. All actionable items either DUP of current
