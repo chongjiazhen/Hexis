@@ -544,6 +544,7 @@ async def run_chat_turn(
     timeout_seconds: int = 120,
     workspace_budgets: WorkspaceBudgets | None = None,
     pool: Any | None = None,
+    decline_enabled: bool = False,
 ) -> dict[str, Any]:
     """
     Run the RLM loop for a chat turn.
@@ -622,6 +623,9 @@ async def run_chat_turn(
     personhood_addendum = compose_personhood_prompt("conversation")
     if personhood_addendum:
         system_prompt = system_prompt + "\n\n---\n\n" + personhood_addendum
+    if decline_enabled:
+        from services.prompt_resources import load_decline_prompt
+        system_prompt = system_prompt + "\n\n" + load_decline_prompt().strip()
     persona_psp = await _load_persona_system_prompt(pool=pool)
     if persona_psp:
         system_prompt = persona_psp.strip() + "\n\n---\n\n" + system_prompt

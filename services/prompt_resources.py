@@ -24,6 +24,7 @@ RLM_RECONSOLIDATION_PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / 
 RECMEM_EPISODE_MERGE_PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "recmem_episode_merge.md"
 RECMEM_EPISODE_CREATE_PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "recmem_episode_create.md"
 RECMEM_SEMANTIC_REFINE_PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "recmem_semantic_refine.md"
+DECLINE_PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "decline.md"
 
 
 @dataclass(frozen=True)
@@ -227,6 +228,19 @@ def load_channel_context_prompt() -> str:
     return (
         "You are in a group conversation. Respond when mentioned or when you can add genuine value. "
         "Stay silent during casual banter. Don't share private context."
+    )
+
+
+def load_decline_prompt() -> str:
+    if DECLINE_PROMPT_PATH.exists():
+        return DECLINE_PROMPT_PATH.read_text(encoding="utf-8")
+    return (
+        "## Choosing not to respond\n\n"
+        "Responding is not mandatory. Decline by beginning your reply with one of these markers:\n\n"
+        "- `[DECLINE:gentle:<short reason>] <a brief, in-character line>`\n"
+        "- `[DECLINE:plain:<short reason>]`\n"
+        "- `[DECLINE:blunt:<short reason>]`\n\n"
+        "The marker must be the very first thing in your reply. Use it sparingly."
     )
 
 

@@ -312,6 +312,7 @@ async def build_system_prompt(
     is_group: bool = False,
     persona_system_prompt: str = "",
     allowed_tool_names: list[str] | None = None,
+    decline_enabled: bool = False,
 ) -> str:
     """Build the system prompt for either chat or heartbeat mode.
 
@@ -334,6 +335,9 @@ async def build_system_prompt(
         if is_group:
             from services.prompt_resources import load_channel_context_prompt
             prompt += "\n\n" + load_channel_context_prompt().strip()
+        if decline_enabled:
+            from services.prompt_resources import load_decline_prompt
+            prompt += "\n\n" + load_decline_prompt().strip()
     else:
         prompt = base_prefix + load_heartbeat_agentic_prompt().strip()
 
@@ -422,6 +426,7 @@ async def run_agent(
     max_tokens: int | None = None,
     max_iterations: int | None = None,
     sender_id: str | None = None,
+    decline_enabled: bool = False,
 ) -> "AgentLoopResult":
     """
     Unified entry point for both chat and heartbeat agent invocations.
@@ -541,6 +546,7 @@ async def run_agent(
         is_group=is_group,
         persona_system_prompt=persona_system_prompt,
         allowed_tool_names=allowed_tool_names,
+        decline_enabled=decline_enabled,
     )
 
     # 5. Build enriched user message.
@@ -646,6 +652,7 @@ async def stream_agent(
     timeout_seconds: float | None = None,
     max_tokens: int | None = None,
     sender_id: str | None = None,
+    decline_enabled: bool = False,
 ) -> AsyncIterator[AgentEventData]:
     """
     Streaming variant of run_agent(). Yields AgentEventData as they happen.
@@ -745,6 +752,7 @@ async def stream_agent(
         is_group=is_group,
         persona_system_prompt=persona_system_prompt,
         allowed_tool_names=allowed_tool_names,
+        decline_enabled=decline_enabled,
     )
 
     # Build enriched user message — chat context folds into the system

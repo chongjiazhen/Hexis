@@ -74,6 +74,7 @@ async def _eco_slim_chat(
     llm_config: dict[str, Any],
     pool: Any | None,
     dsn: str | None,
+    decline_enabled: bool = False,
 ) -> str:
     """
     Bypass the RLM / tool-agent stack entirely. In ECO the 1B model can't
@@ -87,6 +88,9 @@ async def _eco_slim_chat(
     """
     persona = await _load_persona_system_prompt(pool, dsn)
     system_msg = f"{persona.strip()}\n\n---\n\n{ECO_SLIM_ANCHOR}" if persona else ECO_SLIM_ANCHOR
+    if decline_enabled:
+        from services.prompt_resources import load_decline_prompt
+        system_msg = system_msg + "\n\n" + load_decline_prompt().strip()
 
     # Trim history to last N exchanges to keep prompt tight on 1B
     trimmed_history = history[-8:] if len(history) > 8 else history
@@ -482,6 +486,7 @@ async def chat_turn(
                 llm_config=normalized,
                 pool=pool,
                 dsn=dsn,
+                decline_enabled=decline_enabled,
             )
         except Exception as exc:
             logger.warning(f"ECO slim chat raised, using fallback reply: {exc}")
@@ -544,6 +549,7 @@ async def chat_turn(
             dsn=dsn,
             session_id=session_id,
             pool=pool,
+            decline_enabled=decline_enabled,
         )
         assistant_text = result["response"]
         if pool is not None:
@@ -623,6 +629,7 @@ async def chat_turn(
             dsn=dsn,
             max_iterations=max_tool_iterations,
             sender_id=sender_id,
+            decline_enabled=decline_enabled,
         )
         assistant_text = loop_result.text
 
@@ -698,6 +705,7 @@ async def stream_chat_turn(
                 llm_config=normalized_cfg,
                 pool=pool,
                 dsn=dsn,
+                decline_enabled=decline_enabled,
             )
         except Exception as exc:
             logger.warning(f"ECO slim chat raised, using fallback reply: {exc}")
@@ -751,6 +759,7 @@ async def stream_chat_turn(
             is_group=is_group,
             dsn=dsn,
             sender_id=sender_id,
+            decline_enabled=decline_enabled,
         ):
             if event.event == AgentEvent.TEXT_DELTA:
                 text = event.data.get("text", "")

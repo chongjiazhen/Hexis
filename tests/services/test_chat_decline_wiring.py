@@ -126,3 +126,10 @@ async def test_stream_chat_turn_eco_path_declines(monkeypatch):
     assert chunks == ["[DECLINED]"]          # blunt render
     assert recorded["origin"] == "eco"
     assert recorded["register"] == "blunt"
+
+
+def test_decline_prompt_loads_and_mentions_marker():
+    from services.prompt_resources import load_decline_prompt
+    text = load_decline_prompt()
+    assert "[DECLINE:" in text
+    assert "gentle" in text and "plain" in text and "blunt" in text
