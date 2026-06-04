@@ -623,12 +623,16 @@ async def run_chat_turn(
     personhood_addendum = compose_personhood_prompt("conversation")
     if personhood_addendum:
         system_prompt = system_prompt + "\n\n---\n\n" + personhood_addendum
-    if decline_enabled:
-        from services.prompt_resources import load_decline_prompt
-        system_prompt = system_prompt + "\n\n" + load_decline_prompt().strip()
     persona_psp = await _load_persona_system_prompt(pool=pool)
     if persona_psp:
         system_prompt = persona_psp.strip() + "\n\n---\n\n" + system_prompt
+    # Decline-convention instruction LATE (after the persona card prepend) so the
+    # agency instruction is attended to, not buried under the persona scaffold.
+    # PERSONA_FORMAT_SUFFIX stays truly last (closest to generation).
+    if decline_enabled:
+        from services.prompt_resources import load_decline_prompt
+        system_prompt = system_prompt + "\n\n" + load_decline_prompt().strip()
+    if persona_psp:
         system_prompt = system_prompt + PERSONA_FORMAT_SUFFIX
 
     # Run RLM loop

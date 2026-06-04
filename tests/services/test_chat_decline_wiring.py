@@ -128,7 +128,8 @@ async def test_stream_chat_turn_eco_path_declines(monkeypatch):
     assert recorded["register"] == "blunt"
 
 
-def test_decline_prompt_loads_and_mentions_marker():
+async def test_decline_prompt_loads_and_mentions_marker():
+    # async def so it doesn't trip the module-level pytest.mark.asyncio on a sync test
     from services.prompt_resources import load_decline_prompt
     text = load_decline_prompt()
     assert "[DECLINE:" in text

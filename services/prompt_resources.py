@@ -231,6 +231,7 @@ def load_channel_context_prompt() -> str:
     )
 
 
+@lru_cache(maxsize=1)
 def load_decline_prompt() -> str:
     if DECLINE_PROMPT_PATH.exists():
         return DECLINE_PROMPT_PATH.read_text(encoding="utf-8")

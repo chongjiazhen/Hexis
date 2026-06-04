@@ -335,9 +335,6 @@ async def build_system_prompt(
         if is_group:
             from services.prompt_resources import load_channel_context_prompt
             prompt += "\n\n" + load_channel_context_prompt().strip()
-        if decline_enabled:
-            from services.prompt_resources import load_decline_prompt
-            prompt += "\n\n" + load_decline_prompt().strip()
     else:
         prompt = base_prefix + load_heartbeat_agentic_prompt().strip()
 
@@ -389,6 +386,12 @@ async def build_system_prompt(
     # Agent profile
     if agent_profile:
         prompt += "\n\n## Agent Profile\n" + json.dumps(agent_profile, separators=(", ", ": "))
+
+    # Decline-convention instruction LATE — an agency instruction the model must
+    # actually attend to, so it sits after the scaffold (chat mode + enabled only).
+    if mode == "chat" and decline_enabled:
+        from services.prompt_resources import load_decline_prompt
+        prompt += "\n\n" + load_decline_prompt().strip()
 
     # Persona format reminder LAST — closest to generation, beats the recency of
     # the generic scaffold above. Only when a persona anchor is present.
