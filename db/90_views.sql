@@ -73,7 +73,8 @@ SELECT
     COALESCE(s.value->'active_actions', '[]'::jsonb) as active_actions,
     NULLIF(s.value->>'active_reasoning', '') as active_reasoning,
     COALESCE(s.value->'reach_out_sender_log', '{}'::jsonb) as reach_out_sender_log,
-    s.updated_at
+    s.updated_at,
+    (s.value->>'resume_at')::timestamptz as resume_at
 FROM state s
 WHERE s.key = 'heartbeat_state';
 CREATE VIEW maintenance_state AS

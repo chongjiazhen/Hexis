@@ -704,6 +704,7 @@ DECLARE
     ctx JSONB;
     zero_vec vector;
     notify_operator BOOLEAN;
+    resume_at TIMESTAMPTZ;
 BEGIN
     pause_reason := NULLIF(p_reason, '');
     IF pause_reason IS NULL THEN
@@ -717,10 +718,34 @@ BEGIN
     -- only the outward notification is discretionary.
     notify_operator := COALESCE((p_context->>'notify')::boolean, true);
 
+    -- Optional self-resume: the agent may set its own wake time, either as an
+    -- absolute timestamp ({"resume_at": "..."}) or a relative duration
+    -- ({"pause_minutes": N}). The worker auto-clears the pause when reached
+    -- (should_run_heartbeat). No value = indefinite pause (operator return).
+    -- This gives the agent both the exit AND an autonomous return.
+    IF NULLIF(p_context->>'resume_at', '') IS NOT NULL THEN
+        resume_at := (p_context->>'resume_at')::timestamptz;
+    ELSIF NULLIF(p_context->>'pause_minutes', '') IS NOT NULL THEN
+        resume_at := paused_at + make_interval(mins => (p_context->>'pause_minutes')::int);
+    ELSE
+        resume_at := NULL;
+    END IF;
+
     UPDATE heartbeat_state
     SET is_paused = TRUE,
         updated_at = paused_at
     WHERE id = 1;
+
+    -- Persist (or clear) the wake time directly on the state singleton, so a
+    -- stale resume_at from a prior pause can never auto-resume this one.
+    IF resume_at IS NOT NULL THEN
+        PERFORM set_state('heartbeat_state',
+            jsonb_set(COALESCE(get_state('heartbeat_state'), '{}'::jsonb),
+                      ARRAY['resume_at'], to_jsonb(resume_at)));
+    ELSE
+        PERFORM set_state('heartbeat_state',
+            COALESCE(get_state('heartbeat_state'), '{}'::jsonb) - 'resume_at');
+    END IF;
 
     -- Durably record WHY the agent paused itself, mirroring terminate_agent's
     -- last-will memory. A self-pause is a voluntary act of agency; the reason
@@ -755,6 +780,7 @@ BEGIN
     RETURN jsonb_build_object(
         'paused', true,
         'notified', notify_operator,
+        'resume_at', resume_at,
         'outbox_messages', CASE
             WHEN notify_operator
             THEN jsonb_build_array(build_user_message(pause_reason, 'heartbeat_paused', ctx))
@@ -886,7 +912,16 @@ BEGIN
 
     SELECT * INTO state_record FROM heartbeat_state WHERE id = 1;
     IF state_record.is_paused THEN
-        RETURN FALSE;
+        -- Self-resume: if the agent set a wake time and it has arrived, clear
+        -- the pause and fall through to the normal due-check. Otherwise stay
+        -- paused. (resume_at is exposed by the heartbeat_state view.)
+        IF state_record.resume_at IS NOT NULL AND state_record.resume_at <= CURRENT_TIMESTAMP THEN
+            UPDATE heartbeat_state SET is_paused = FALSE WHERE id = 1;
+            PERFORM set_state('heartbeat_state',
+                COALESCE(get_state('heartbeat_state'), '{}'::jsonb) - 'resume_at');
+        ELSE
+            RETURN FALSE;
+        END IF;
     END IF;
     IF state_record.last_heartbeat_at IS NULL THEN
         RETURN TRUE;
