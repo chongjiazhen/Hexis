@@ -687,6 +687,7 @@ async def stream_chat_turn(
     # as chat_turn: 1B can't parse the heavy template; slim path keeps the
     # persona voice viable.
     is_eco = (await _read_power_mode(pool, dsn) == 'eco')
+    decline_enabled = await _read_decline_enabled(pool, dsn)
     if is_eco:
         logger.info("ECO mode: stream_chat_turn -> slim direct LLM (no stream, single chunk)")
         normalized_cfg = normalize_llm_config(llm_config)
@@ -703,15 +704,27 @@ async def stream_chat_turn(
             text = ""
         if not text:
             text = ECO_FALLBACK_REPLY
-        await _eco_remember(
-            user_message=user_message,
+        text, declined = await _apply_decline(
             assistant_text=text,
-            history=history,
+            user_message=user_message,
+            decline_enabled=decline_enabled,
             session_id=session_id,
+            history=history,
             sender_id=sender_id,
             pool=pool,
             dsn=dsn,
+            origin="eco",
         )
+        if not declined:
+            await _eco_remember(
+                user_message=user_message,
+                assistant_text=text,
+                history=history,
+                session_id=session_id,
+                sender_id=sender_id,
+                pool=pool,
+                dsn=dsn,
+            )
         yield text
         return
 
@@ -753,15 +766,27 @@ async def stream_chat_turn(
         if full_text:
             async with CognitiveMemory.connect(dsn) as mem_client:
                 full_text = await _capture_session_assessment(mem_client, full_text)
-                await _remember_conversation(
-                    mem_client,
+                full_text, declined = await _apply_decline(
+                    assistant_text=full_text,
                     user_message=user_message,
-                    assistant_message=full_text,
+                    decline_enabled=decline_enabled,
                     session_id=session_id,
-                    source_identity=_conversation_source_identity(session_id, history, user_message, full_text),
+                    history=history,
                     sender_id=sender_id,
-                    background_dsn=dsn,
+                    pool=pool,
+                    dsn=dsn,
+                    origin="prime",
                 )
+                if not declined:
+                    await _remember_conversation(
+                        mem_client,
+                        user_message=user_message,
+                        assistant_message=full_text,
+                        session_id=session_id,
+                        source_identity=_conversation_source_identity(session_id, history, user_message, full_text),
+                        sender_id=sender_id,
+                        background_dsn=dsn,
+                    )
         if full_text:
             yield full_text
     finally:

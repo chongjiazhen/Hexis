@@ -90,3 +90,39 @@ async def test_chat_turn_eco_path_declines(monkeypatch):
     )
     assert out["assistant"] == "[DECLINED: napping]"
     assert recorded["origin"] == "eco"
+
+
+async def test_stream_chat_turn_eco_path_declines(monkeypatch):
+    """Streaming ECO path: a decline marker is honored + rendered in the yielded chunk."""
+    async def _fake_power_mode(*a, **k):
+        return "eco"
+    monkeypatch.setattr(chat, "_read_power_mode", _fake_power_mode)
+
+    async def _fake_decline_enabled(*a, **k):
+        return True
+    monkeypatch.setattr(chat, "_read_decline_enabled", _fake_decline_enabled)
+
+    async def _fake_slim(**kwargs):
+        return "[DECLINE:blunt:busy]"
+    monkeypatch.setattr(chat, "_eco_slim_chat", _fake_slim)
+
+    recorded = {}
+    async def _fake_remember(*, decline, origin, **kwargs):
+        recorded["origin"] = origin
+        recorded["register"] = decline.register
+    monkeypatch.setattr(chat, "_remember_decline", _fake_remember)
+
+    async def _no_eco_remember(**kwargs):
+        raise AssertionError("declined stream turn must not call _eco_remember")
+    monkeypatch.setattr(chat, "_eco_remember", _no_eco_remember)
+
+    chunks = []
+    async for c in chat.stream_chat_turn(
+        user_message="you up?", history=[], llm_config={"model": "x"},
+        dsn="noop", session_id="s", pool=None,
+    ):
+        chunks.append(c)
+
+    assert chunks == ["[DECLINED]"]          # blunt render
+    assert recorded["origin"] == "eco"
+    assert recorded["register"] == "blunt"
