@@ -74,7 +74,7 @@ $personas = @(  # adjust to current fleet
     'vera','hazel','esme','sable','vesper','denali','callisto','ennie',
     'death','cassiel','trump','milena','baymax','monika','lovesick','charlotte'
 )
-$migrate = "C:\hexis\.local-notes\upstream-reconcile-2026-05-23\migrate-additive.full.sql"
+$migrate = "C:\hexis\.local-notes\upstream-reconcile-2026-05-23\migration-pure-recmem\migrate-additive.full.sql"
 
 foreach ($p in $personas) {
     Write-Host "Migrating hexis_$p..."

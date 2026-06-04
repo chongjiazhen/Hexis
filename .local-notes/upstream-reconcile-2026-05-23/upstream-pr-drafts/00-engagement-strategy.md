@@ -1,5 +1,11 @@
 # Upstream Engagement Strategy
 
+> **Playbook, dated 2026-05-23.** Maintainer reality check + tone + never-push checklist
+> below are CURRENT and authoritative. But the commit counts ("248 local commits") and the
+> "Draft body files / To write" list at the bottom are STALE — superseded by `STATUS.md`
+> (live pipeline) and `../pr-suitability-2026-06-04.md` (body-read screen). Read those for
+> what to ship; read this for HOW to ship it.
+
 ## Maintainer reality check
 
 - Upstream `QuixiAI/Hexis` solo-maintained by **Eric Hartford** (`ehartford@gmail.com` + `eric@quixi.ai` + twitter `quixiai`). Bio: "I make AI models like Dolphin and Samantha." Uncensored fine-tune lineage.
@@ -54,8 +60,8 @@ Bundle multiple commits into one feature PR. Only ship after Tier A success.
 
 | Bundle | Commits | Risk |
 |---|---|---|
-| **Sender-scoped recall** | `ec9e1ec` (schema) + `bd106a8` (logic) + my PR-A + my PR-B | Big. The completion-of-`subconscious_units.source_identity` pitch. See `04-pr-sender-scoped-recmem-recall.md` + `05-pr-sender-propagation-derived.md`. |
-| **RecMem compaction sender fix** | New code (PR-C) | Small bug fix on something Eric just shipped today. See `06-pr-compaction-sender-preservation.md`. |
+| **Sender-scoped recall** | `ec9e1ec` (schema) + `bd106a8` (logic) + my PR-A + my PR-B | Big. The completion-of-`subconscious_units.source_identity` pitch. See `TIERC-01-sender-scoped-recall.md` + `TIERC-02-sender-propagation.md`. |
+| **RecMem compaction sender fix** | New code (PR-C) | Small bug fix on something Eric just shipped today. See `READY-02-recmem-compaction.md` (BUILT). |
 
 ### TIER D — never to upstream
 
