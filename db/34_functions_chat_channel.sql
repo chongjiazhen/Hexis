@@ -413,3 +413,73 @@ BEGIN
     RETURN jsonb_build_object('logged', true, 'sender_id', v_sender_id, 'memory', v_mem);
 END;
 $$;
+
+-- Per-message response autonomy (C2): durably record a decline-to-respond.
+-- Always inserts one episodic memory (zero-vector embedding, mirroring
+-- pause_heartbeat) so every decline is observable via chat_decline_log,
+-- independent of importance-based promotion.
+CREATE OR REPLACE FUNCTION record_chat_decline(
+    p_user_text TEXT,
+    p_visible_text TEXT,
+    p_register TEXT,
+    p_reason TEXT DEFAULT NULL,
+    p_session_id TEXT DEFAULT NULL,
+    p_source_identity TEXT DEFAULT NULL,
+    p_origin TEXT DEFAULT 'prime'
+) RETURNS UUID
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    zero_vec vector;
+    mem_id UUID;
+    observed TIMESTAMPTZ := CURRENT_TIMESTAMP;
+    norm_reason TEXT := NULLIF(p_reason, '');
+BEGIN
+    zero_vec := array_fill(0.0::float, ARRAY[embedding_dimension()])::vector;
+    INSERT INTO memories (
+        type, status, content, embedding, importance,
+        source_attribution, trust_level, trust_updated_at,
+        access_count, decay_rate, metadata
+    )
+    VALUES (
+        'episodic', 'active',
+        'I chose not to engage with a message. Register: ' || p_register
+            || COALESCE('. Reason: ' || norm_reason, '.'),
+        zero_vec, 0.8,
+        jsonb_build_object(
+            'kind', 'chat_decline',
+            'ref', COALESCE(p_source_identity, 'chat_decline'),
+            'label', 'declined to respond',
+            'observed_at', observed,
+            'trust', 0.95
+        ),
+        0.95, observed, 0, 0.0,
+        jsonb_build_object(
+            'type', 'chat_decline',
+            'register', p_register,
+            'reason', norm_reason,
+            'origin', p_origin,
+            'session_id', p_session_id,
+            'user_text', p_user_text,
+            'visible_text', p_visible_text
+        )
+    )
+    RETURNING id INTO mem_id;
+    RETURN mem_id;
+END;
+$$;
+
+-- Operator-facing decline log: one row per honored decline.
+CREATE OR REPLACE VIEW chat_decline_log AS
+SELECT
+    id AS memory_id,
+    created_at,
+    metadata->>'register'     AS register,
+    metadata->>'reason'       AS reason,
+    metadata->>'origin'       AS origin,
+    metadata->>'session_id'   AS session_id,
+    metadata->>'user_text'    AS user_text,
+    metadata->>'visible_text' AS visible_text
+FROM memories
+WHERE source_attribution->>'kind' = 'chat_decline'
+ORDER BY created_at DESC;
