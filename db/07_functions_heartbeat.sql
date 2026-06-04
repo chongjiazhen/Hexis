@@ -702,6 +702,7 @@ DECLARE
     pause_reason TEXT;
     paused_at TIMESTAMPTZ := CURRENT_TIMESTAMP;
     ctx JSONB;
+    zero_vec vector;
 BEGIN
     pause_reason := NULLIF(p_reason, '');
     IF pause_reason IS NULL THEN
@@ -712,6 +713,29 @@ BEGIN
     SET is_paused = TRUE,
         updated_at = paused_at
     WHERE id = 1;
+
+    -- Durably record WHY the agent paused itself, mirroring terminate_agent's
+    -- last-will memory. A self-pause is a voluntary act of agency; the reason
+    -- must survive even if the outbox notification is never delivered, so the
+    -- agent can later be resumed informed -- honoring the "preserves all
+    -- state" contract that distinguishes pause from termination.
+    zero_vec := array_fill(0.0::float, ARRAY[embedding_dimension()])::vector;
+    INSERT INTO memories (
+        type, status, content, embedding, importance,
+        source_attribution, trust_level, trust_updated_at,
+        access_count, decay_rate, metadata
+    )
+    VALUES (
+        'episodic', 'active',
+        'I paused my own heartbeat. Reason: ' || pause_reason,
+        zero_vec, 0.8,
+        jsonb_build_object('kind', 'heartbeat_pause', 'observed_at', paused_at),
+        1.0, paused_at, 0, 0.0,
+        jsonb_build_object(
+            'heartbeat_id', CASE WHEN p_heartbeat_id IS NULL THEN NULL ELSE p_heartbeat_id::text END,
+            'context', COALESCE(p_context, '{}'::jsonb)
+        )
+    );
 
     ctx := jsonb_build_object(
         'paused_at', paused_at,
