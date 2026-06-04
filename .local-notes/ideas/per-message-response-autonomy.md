@@ -1,6 +1,13 @@
 # Per-message response autonomy (C2)
 
-Future work. Local "our flavour" of the vision. Spun out of pause-autonomy
+**SHIPPED 2026-06-04** (branch `home-rig-local`, commits `0a07d05..513118c`, not
+yet live-applied). Spec/plan: `docs/superpowers/specs|plans/2026-06-04-per-message-response-autonomy*`.
+Final mechanism = uniform text-convention (`[DECLINE:gentle|plain|blunt:reason]`),
+not the tool approach below (fleet runs RLM where a tool can't end a turn). This
+note = original seed; design doc supersedes it. Live apply:
+`.local-notes/migrations/2026-06-04-chat-decline/apply.sql` + worker rebuild.
+
+Local "our flavour" of the vision. Spun out of pause-autonomy
 (A/B/C1, see `upstream-reconcile-2026-05-23/upstream-pr-drafts/READY-03-pause-autonomy.md`).
 
 ## Idea
