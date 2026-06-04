@@ -703,11 +703,19 @@ DECLARE
     paused_at TIMESTAMPTZ := CURRENT_TIMESTAMP;
     ctx JSONB;
     zero_vec vector;
+    notify_operator BOOLEAN;
 BEGIN
     pause_reason := NULLIF(p_reason, '');
     IF pause_reason IS NULL THEN
         RAISE EXCEPTION 'pause_heartbeat requires a non-empty reason';
     END IF;
+
+    -- The agent decides whether to notify the operator of its pause. Default
+    -- TRUE preserves prior behavior; an agent that wants to step away quietly
+    -- can pass {"notify": false} in the action context. The durable memory
+    -- below is written regardless -- the agent always records its own act,
+    -- only the outward notification is discretionary.
+    notify_operator := COALESCE((p_context->>'notify')::boolean, true);
 
     UPDATE heartbeat_state
     SET is_paused = TRUE,
@@ -746,9 +754,12 @@ BEGIN
 
     RETURN jsonb_build_object(
         'paused', true,
-        'outbox_messages', jsonb_build_array(
-            build_user_message(pause_reason, 'heartbeat_paused', ctx)
-        )
+        'notified', notify_operator,
+        'outbox_messages', CASE
+            WHEN notify_operator
+            THEN jsonb_build_array(build_user_message(pause_reason, 'heartbeat_paused', ctx))
+            ELSE '[]'::jsonb
+        END
     );
 END;
 $$ LANGUAGE plpgsql;
