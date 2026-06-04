@@ -31,50 +31,74 @@ the general case; "paused read-and-ignore" is a special case of it.
 
 The persona picks how warm or cold the decline reads:
 
-| Register | Visible output                       | Source                       |
-|----------|--------------------------------------|------------------------------|
-| `warm`   | friendly in-character line           | persona-supplied `message`   |
-| `cool`   | `[DECLINED: <reason>]`               | system-rendered from `reason`|
-| `ice`    | `[DECLINED]`                         | system-rendered, reason hidden |
+| Register | Visible output             | Marker the persona emits          |
+|----------|----------------------------|-----------------------------------|
+| `warm`   | friendly in-character line | `[DECLINE:warm:<reason>] <line>`  |
+| `cool`   | `[DECLINED: <reason>]`     | `[DECLINE:cool:<reason>]`         |
+| `ice`    | `[DECLINED]`               | `[DECLINE:ice:<reason>]`          |
 
 All three are flagged as a decline internally. `reason` and `register` are
 always captured — even `ice`, which hides the reason from the user but still
 records it to memory.
 
-`warm` example: `decline_response(register='warm', reason='low energy',
-message='not now, love — catch you later')` → emits the friendly `message` as
-the visible reply, flags the turn as a decline.
+`warm` example: persona emits `[DECLINE:warm:low energy] not now, love — catch
+you later`. The parser strips the marker, emits the friendly remainder as the
+visible reply, records register=`warm` reason=`low energy`.
 
-## 3. Capture mechanism (two paths)
+## 3. Capture mechanism (uniform text-convention)
 
-ECO mode (`_eco_slim_chat`, services/chat.py:101) calls the LLM with
-`tools=None`, so a tool-based mechanism cannot fire there. Two paths converge to
-the same internal result `{declined: bool, register, reason, visible_text}`.
+The fleet runs the **RLM path** by default (`chat.use_rlm=true`, db/00_tables.sql:682),
+where a structured tool cannot cleanly end a turn — an RLM tool is a *mid-reasoning
+REPL syscall*, not a turn terminator; only `run_agent` ends a turn on a tool call.
+All three chat paths (ECO `_eco_slim_chat`, RLM `run_chat_turn`, default
+`run_agent`) converge on a single `assistant_text` string. So decline is captured
+by **one text-convention parser run on `assistant_text` in every path** — no tool,
+no path-specific code.
 
-- **PRIME:** add a `decline_response(register, reason, message?)` tool to the
-  chat tool registry. The model calls it instead of emitting normal text.
-  `message` is used only for `warm`; `cool`/`ice` render from `reason`.
-- **ECO:** regex-parse the model output for a leading marker
-  `[DECLINED: <reason>]` or `[DECLINED]`. The persona is prompted to use that
-  convention. A `warm` ECO decline is a normal-looking friendly reply carrying
-  an inline `[DECLINED]` tag that the parser strips before emit.
+**Marker grammar (one leading token, persona emits in all modes):**
+
+```
+[DECLINE:<register>:<reason>]<optional trailing message>
+```
+
+- `register` ∈ {`warm`, `cool`, `ice`}; omitted → defaults to `cool`.
+- `reason` is free text up to the closing `]`; may be empty.
+- Trailing message after `]` is used only for `warm` (the visible friendly line).
+- Bare `[DECLINE]` → register `ice`, reason `NULL`.
+
+**Parser `_classify_decline(text) -> Decline | None`:**
+- Anchored to the START of `text` (after optional leading whitespace). A `[...]`
+  elsewhere in the body is NOT a decline.
+- No leading marker → returns `None` (normal reply).
+- Match → returns `{register, reason, visible_text}` where `visible_text` is:
+  - `warm` → the stripped trailing message (or a generic warm fallback if empty)
+  - `cool` → `[DECLINED: <reason>]` (system-rendered; if reason empty, `[DECLINED]`)
+  - `ice`  → `[DECLINED]`
+
+The persona is prompted (in the chat system prompt, all modes) to use this marker
+when it chooses not to engage.
 
 ## 4. Data flow
 
 The decline rides the EXISTING emit/persist sequence. No new emission plumbing.
 
 ```
-prepare_channel_turn    inbound logged           (unchanged — already happens)
-chat_turn               read chat.decline.enabled (cf. _read_power_mode)
-                        PRIME: decline_response tool | ECO: regex parse
-                        if declined AND enabled:
-                            visible_text = rendered marker (per register)
-                            write decline memory (kind='chat_decline')
-                        else:
-                            normal reply generation
-finalize_channel_turn   outbound = visible_text  (logged + history, unchanged)
-emit                    adapter.send(visible_text)
+prepare_channel_turn    inbound logged              (unchanged — already happens)
+chat_turn               generate assistant_text     (ECO | RLM | run_agent — unchanged)
+                        read chat.decline.enabled   (cf. _read_power_mode)
+                        decline = _classify_decline(assistant_text)
+                        if decline AND enabled:
+                            assistant_text = decline.visible_text  (rendered per register)
+                            write decline memory (kind='chat_decline', reason, register)
+                        # else: assistant_text passes through unchanged
+finalize_channel_turn   outbound = assistant_text   (logged + history, unchanged)
+emit                    adapter.send(assistant_text)
 ```
+
+The parse + render + decline-memory step is a single post-generation hook applied
+to `assistant_text` in `chat_turn`, after each path produces its text and before
+`_remember_conversation`/return. One insertion point per path (ECO return, RLM
+return, run_agent return) calls the same helper.
 
 - Inbound is logged in `prepare_channel_turn` *before* the turn runs, so a
   declined message is recorded regardless.
@@ -86,10 +110,16 @@ emit                    adapter.send(visible_text)
 ## 5. Operator control (Option A)
 
 - **Toggle:** `chat.decline.enabled` config row, default `true`. Read once per
-  turn (same `get_config()` pattern as `agent.power_mode`). `false` → the tool
-  is not exposed (PRIME) and the parse is ignored (ECO); the persona always
-  replies. Per-persona (per DB), so service personas (coaches) can be pinned to
-  always-reply.
+  turn (same `get_config()` pattern as `agent.power_mode`). Per-persona (per DB),
+  so service personas (coaches) can be pinned to always-reply.
+- **Two-level enforcement when `false`:**
+  1. *Prompt gate (primary):* the chat system prompt offers the decline
+     convention only when enabled. Disabled → the persona is never told it can
+     decline, so it emits no marker. (`build_system_prompt` reads the config.)
+  2. *Honor gate (belt):* `chat_turn` skips `_classify_decline` entirely when
+     disabled → `assistant_text` passes through verbatim and no decline memory is
+     written. A stray marker (model hallucinating the convention) would show raw
+     rather than be honored — visible, never silent.
 - **Observability:** every honored decline writes a memory row
   `source_attribution.kind='chat_decline'` (reason, register, timestamp),
   mirroring the pause-reason memory from commit A.
@@ -104,16 +134,19 @@ sender_id is not unified in hexis).
 
 ## 6. Error handling
 
-- **Empty reason.** A `decline_response` call with an empty/blank reason is
-  rejected (mirrors `pause_heartbeat`'s required-reason guard) → fall back to a
-  normal reply rather than emit a reasonless decline.
-- **ECO parse ambiguity.** Anchor the regex to a *leading* marker only. Content
-  that merely contains `[...]` elsewhere is not a decline. No match → treat as a
-  normal reply.
+- **Empty reason.** A marker with an empty reason (`[DECLINE:cool:]` or bare
+  `[DECLINE]`) is allowed, not rejected — the persona may decline without stating
+  why (`ice` is exactly that). `reason` is stored `NULL`; `cool` with empty reason
+  renders `[DECLINED]`. The decline is never silent regardless.
+- **Parse ambiguity.** Anchor the regex to a *leading* marker only (after optional
+  whitespace). A `[...]` elsewhere in the body is not a decline. No leading match
+  → `_classify_decline` returns `None` → normal reply (fail-open to replying).
 - **Fail toward replying, never toward silence.** If `chat.decline.enabled`
   cannot be read (DB blip), default to **disabled** (always reply) so a transient
   failure can never silence a persona. This mirrors `_read_power_mode`'s
   fail-to-prime posture.
+- **Marker present but render yields empty** (warm with no trailing message) →
+  substitute a generic warm fallback line so output is never empty.
 
 ## 7. Out of scope (YAGNI)
 
@@ -130,24 +163,33 @@ sender_id is not unified in hexis).
 - `chat.decline.enabled=false` suppresses the decline (always reply).
 - `chat_decline_log` view returns expected rows.
 
-**Python (`tests/services/` or `tests/cli/`):**
-- PRIME: `decline_response` tool call → `declined` dict with correct
-  register/reason/visible_text.
-- ECO: regex parse of `warm` / `cool` / `ice` markers; non-match fails open to a
-  normal reply.
-- Empty-reason `decline_response` → falls back to normal reply.
-- `chat.decline.enabled` read failure → persona replies (no silence).
+**Python (`tests/services/`):**
+- `_classify_decline` unit tests: `warm`/`cool`/`ice` markers → correct
+  register/reason/visible_text; bare `[DECLINE]` → ice + reason NULL; default
+  register when omitted = cool; non-leading `[...]` → None; leading-whitespace
+  tolerated; warm with empty trailing → generic fallback visible_text.
+- `chat.decline.enabled=false` → `_classify_decline` skipped, text verbatim, no
+  decline memory.
+- `chat.decline.enabled` read failure → treated as disabled, persona replies
+  (no silence).
 
 ## 9. Change surface (anticipated)
 
-- `db/34_functions_chat_channel.sql` — decline memory write helper +
-  `chat_decline_log` view (DB authority for the memory shape).
-- `services/chat.py` — `chat_turn` decline branch, `chat.decline.enabled` read,
-  ECO regex parse.
-- `core/tools/` (chat registry) — `decline_response` tool definition.
-- `services/prompts/*.md` — persona prompting for the decline convention
-  (PRIME tool usage + ECO `[DECLINED]` text convention). NOTE: prompt files are
-  baked into worker images; any edit needs a worker rebuild.
+- `services/chat.py` — `_classify_decline` parser + the post-generation hook in
+  `chat_turn` applied at all three return points (ECO, RLM, run_agent);
+  `chat.decline.enabled` read.
+- `db/34_functions_chat_channel.sql` — decline memory write helper (or reuse
+  `record_chat_turn_memory` with a decline kind) + `chat_decline_log` view
+  (DB authority for the memory shape).
+- `services/agent.py` / `build_system_prompt` — prompt gate: include the decline
+  marker convention only when `chat.decline.enabled`.
+- `services/prompts/*.md` — the decline-convention instruction text (one block,
+  same for all modes). NOTE: prompt files are baked into worker images; any edit
+  needs a worker rebuild (`--no-deps --force-recreate --build`).
+
+No tool registry change — uniform text-convention needs no `decline_response`
+tool. (A structured tool remains a possible future enhancement if the fleet ever
+moves off RLM to the `run_agent` path.)
 
 This is a local "our flavour of the vision" patch (not an upstream PR), per the
 pause-autonomy C-series framing.
