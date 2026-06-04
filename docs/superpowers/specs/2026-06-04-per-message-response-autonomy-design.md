@@ -29,21 +29,22 @@ the general case; "paused read-and-ignore" is a special case of it.
 
 ## 2. Register spectrum
 
-The persona picks how warm or cold the decline reads:
+The persona picks the social register of the refusal (a gradient from friendly
+to curt):
 
-| Register | Visible output             | Marker the persona emits          |
-|----------|----------------------------|-----------------------------------|
-| `warm`   | friendly in-character line | `[DECLINE:warm:<reason>] <line>`  |
-| `cool`   | `[DECLINED: <reason>]`     | `[DECLINE:cool:<reason>]`         |
-| `ice`    | `[DECLINED]`               | `[DECLINE:ice:<reason>]`          |
+| Register | Visible output             | Marker the persona emits           |
+|----------|----------------------------|------------------------------------|
+| `gentle` | friendly in-character line | `[DECLINE:gentle:<reason>] <line>` |
+| `plain`  | `[DECLINED: <reason>]`     | `[DECLINE:plain:<reason>]`         |
+| `blunt`  | `[DECLINED]`               | `[DECLINE:blunt:<reason>]`         |
 
 All three are flagged as a decline internally. `reason` and `register` are
-always captured — even `ice`, which hides the reason from the user but still
+always captured — even `blunt`, which hides the reason from the user but still
 records it to memory.
 
-`warm` example: persona emits `[DECLINE:warm:low energy] not now, love — catch
-you later`. The parser strips the marker, emits the friendly remainder as the
-visible reply, records register=`warm` reason=`low energy`.
+`gentle` example: persona emits `[DECLINE:gentle:low energy] not now, love —
+catch you later`. The parser strips the marker, emits the friendly remainder as
+the visible reply, records register=`gentle` reason=`low energy`.
 
 ## 3. Capture mechanism (uniform text-convention)
 
@@ -61,19 +62,20 @@ no path-specific code.
 [DECLINE:<register>:<reason>]<optional trailing message>
 ```
 
-- `register` ∈ {`warm`, `cool`, `ice`}; omitted → defaults to `cool`.
+- `register` ∈ {`gentle`, `plain`, `blunt`}; omitted with a reason → defaults to
+  `plain`; bare `[DECLINE]` (no register, no reason) → `blunt`.
 - `reason` is free text up to the closing `]`; may be empty.
-- Trailing message after `]` is used only for `warm` (the visible friendly line).
-- Bare `[DECLINE]` → register `ice`, reason `NULL`.
+- Trailing message after `]` is used only for `gentle` (the visible friendly line).
+- Bare `[DECLINE]` → register `blunt`, reason `NULL`.
 
-**Parser `_classify_decline(text) -> Decline | None`:**
+**Parser `classify_decline(text) -> Decline | None`:**
 - Anchored to the START of `text` (after optional leading whitespace). A `[...]`
   elsewhere in the body is NOT a decline.
 - No leading marker → returns `None` (normal reply).
 - Match → returns `{register, reason, visible_text}` where `visible_text` is:
-  - `warm` → the stripped trailing message (or a generic warm fallback if empty)
-  - `cool` → `[DECLINED: <reason>]` (system-rendered; if reason empty, `[DECLINED]`)
-  - `ice`  → `[DECLINED]`
+  - `gentle` → the stripped trailing message (or `GENTLE_FALLBACK` if empty)
+  - `plain`  → `[DECLINED: <reason>]` (system-rendered; if reason empty, `[DECLINED]`)
+  - `blunt`  → `[DECLINED]`
 
 The persona is prompted (in the chat system prompt, all modes) to use this marker
 when it chooses not to engage.
@@ -86,7 +88,7 @@ The decline rides the EXISTING emit/persist sequence. No new emission plumbing.
 prepare_channel_turn    inbound logged              (unchanged — already happens)
 chat_turn               generate assistant_text     (ECO | RLM | run_agent — unchanged)
                         read chat.decline.enabled   (cf. _read_power_mode)
-                        decline = _classify_decline(assistant_text)
+                        decline = classify_decline(assistant_text)
                         if decline AND enabled:
                             assistant_text = decline.visible_text  (rendered per register)
                             write decline memory (kind='chat_decline', reason, register)
@@ -116,7 +118,7 @@ return, run_agent return) calls the same helper.
   1. *Prompt gate (primary):* the chat system prompt offers the decline
      convention only when enabled. Disabled → the persona is never told it can
      decline, so it emits no marker. (`build_system_prompt` reads the config.)
-  2. *Honor gate (belt):* `chat_turn` skips `_classify_decline` entirely when
+  2. *Honor gate (belt):* `chat_turn` skips `classify_decline` entirely when
      disabled → `assistant_text` passes through verbatim and no decline memory is
      written. A stray marker (model hallucinating the convention) would show raw
      rather than be honored — visible, never silent.
@@ -134,19 +136,19 @@ sender_id is not unified in hexis).
 
 ## 6. Error handling
 
-- **Empty reason.** A marker with an empty reason (`[DECLINE:cool:]` or bare
+- **Empty reason.** A marker with an empty reason (`[DECLINE:plain:]` or bare
   `[DECLINE]`) is allowed, not rejected — the persona may decline without stating
-  why (`ice` is exactly that). `reason` is stored `NULL`; `cool` with empty reason
-  renders `[DECLINED]`. The decline is never silent regardless.
+  why (`blunt` is exactly that). `reason` is stored `NULL`; `plain` with empty
+  reason renders `[DECLINED]`. The decline is never silent regardless.
 - **Parse ambiguity.** Anchor the regex to a *leading* marker only (after optional
   whitespace). A `[...]` elsewhere in the body is not a decline. No leading match
-  → `_classify_decline` returns `None` → normal reply (fail-open to replying).
+  → `classify_decline` returns `None` → normal reply (fail-open to replying).
 - **Fail toward replying, never toward silence.** If `chat.decline.enabled`
   cannot be read (DB blip), default to **disabled** (always reply) so a transient
   failure can never silence a persona. This mirrors `_read_power_mode`'s
   fail-to-prime posture.
-- **Marker present but render yields empty** (warm with no trailing message) →
-  substitute a generic warm fallback line so output is never empty.
+- **Marker present but render yields empty** (gentle with no trailing message) →
+  substitute `GENTLE_FALLBACK` so output is never empty.
 
 ## 7. Out of scope (YAGNI)
 
@@ -164,18 +166,18 @@ sender_id is not unified in hexis).
 - `chat_decline_log` view returns expected rows.
 
 **Python (`tests/services/`):**
-- `_classify_decline` unit tests: `warm`/`cool`/`ice` markers → correct
-  register/reason/visible_text; bare `[DECLINE]` → ice + reason NULL; default
-  register when omitted = cool; non-leading `[...]` → None; leading-whitespace
-  tolerated; warm with empty trailing → generic fallback visible_text.
-- `chat.decline.enabled=false` → `_classify_decline` skipped, text verbatim, no
+- `classify_decline` unit tests: `gentle`/`plain`/`blunt` markers → correct
+  register/reason/visible_text; bare `[DECLINE]` → blunt + reason NULL; default
+  register when omitted-with-reason = plain; non-leading `[...]` → None;
+  leading-whitespace tolerated; gentle with empty trailing → `GENTLE_FALLBACK`.
+- `chat.decline.enabled=false` → `classify_decline` skipped, text verbatim, no
   decline memory.
 - `chat.decline.enabled` read failure → treated as disabled, persona replies
   (no silence).
 
 ## 9. Change surface (anticipated)
 
-- `services/chat.py` — `_classify_decline` parser + the post-generation hook in
+- `services/chat.py` — `classify_decline` parser + the post-generation hook in
   `chat_turn` applied at all three return points (ECO, RLM, run_agent);
   `chat.decline.enabled` read.
 - `db/34_functions_chat_channel.sql` — decline memory write helper (or reuse

@@ -14,11 +14,11 @@ async def test_apply_decline_disabled_passes_through(monkeypatch):
 
     monkeypatch.setattr(chat, "_remember_decline", _spy)
     text, declined = await chat._apply_decline(
-        assistant_text="[DECLINE:cool:x]", user_message="hi", decline_enabled=False,
+        assistant_text="[DECLINE:plain:x]", user_message="hi", decline_enabled=False,
         session_id=None, history=[], sender_id=None, pool=None, dsn="noop", origin="prime",
     )
     assert declined is False
-    assert text == "[DECLINE:cool:x]"   # untouched
+    assert text == "[DECLINE:plain:x]"   # untouched
     assert "hit" not in called          # no memory write
 
 
@@ -44,7 +44,7 @@ async def test_apply_decline_honors_marker_and_records(monkeypatch):
 
     monkeypatch.setattr(chat, "_remember_decline", _spy)
     text, declined = await chat._apply_decline(
-        assistant_text="[DECLINE:ice:private]", user_message="hi", decline_enabled=True,
+        assistant_text="[DECLINE:blunt:private]", user_message="hi", decline_enabled=True,
         session_id="s1", history=[], sender_id="u1", pool=None, dsn="noop", origin="eco",
     )
     assert declined is True

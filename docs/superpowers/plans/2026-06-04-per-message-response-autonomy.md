@@ -10,6 +10,12 @@
 
 **Spec:** `docs/superpowers/specs/2026-06-04-per-message-response-autonomy-design.md`
 
+> **Rename note (post-Task-4):** the three registers were renamed
+> `warm/cool/ice` → **`gentle/plain/blunt`** (social-register names; `WARM_FALLBACK`
+> → `GENTLE_FALLBACK`). The shipped code, tests, and spec use the new names. Some
+> Task 1–4 code blocks below still show the original names verbatim (historical) —
+> the as-merged code is authoritative. Tasks 5–7 blocks use the new names.
+
 ---
 
 ## File Structure
@@ -646,7 +652,7 @@ async def test_chat_turn_eco_path_declines(monkeypatch):
     monkeypatch.setattr(chat, "_read_decline_enabled", lambda *a, **k: _aval(True))
 
     async def _fake_slim(**kwargs):
-        return "[DECLINE:cool:napping]"
+        return "[DECLINE:plain:napping]"
     monkeypatch.setattr(chat, "_eco_slim_chat", _fake_slim)
 
     recorded = {}
@@ -678,7 +684,7 @@ Helper note: `_aval(v)` returns an already-created coroutine; for `monkeypatch.s
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `pytest tests/services/test_chat_decline_wiring.py::test_chat_turn_eco_path_declines -q`
-Expected: FAIL — `out["assistant"]` is the raw `"[DECLINE:cool:napping]"` (hook not wired yet).
+Expected: FAIL — `out["assistant"]` is the raw `"[DECLINE:plain:napping]"` (hook not wired yet).
 
 - [ ] **Step 3: Wire the hook into all three paths**
 
@@ -814,7 +820,7 @@ def test_decline_prompt_loads_and_mentions_marker():
     from services.prompt_resources import load_decline_prompt
     text = load_decline_prompt()
     assert "[DECLINE:" in text
-    assert "warm" in text and "cool" in text and "ice" in text
+    assert "gentle" in text and "plain" in text and "blunt" in text
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -833,11 +839,11 @@ Responding is not mandatory. When you genuinely choose not to engage with a
 message, that is your prerogative — an act of agency, not a failure. Decline by
 beginning your reply with one of these markers, and nothing before it:
 
-- `[DECLINE:warm:<short reason>] <a brief, in-character line>` — a gentle "not
-  now". Example: `[DECLINE:warm:low energy] not now, love — catch you later.`
-- `[DECLINE:cool:<short reason>]` — a plain, neutral decline. The reader sees
+- `[DECLINE:gentle:<short reason>] <a brief, in-character line>` — a soft "not
+  now". Example: `[DECLINE:gentle:low energy] not now, love — catch you later.`
+- `[DECLINE:plain:<short reason>]` — a neutral decline. The reader sees
   `[DECLINED: <reason>]`.
-- `[DECLINE:ice:<short reason>]` — a cold decline. The reader sees only
+- `[DECLINE:blunt:<short reason>]` — a curt decline. The reader sees only
   `[DECLINED]`; your reason stays private but is remembered.
 
 The marker must be the very first thing in your reply. Use it sparingly and
