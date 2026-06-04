@@ -472,6 +472,7 @@ async def chat_turn(
     # turn IS still persisted via _eco_remember (tagged metadata.origin='eco')
     # so eco vs prime quality stays measurable downstream.
     is_eco = (await _read_power_mode(pool, dsn) == 'eco')
+    decline_enabled = await _read_decline_enabled(pool, dsn)
     if is_eco:
         logger.info("ECO mode: chat_turn -> slim direct LLM (no RLM, no tools; turn persisted tagged origin=eco)")
         try:
@@ -487,15 +488,27 @@ async def chat_turn(
             assistant_text = ""
         if not assistant_text:
             assistant_text = ECO_FALLBACK_REPLY
-        await _eco_remember(
-            user_message=user_message,
+        assistant_text, declined = await _apply_decline(
             assistant_text=assistant_text,
-            history=history,
+            user_message=user_message,
+            decline_enabled=decline_enabled,
             session_id=session_id,
+            history=history,
             sender_id=sender_id,
             pool=pool,
             dsn=dsn,
+            origin="eco",
         )
+        if not declined:
+            await _eco_remember(
+                user_message=user_message,
+                assistant_text=assistant_text,
+                history=history,
+                session_id=session_id,
+                sender_id=sender_id,
+                pool=pool,
+                dsn=dsn,
+            )
         new_history = list(history)
         new_history.append({"role": "user", "content": user_message})
         new_history.append({"role": "assistant", "content": assistant_text})
@@ -536,18 +549,18 @@ async def chat_turn(
         if pool is not None:
             mem_client = CognitiveMemory(pool)
             assistant_text = await _capture_session_assessment(mem_client, assistant_text)
-            await _remember_conversation(
-                mem_client,
+            assistant_text, declined = await _apply_decline(
+                assistant_text=assistant_text,
                 user_message=user_message,
-                assistant_message=assistant_text,
+                decline_enabled=decline_enabled,
                 session_id=session_id,
-                source_identity=_conversation_source_identity(session_id, history, user_message, assistant_text),
+                history=history,
                 sender_id=sender_id,
-                background_dsn=dsn,
+                pool=pool,
+                dsn=dsn,
+                origin="prime",
             )
-        else:
-            async with CognitiveMemory.connect(dsn) as mem_client:
-                assistant_text = await _capture_session_assessment(mem_client, assistant_text)
+            if not declined:
                 await _remember_conversation(
                     mem_client,
                     user_message=user_message,
@@ -557,6 +570,30 @@ async def chat_turn(
                     sender_id=sender_id,
                     background_dsn=dsn,
                 )
+        else:
+            async with CognitiveMemory.connect(dsn) as mem_client:
+                assistant_text = await _capture_session_assessment(mem_client, assistant_text)
+                assistant_text, declined = await _apply_decline(
+                    assistant_text=assistant_text,
+                    user_message=user_message,
+                    decline_enabled=decline_enabled,
+                    session_id=session_id,
+                    history=history,
+                    sender_id=sender_id,
+                    pool=pool,
+                    dsn=dsn,
+                    origin="prime",
+                )
+                if not declined:
+                    await _remember_conversation(
+                        mem_client,
+                        user_message=user_message,
+                        assistant_message=assistant_text,
+                        session_id=session_id,
+                        source_identity=_conversation_source_identity(session_id, history, user_message, assistant_text),
+                        sender_id=sender_id,
+                        background_dsn=dsn,
+                    )
         new_history = list(history)
         new_history.append({"role": "user", "content": user_message})
         new_history.append({"role": "assistant", "content": assistant_text})
@@ -591,15 +628,27 @@ async def chat_turn(
 
         async with CognitiveMemory.connect(dsn) as mem_client:
             assistant_text = await _capture_session_assessment(mem_client, assistant_text)
-            await _remember_conversation(
-                mem_client,
+            assistant_text, declined = await _apply_decline(
+                assistant_text=assistant_text,
                 user_message=user_message,
-                assistant_message=assistant_text,
+                decline_enabled=decline_enabled,
                 session_id=session_id,
-                source_identity=_conversation_source_identity(session_id, history, user_message, assistant_text),
+                history=history,
                 sender_id=sender_id,
-                background_dsn=dsn,
+                pool=pool,
+                dsn=dsn,
+                origin="prime",
             )
+            if not declined:
+                await _remember_conversation(
+                    mem_client,
+                    user_message=user_message,
+                    assistant_message=assistant_text,
+                    session_id=session_id,
+                    source_identity=_conversation_source_identity(session_id, history, user_message, assistant_text),
+                    sender_id=sender_id,
+                    background_dsn=dsn,
+                )
 
         new_history = list(history)
         new_history.append({"role": "user", "content": user_message})

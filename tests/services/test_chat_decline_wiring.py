@@ -58,3 +58,35 @@ async def test_read_decline_enabled_failure_returns_false(monkeypatch):
     # No pool, bad dsn -> connection fails -> fail toward replying (False).
     val = await chat._read_decline_enabled(None, "postgresql://nope:0/none")
     assert val is False
+
+
+async def test_chat_turn_eco_path_declines(monkeypatch):
+    """ECO path: a decline marker from the slim call is honored + rendered."""
+    async def _fake_power_mode(*a, **k):
+        return "eco"
+    monkeypatch.setattr(chat, "_read_power_mode", _fake_power_mode)
+
+    async def _fake_decline_enabled(*a, **k):
+        return True
+    monkeypatch.setattr(chat, "_read_decline_enabled", _fake_decline_enabled)
+
+    async def _fake_slim(**kwargs):
+        return "[DECLINE:plain:napping]"
+    monkeypatch.setattr(chat, "_eco_slim_chat", _fake_slim)
+
+    recorded = {}
+    async def _fake_remember(*, decline, origin, **kwargs):
+        recorded["origin"] = origin
+        recorded["register"] = decline.register
+    monkeypatch.setattr(chat, "_remember_decline", _fake_remember)
+
+    async def _no_eco_remember(**kwargs):
+        raise AssertionError("declined turn must not call _eco_remember")
+    monkeypatch.setattr(chat, "_eco_remember", _no_eco_remember)
+
+    out = await chat.chat_turn(
+        user_message="you up?", history=[], llm_config={"model": "x"},
+        dsn="noop", session_id="s", pool=None,
+    )
+    assert out["assistant"] == "[DECLINED: napping]"
+    assert recorded["origin"] == "eco"
