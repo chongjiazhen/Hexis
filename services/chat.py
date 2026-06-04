@@ -14,6 +14,7 @@ from core.cognitive_memory_api import CognitiveMemory, MemoryType
 from core.llm import chat_completion, normalize_llm_config
 from core.tools import create_default_registry, ToolContext, ToolExecutionContext, ToolRegistry
 from services.agent import run_agent, stream_agent
+from services.decline import classify_decline, Decline
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +140,26 @@ async def _read_power_mode(pool: Any | None, dsn: str | None) -> str:
     else:
         mode = str(val).lower()
     return 'eco' if mode == 'eco' else 'prime'
+
+
+async def _read_decline_enabled(pool: Any | None, dsn: str | None) -> bool:
+    """Return chat.decline.enabled. Fail toward replying (False) on any error or
+    missing key so a transient DB blip or unmigrated DB can never silence a
+    persona. Mirrors _read_power_mode's fail-to-prime posture."""
+    import asyncpg
+    try:
+        if pool is not None:
+            async with pool.acquire() as conn:
+                val = await conn.fetchval("SELECT get_config_bool('chat.decline.enabled')")
+        else:
+            conn = await asyncpg.connect(dsn or db_dsn_from_env())
+            try:
+                val = await conn.fetchval("SELECT get_config_bool('chat.decline.enabled')")
+            finally:
+                await conn.close()
+    except Exception:
+        return False
+    return bool(val) if val is not None else False
 
 
 async def _build_system_prompt(
@@ -272,6 +293,76 @@ async def _remember_conversation(
         source_identity=effective_identity,
         context={"metadata": {"type": "conversation", "origin": origin}},
     )
+
+
+async def _remember_decline(
+    *,
+    user_message: str,
+    decline: Decline,
+    session_id: str | None,
+    source_identity: str | None,
+    sender_id: str | None,
+    pool: Any | None,
+    dsn: str | None,
+    origin: str = "prime",
+) -> None:
+    """Persist a decline via record_chat_decline. Non-fatal: a failed write must
+    never break the user-facing reply (the decline marker is already rendered)."""
+    effective_identity = source_identity if source_identity is not None else sender_id
+    sql = "SELECT record_chat_decline($1, $2, $3, $4, $5, $6, $7)"
+    args = (
+        user_message, decline.visible_text, decline.register, decline.reason,
+        session_id, effective_identity, origin,
+    )
+    try:
+        if pool is not None:
+            async with pool.acquire() as conn:
+                await conn.fetchval(sql, *args)
+        else:
+            import asyncpg
+            conn = await asyncpg.connect(dsn or db_dsn_from_env())
+            try:
+                await conn.fetchval(sql, *args)
+            finally:
+                await conn.close()
+    except Exception as exc:
+        logger.warning(f"decline memory-write failed (non-fatal): {exc}")
+
+
+async def _apply_decline(
+    *,
+    assistant_text: str,
+    user_message: str,
+    decline_enabled: bool,
+    session_id: str | None,
+    history: list[dict[str, Any]],
+    sender_id: str | None,
+    pool: Any | None,
+    dsn: str | None,
+    origin: str,
+) -> tuple[str, bool]:
+    """Post-generation hook shared by all chat paths. If declines are enabled and
+    assistant_text begins with a decline marker, render the visible decline and
+    record it. Returns (final_text, declined)."""
+    if not decline_enabled:
+        return assistant_text, False
+    decline = classify_decline(assistant_text)
+    if decline is None:
+        return assistant_text, False
+    source_identity = _conversation_source_identity(
+        session_id, history, user_message, decline.visible_text
+    )
+    await _remember_decline(
+        user_message=user_message,
+        decline=decline,
+        session_id=session_id,
+        source_identity=source_identity,
+        sender_id=sender_id,
+        pool=pool,
+        dsn=dsn,
+        origin=origin,
+    )
+    return decline.visible_text, True
 
 
 async def _eco_remember(
