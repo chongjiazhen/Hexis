@@ -349,8 +349,10 @@ async def _apply_decline(
     decline = classify_decline(assistant_text)
     if decline is None:
         return assistant_text, False
+    # Digest the raw model output (the marker), matching how sibling paths
+    # (_remember_conversation) compute per-turn source_identity.
     source_identity = _conversation_source_identity(
-        session_id, history, user_message, decline.visible_text
+        session_id, history, user_message, assistant_text
     )
     await _remember_decline(
         user_message=user_message,
