@@ -334,8 +334,11 @@ async def ensure_embedding_service(db_pool):
             reraise=False,
         )
 
+        async def _check_health():
+            return await conn.fetchval("SELECT check_embedding_service_health()")
+
         try:
-            ok = await retrying(conn.fetchval, "SELECT check_embedding_service_health()")
+            ok = await retrying(_check_health)
             assert ok is True
             return True
         except RetryError as exc:
