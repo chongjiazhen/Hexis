@@ -77,3 +77,19 @@ async def test_record_chat_decline_null_reason_ok(db_pool):
             assert reason is None
         finally:
             await tr.rollback()
+
+
+async def test_record_chat_decline_rejects_empty_register(db_pool):
+    """A NULL/empty register is a caller error -> raise, never write a NULL-content row."""
+    import asyncpg
+    async with db_pool.acquire() as conn:
+        tr = conn.transaction()
+        await tr.start()
+        try:
+            with pytest.raises(asyncpg.PostgresError):
+                await conn.fetchval(
+                    "SELECT record_chat_decline($1, $2, $3, $4, $5, $6, $7)",
+                    "hi", "[DECLINED]", "", None, None, "tester", "prime",
+                )
+        finally:
+            await tr.rollback()

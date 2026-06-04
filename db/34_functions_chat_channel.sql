@@ -435,6 +435,9 @@ DECLARE
     observed TIMESTAMPTZ := CURRENT_TIMESTAMP;
     norm_reason TEXT := NULLIF(p_reason, '');
 BEGIN
+    IF NULLIF(p_register, '') IS NULL THEN
+        RAISE EXCEPTION 'record_chat_decline requires a non-empty register';
+    END IF;
     zero_vec := array_fill(0.0::float, ARRAY[embedding_dimension()])::vector;
     INSERT INTO memories (
         type, status, content, embedding, importance,
