@@ -1,13 +1,54 @@
 # _inbox — open items / scratchpad
 
 Centralized "what's on our plate" so nothing gets dropped. Newest context at
-top of each item. Untracked scratch (lives in `.local-notes/`).
+top of each item. Tracked in-repo (lives in `.local-notes/`).
 
-Last updated: 2026-05-30
+Last updated: 2026-06-09
+
+**Ground truth = `git branch -a` (live work) + `git log` (shipped). Reconcile
+this file against them; per-repo memory `*.md` is point-in-time observation,
+NOT live state — don't trust its "shipped/pending" claims without a git check.**
+We are a local user with local patches; we do NOT own upstream. Unmerged
+`feat/*`/`fix/*` branches = candidate PRs to upstream, not loose ends (see
+§Branches below).
 
 ---
 
 ## ACTIVE — needs a decision or action
+
+### -1. All-latent reach-out — target-sender misdelivery (FIXED 2026-06-09)
+
+- **Base shipped** (all-latent LLM-judgment reach-out): `5975c84` (surface
+  reach-out signal + rhythm to active_senders), `b745c13`/`a03712f` (prompt
+  de-veto), `ca0f2f2` (live-DB bounce), `18365e6` (persist reach-outs).
+  Supersedes deterministic-gate `3c2ffea`.
+- **Correction to first triage:** the live path (`heartbeat.use_rlm=true`)
+  ALREADY lets the persona choose the target. RLM persona calls
+  `tool_use("reach_out_user", {sender_id, message})` → `call_records_to_actions_taken`
+  → action → `db/17_functions_subconscious_observations.sql:1208` handler
+  threads `sender_id` into payload → `_publish_outbox` → `outbox.py:247`
+  sender-FILTERED delivery. End-to-end wired; `rlm_heartbeat_system.md:106`
+  marks `sender_id` REQUIRED. So "persona can't act" was WRONG.
+- **Actual defect:** what happened when the persona *omitted* `sender_id` —
+  the `outbox.py` empty-sender branch silently delivered to the globally-latest
+  DM (wrong person for multi-partner Vera). Plus `queue_user_message`
+  (`core/tools/memory.py`) was still registered in HEARTBEAT context as an
+  untargeted "message the user" tool — a trap competing with `reach_out_user`,
+  with a vestigial (undrained) `external_calls` delivery path.
+- **Fix (all three, shipped):**
+  1. `channels/outbox.py` `_deliver_last_active` — empty `sender_id` + >1
+     active sender in 7d window → skip + WARN (no misdelivery). Single/zero
+     sender keeps latest-active. Tests: `tests/channels/test_outbox_last_active.py` (3, green).
+  2. `core/tools/memory.py` `create_memory_tools` — dropped
+     `QueueUserMessageHandler` from the registry (class kept for SQL
+     `build_user_message` / cron `action_kind` paths). Persona's only reach-out
+     surface is now `reach_out_user`.
+  3. `services/prompts/rlm_heartbeat_system.md` — hard-line: never call
+     `reach_out_user` without a `sender_id`; two recipients = two calls; +example.
+- **Live-apply NOT done:** prompt #3 is baked into worker images
+  (`feedback_prompt_files_baked_rebuild_required`) → needs
+  `--no-deps --force-recreate --build` of the heartbeat/maintenance workers.
+  #1/#2 are Python in the same worker images → same rebuild. No DB migration.
 
 ### 0. Coach trinity — Vera / Lyra / Spes (LOCKED 2026-05-25)
 
@@ -34,6 +75,14 @@ Last updated: 2026-05-30
 - **Lyra** ✓ card rebuilt (anchor 7243 B, parity w/ pre-fold). Iris fold as Tier 0 (verbal openers → asking out); unified 6-skill rubric across full arc; existing-relationship decline moved to SOFT safety. UAT pending. Apply: `docker exec -i hexis_brain psql -U hexis_user -d hexis_lyra -v ON_ERROR_STOP=1 -f - < characters/set_persona_prompt.lyra.sql`.
 - **Iris** ✓ **FROZEN 2026-05-25** — content fully folded into Vera + Lyra. Compose `profiles: ["frozen"]` applied to all 3 services. Stop commands handed to user. DB `hexis_iris` preserved as archive. Telegram `@convo_coach_bot` token left alive but silent (reusable).
 - **Spes** — net-new persona, deferred. Build only on demand evidence.
+
+**Reconcile 2026-06-09:** Vera + Lyra card JSON confirmed updated on disk
+(`characters/vera.json`/`lyra.json` carry new prompts). One-shot updater
+scripts `scripts/_update_{vera,lyra}_card.py` still sit UNTRACKED = the
+"delete after applying" leftovers (per `feedback_no_commit_oneshot_card_scripts`
+— leave untracked or delete, never commit). **Still open:** (1) confirm
+`set_persona_prompt.{vera,lyra}.sql` applied to live `hexis_vera`/`hexis_lyra`
+DBs; (2) the live UAT probe. Everything else in §0 done.
 
 **Execution sequence (when picked up):**
 1. Iris content audit: read `characters/iris.json` `data.system_prompt` + `data.extensions.hexis` → validate ~75/25 Vera/Lyra split estimate
@@ -297,6 +346,37 @@ Path traveled: trinity Greek (Thea/Iris/Lyra) → pentad (+Galene +Mneme) → au
   (re)start workers.
 - **Apply (per DB):** `docker exec -i hexis_brain psql -U hexis_user -d hexis_<P> -v ON_ERROR_STOP=1 -f - < .local-notes/migrations/2026-05-30-pure-recmem-reconcile/drop-rollout-eval-functions.sql`
 - **Related:** sender-scope follow-up B = DONE (`9f5eae1`), separate from this.
+
+---
+
+## BRANCHES — live work / upstream-PR candidates (reconciled 2026-06-09)
+
+We're a local user on local patches; upstream not owned. These unmerged
+branches are candidate PRs (or local-only keeps). All stacked on the
+`home-rig-local` divergence, so "commits ahead of main" ≈ whole fork, not the
+branch's own delta. Decide per branch: PR upstream / keep local / drop.
+
+| Branch | Tip | Disposition (TBD) |
+|---|---|---|
+| `feat/pause-notify-autonomy` | `08ed1bd` agent chooses whether self-pause notifies operator | likely local (fork-specific UX) |
+| `fix/pause-persist-reason` | `b3ec9e4` persist self-pause reason to memory not just outbox | PR-candidate (bugfix) |
+| `fix/telegram-reply-quote` | `2306439` surface reply/quote context to model | PR-candidate |
+| `fix/recmem-compaction-sender` | `7ead8fe` preserve real sender identity through compaction flush | PR-candidate (touches sender-scope — relates to §-1) |
+| `feat/model-tier-probe` | `9fe7bab` marker-list sync + VRAM-measure caveat | = the 8GB-viability A/B probe work; local research |
+| `archive-organizer` | `b8da83f` wire cli dispatch keywords | local tooling; has plan+spec on `home-rig-local` (`5ed7d7f`) |
+| `fix/llm-strip-reasoning` | `845d873` strip leaked reasoning traces | already pushed to `personal` remote; PR-staged |
+
+---
+
+## RECENTLY SHIPPED — reconciled out of ACTIVE (2026-06-09)
+
+- **C2 per-message response autonomy** — SHIPPED + live-applied. 16 commits
+  `0a07d05..513118c` + live-apply `851ca9e` + marked-done `16ef360`. Memory
+  `project_c2_decline_and_chat_path_map.md` still says "not live-applied" —
+  STALE (corrected in memory 2026-06-09). Decline via `[DECLINE:<register>:<reason>]`
+  marker, gated `chat.decline.enabled`.
+- **All-latent reach-out (base)** — SHIPPED (see §-1 for the open target-sender
+  bug that re-opened it).
 
 ---
 
