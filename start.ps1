@@ -30,7 +30,28 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $LlamaServer = "C:\llama.cpp-cuda\llama-server.exe"
 
+# Chat model (:8080) identity is sourced from the llm-serve registry (models.json
+# `q36`) so this script and set-power-mode.ps1 can never disagree on WHICH model
+# serves :8080. They previously hardcoded it independently; the start.ps1-launches-
+# first / set-power-mode-skips-"already up" race meant a registry/literal drift
+# (APEX vs heretic) silently served the wrong model. Registry is the single source;
+# the literal below is only a fallback for when models.json is unreadable (start.ps1
+# is boot-critical and must still bring chat up). -hf tag = "<repo>:<quant>".
 $ChatRepo  = "mudler/Qwen3.6-35B-A3B-Claude-4.7-Opus-Reasoning-Distilled-APEX-GGUF:I-Mini"
+$ModelsJson = "C:\llm-serve\models.json"
+try {
+    if (Test-Path $ModelsJson) {
+        $q36 = (Get-Content $ModelsJson -Raw | ConvertFrom-Json).q36
+        if ($q36 -and $q36.llama.repo -and $q36.quant) {
+            $ChatRepo = "$($q36.llama.repo):$($q36.quant)"
+            Write-Host "[chat] model from registry q36: $ChatRepo"
+        } else {
+            Write-Host "[chat] registry q36 incomplete - using built-in default $ChatRepo"
+        }
+    }
+} catch {
+    Write-Host "[chat] registry read failed ($($_.Exception.Message)) - using built-in default $ChatRepo"
+}
 $EmbedRepo = "ggml-org/embeddinggemma-300M-GGUF:Q8_0"
 # Always-on CPU nano (1B). The floor every character can fall to in ECO mode.
 # Kept resident in both modes; mode switches never touch it. See set-power-mode.ps1.
@@ -312,7 +333,13 @@ if (-not $wantChat) {
                         "-b","2048","-ub","512",         
                         "--parallel","1",
                         "--threads","8",
+                        # --ctx-checkpoints 0: disable context-checkpoint restore.
+                        # The restore path produces partial-prompt MoE batches that
+                        # trip a CUDA "invalid argument" in MUL_MAT_ID on the 5060 Ti
+                        # (sm_120 via PTX-JIT). Crashed :8080 dead 7.5h on 2026-06-09.
+                        "--ctx-checkpoints","0",
                         "--alias","qwen36-35b-a3b-iq3","--jinja") `
+        -RedirectStandardError (Join-Path $Root "logs\serve-8080-stderr.log") `
         -WindowStyle Hidden
 }
 
