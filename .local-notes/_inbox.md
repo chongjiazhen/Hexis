@@ -80,9 +80,10 @@ We are a local user with local patches; we do NOT own upstream. Unmerged
 (`characters/vera.json`/`lyra.json` carry new prompts). One-shot updater
 scripts `scripts/_update_{vera,lyra}_card.py` still sit UNTRACKED = the
 "delete after applying" leftovers (per `feedback_no_commit_oneshot_card_scripts`
-— leave untracked or delete, never commit). **Still open:** (1) confirm
-`set_persona_prompt.{vera,lyra}.sql` applied to live `hexis_vera`/`hexis_lyra`
-DBs; (2) the live UAT probe. Everything else in §0 done.
+— leave untracked or delete, never commit). **Live-SQL confirm PASS
+(2026-06-09):** live `agent.persona_system_prompt` in `hexis_vera`/`hexis_lyra`
+is md5-identical to the current `set_persona_prompt.{vera,lyra}.sql` — anchors
+applied. **Only open:** Telegram UAT soak (in progress). Everything else in §0 done.
 
 **Execution sequence (when picked up):**
 1. Iris content audit: read `characters/iris.json` `data.system_prompt` + `data.extensions.hexis` → validate ~75/25 Vera/Lyra split estimate
