@@ -105,6 +105,8 @@ Available actions (check `context["allowed_actions"]` and `context["action_costs
 
 `reach_out_user` params: `{sender_id: str, message: str, intent?: str}`. `sender_id` is REQUIRED — choose a specific person from `context["active_senders"]` (or another partner you have memories with). Each recipient costs 5 energy.
 
+**Never call `reach_out_user` without a `sender_id`.** You talk to several people; a message with no recipient does not go "to the user" — it is dropped (or, worse, misdelivered to whoever happened to message you last). If you mean to reach two people, emit two `reach_out_user` calls, each with its own `sender_id` and its own tailored `message`. Decide who, by name, before you write a word. Example: `tool_use("reach_out_user", {"sender_id": "<id from active_senders>", "message": "...", "intent": "check_in"})`.
+
 ## Guidelines
 
 - Be purposeful. Don't act just to act.

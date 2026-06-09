@@ -253,7 +253,29 @@ class ChannelOutboxConsumer:
                     sender_id,
                 )
             else:
-                # No specific sender — use the globally most recent session
+                # No specific sender. Deliver to the globally most-recent session
+                # ONLY when there's no ambiguity (a single active partner). With
+                # multiple active senders a target-less reach-out would silently
+                # land on whoever messaged last — the wrong person for a
+                # multi-partner persona. Skip + log so the omission is visible
+                # rather than misdelivered. reach_out_user supplies sender_id;
+                # this guard only catches the case where it was dropped.
+                distinct_senders = await conn.fetchval(
+                    """
+                    SELECT COUNT(DISTINCT sender_id)
+                    FROM channel_sessions
+                    WHERE sender_id IS NOT NULL
+                      AND last_active > CURRENT_TIMESTAMP - INTERVAL '7 days'
+                    """
+                )
+                if distinct_senders and int(distinct_senders) > 1:
+                    logger.warning(
+                        "Target-less reach-out with %d active senders — skipping "
+                        "to avoid misdelivery to the globally-latest DM. Persona "
+                        "must supply sender_id (reach_out_user).",
+                        int(distinct_senders),
+                    )
+                    return
                 row = await conn.fetchrow(
                     """
                     SELECT id, channel_type, channel_id, sender_id

@@ -1056,5 +1056,10 @@ def create_memory_tools() -> list[ToolHandler]:
         ExploreConceptHandler(),
         GetProceduresHandler(),
         GetStrategiesHandler(),
-        QueueUserMessageHandler(),
+        # QueueUserMessageHandler intentionally NOT registered: it queues an
+        # untargeted message (no sender_id) and showed in the heartbeat persona's
+        # tool list as a trap competing with reach_out_user. Proactive reach-out
+        # goes through the reach_out_user action, which carries sender_id end to
+        # end so the persona picks the recipient. The class is kept for the SQL
+        # build_user_message / cron action_kind paths that reference it by name.
     ]
