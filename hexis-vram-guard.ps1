@@ -171,19 +171,27 @@ function Get-ForeignGpuMB {
 
 function Invoke-Eco {
     Log "TRIGGER -> switching to ECO (set-power-mode.ps1 eco)"
+    # Stamp the guard-caused flag BEFORE the switch, not after. The switch is the
+    # exact moment the guard is most likely to die (set-power-mode eco kills the
+    # GPU llama-servers; host sleep/resume often coincides with launching a game).
+    # If the guard is killed mid-switch, a flag written afterward never lands, and
+    # the next guard start reads an un-flagged ECO as a deliberate manual ECO and
+    # refuses to re-arm PRIME - wedged forever. Writing the flag first makes a
+    # crash-during-switch survivable: the next guard sees the flag and re-arms.
+    # Marks this ECO as guard-caused; a manual `set-power-mode.ps1 eco` writes no
+    # flag, so the guard still never overrides a deliberate manual ECO.
+    [System.IO.File]::WriteAllText($EcoFlag,
+        (Get-Date -Format o), (New-Object System.Text.UTF8Encoding($false)))
+    Log "wrote eco flag ($EcoFlag) before switch - PRIME re-arm enabled"
     $psArgs = @("-NoProfile","-ExecutionPolicy","Bypass","-File","`"$SetMode`"","eco")
     $proc = Start-Process powershell -ArgumentList $psArgs -WorkingDirectory $Root `
         -WindowStyle Hidden -PassThru -Wait
     Log "set-power-mode eco exited $($proc.ExitCode)"
-    if ($proc.ExitCode -eq 0) {
-        # Stamp: marks this ECO as guard-caused. Only a flagged ECO is later
-        # auto-restored to PRIME - a manual `set-power-mode.ps1 eco` writes no
-        # flag, so the guard never overrides a deliberate manual ECO.
-        [System.IO.File]::WriteAllText($EcoFlag,
-            (Get-Date -Format o), (New-Object System.Text.UTF8Encoding($false)))
-        Log "wrote eco flag ($EcoFlag) - PRIME re-arm enabled"
-    } else {
-        Log "eco exit nonzero - flag NOT written (no auto re-arm for a failed switch)"
+    if ($proc.ExitCode -ne 0) {
+        # Clean failure (switch ran, returned nonzero): GPU likely still armed,
+        # so drop the flag - no re-arm needed for an ECO that didn't take.
+        Remove-Item $EcoFlag -ErrorAction SilentlyContinue
+        Log "eco exit nonzero - flag removed (no auto re-arm for a failed switch)"
     }
 }
 
@@ -204,9 +212,23 @@ function Invoke-Prime {
 $armed = $true
 $hits  = 0
 $clearSince = $null   # timestamp GPU first went clear; $null while triggered
+$lastPoll = Get-Date  # for wake detection: a big gap between polls = host slept
 
 try {
     while ($true) {
+        # Wake detection: poll cadence is $PollSeconds (4s). A gap far larger than
+        # that means the process was suspended - host sleep/hibernate (or a long
+        # switch). On the first poll after such a gap, treat it as a resume and
+        # skip the PRIME re-arm cooldown below, so a guard-caused ECO restored
+        # before sleep comes straight back to PRIME on wake (if the GPU is clear),
+        # instead of waiting a full $PrimeRearmMinutes of awake time. Self-contained:
+        # no dependency on the OS logging wake events (this box often doesn't).
+        $now      = Get-Date
+        $gapSec   = ($now - $lastPoll).TotalSeconds
+        $lastPoll = $now
+        $resumed  = $gapSec -gt 180
+        if ($resumed) { Log ("resume detected (poll gap {0:N0}s) - will skip re-arm cooldown if GPU clear" -f $gapSec) }
+
         $game    = Test-GameRunning
         $foreign = Get-ForeignGpuMB
         $trig    = $game -or ($foreign -gt $MinForeignVramMB)
@@ -247,8 +269,17 @@ try {
                 }
             } elseif (Test-Path $EcoFlag) {
                 $clearMin = ((Get-Date) - $clearSince).TotalMinutes
-                if ($clearMin -ge $PrimeRearmMinutes) {
-                    Log ("GPU clear {0:N1}m >= {1}m - re-arming PRIME" -f $clearMin, $PrimeRearmMinutes)
+                # Re-arm now if EITHER we just woke (resume) OR the GPU has been
+                # continuously clear for the full cooldown. The clear branch means
+                # the guard's own detection sees no game/foreign GPU, so a resume
+                # skip is safe - it only short-circuits the timer, not the safety
+                # check. Manual ECO (no $EcoFlag) is excluded by the elseif above.
+                if ($resumed -or $clearMin -ge $PrimeRearmMinutes) {
+                    if ($resumed) {
+                        Log "resume + GPU clear + guard-caused ECO - re-arming PRIME now (cooldown skipped)"
+                    } else {
+                        Log ("GPU clear {0:N1}m >= {1}m - re-arming PRIME" -f $clearMin, $PrimeRearmMinutes)
+                    }
                     Invoke-Prime
                     # Reset countdown either way: success -> mode!=eco next loop;
                     # failure -> back off a full window before retrying.
