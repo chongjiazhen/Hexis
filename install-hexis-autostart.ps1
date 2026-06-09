@@ -74,6 +74,42 @@ Register-ScheduledTask -TaskName $TaskName `
     -Description "Bring up full Hexis stack (Docker + llama-servers + all character workers) at boot and logon." | Out-Null
 Write-Host "[ok] scheduled task '$TaskName' registered (triggers: at startup + at logon, run whether logged on or not)"
 
+# --- 1a. Watchdog: keep the VRAM guard alive between boots ---
+# The guard is a detached poll loop. If it dies mid-session (sleep/resume, or the
+# eco-switch teardown), the Autostart task above does NOT restart it - that task
+# runs start-all.ps1, which exits right after fire-and-forgetting the guard, so
+# its RestartCount watches start-all, not the guard. This repeating task runs
+# ensure-guard.ps1 every 5 minutes; single-instance lock makes it a no-op while
+# the guard is alive, and respawns it within ~5 min of a crash.
+$WatchTask = "Hexis Guard Watchdog"
+$EnsureGuard = Join-Path $Root "ensure-guard.ps1"
+$wPsArgs = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$EnsureGuard`""
+$wAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $wPsArgs -WorkingDirectory $Root
+# Repeating trigger: fire once at registration, then every 5 min indefinitely.
+# NOTE: -RepetitionDuration ([TimeSpan]::MaxValue) serializes to an out-of-range
+# Duration (P99999999DT...) that Register-ScheduledTask rejects. Build the
+# repetition pattern directly and leave Duration unset = repeat forever.
+$wTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date)
+$repClass = Get-CimClass -ClassName MSFT_TaskRepetitionPattern `
+    -Namespace Root/Microsoft/Windows/TaskScheduler
+$rep = New-CimInstance -CimClass $repClass -ClientOnly
+$rep.Interval = "PT5M"
+$rep.StopAtDurationEnd = $false
+$wTrigger.Repetition = $rep
+$wSettings = New-ScheduledTaskSettingsSet `
+    -AllowStartIfOnBatteries `
+    -DontStopIfGoingOnBatteries `
+    -StartWhenAvailable `
+    -MultipleInstances IgnoreNew `
+    -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
+if (Get-ScheduledTask -TaskName $WatchTask -ErrorAction SilentlyContinue) {
+    Unregister-ScheduledTask -TaskName $WatchTask -Confirm:$false
+}
+Register-ScheduledTask -TaskName $WatchTask `
+    -Action $wAction -Trigger $wTrigger -Settings $wSettings -Principal $principal `
+    -Description "Respawn the Hexis VRAM guard within ~5 min if it dies between boots." | Out-Null
+Write-Host "[ok] scheduled task '$WatchTask' registered (every 5 min; no-op while guard alive)"
+
 # --- 1b. Force Docker Desktop's own auto-start-at-login setting ---
 # So the engine comes up the moment a session exists, no manual GUI launch.
 function Enable-DockerDesktopAutoStart {
