@@ -44,7 +44,20 @@ try {
 
 $ProfilePath = Join-Path $Root "power-profiles.psd1"
 if (-not (Test-Path $ProfilePath)) { throw "power-profiles.psd1 not found at $ProfilePath" }
-$P = Import-PowerShellDataFile -Path $ProfilePath
+# Import-PowerShellDataFile lives in Microsoft.PowerShell.Utility. When this
+# script is spawned by hexis-vram-guard mid-session, module autoload has been
+# seen to transiently miss it -> CommandNotFoundException, which (pre-fix) wedged
+# the guard in PRIME for hours (2026-06-09). Ensure the module, then fall back to
+# evaluating the psd1 (a plain hashtable literal) so the switch can never die here.
+if (-not (Get-Command Import-PowerShellDataFile -ErrorAction SilentlyContinue)) {
+    Import-Module Microsoft.PowerShell.Utility -ErrorAction SilentlyContinue
+}
+if (Get-Command Import-PowerShellDataFile -ErrorAction SilentlyContinue) {
+    $P = Import-PowerShellDataFile -Path $ProfilePath
+} else {
+    Write-Host "[psd1] Import-PowerShellDataFile unavailable - evaluating psd1 literal as fallback"
+    $P = & ([scriptblock]::Create((Get-Content -Raw -Path $ProfilePath)))
+}
 
 $LlamaServer = $P.LlamaServer
 $DockerHost  = $P.DockerHost
