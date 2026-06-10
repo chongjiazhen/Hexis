@@ -29,7 +29,8 @@ $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 # 1) $GameProcs - exact process base names WITHOUT .exe (catches games even if
 #    installed outside the dirs below).
 $GameProcs = @(
-    # 'eldenring', 'Cyberpunk2077', 'RDR2', 'bf2042', 'starfield'
+    'eldenring'
+    # 'Cyberpunk2077', 'RDR2', 'bf2042', 'starfield'
 )
 # 2) $GameDirs - ANY process whose .exe lives under one of these roots trips
 #    the guard. Covers games you forgot to list. Add your launchers/libraries.
@@ -39,6 +40,10 @@ $GameDirs = @(
     'C:\Program Files\Steam\steamapps\common',
     'C:\XboxGames',
     'C:\Program Files (x86)\GOG Galaxy\Games',
+    'C:\Program Files\EA Games',
+    'C:\Program Files (x86)\Origin Games',
+    'C:\Program Files\Electronic Arts',
+    'C:\Program Files (x86)\Electronic Arts',
     'C:\ComfyUI',  # ComfyUI portable: python_embeded\python.exe under here = CUDA hog, treat like a game (one-way PRIME->ECO)
     'C:\Games',
     'C:\GOG Games',
