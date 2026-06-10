@@ -19,6 +19,8 @@
 $ErrorActionPreference = "Continue"   # daemon: robustness over strictness
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 
+. (Join-Path $Root "guard-decisions.ps1")   # pure decision fns (testable)
+
 # ----------------- CONFIG (hand-edit) -----------------
 # Detection on consumer GeForce is process-based: nvidia-smi reports per-process
 # VRAM as [N/A] under WDDM, and in PRIME the card is already full so a reactive
@@ -56,6 +58,11 @@ $LlamaExeName       = 'llama-server'
 # not urgent; cold-start on :8080 is ~4 min on top of this anyway. Any single
 # trigger sample resets the countdown.
 $PrimeRearmMinutes  = 15
+# Eco-retry backoff: after a FAILED eco switch the guard stays ARMED and retries
+# (a single transient set-power-mode failure must not wedge the box in PRIME).
+# This gates how often it respawns set-power-mode so a fast-failing switch does
+# not hammer it every poll.
+$EcoRetryBackoffSeconds = 15
 # ------------------------------------------------------
 
 $LogDir = Join-Path $Root "logs"
@@ -192,7 +199,9 @@ function Invoke-Eco {
         # so drop the flag - no re-arm needed for an ECO that didn't take.
         Remove-Item $EcoFlag -ErrorAction SilentlyContinue
         Log "eco exit nonzero - flag removed (no auto re-arm for a failed switch)"
+        return $false
     }
+    return $true
 }
 
 function Invoke-Prime {
@@ -213,6 +222,7 @@ $armed = $true
 $hits  = 0
 $clearSince = $null   # timestamp GPU first went clear; $null while triggered
 $lastPoll = Get-Date  # for wake detection: a big gap between polls = host slept
+$ecoRetryAfter = $null  # while set, suppress eco retries until this time (backoff)
 
 try {
     while ($true) {
@@ -236,20 +246,38 @@ try {
         if ($trig) {
             $hits++
             $clearSince = $null   # any trigger resets the PRIME re-arm countdown
-            if ($armed -and $hits -ge $ConsecutiveSamples) {
-                $mode = Get-Mode
-                # GPU-armed = anything other than 'eco' (prime alias or a
-                # specific BigModels key like 'ablx'/'q36'). All flip to ECO.
-                if ($mode -ne 'eco') {
-                    Log "sustained trigger (game=$game foreignMB=$foreign) mode=$mode"
-                    Invoke-Eco
-                } else {
-                    Log "trigger but mode=$mode - nothing to do"
+            $mode = Get-Mode
+            $ecoDecision = Get-EcoTriggerDecision -Armed $armed -Hits $hits `
+                -Threshold $ConsecutiveSamples -Mode $mode
+            switch ($ecoDecision.Action) {
+                'attempt-eco' {
+                    # Backoff gate: a fast-failing eco (e.g. a transient module
+                    # autoload error) would otherwise respawn set-power-mode every
+                    # poll while the trigger persists.
+                    $blocked = ($ecoRetryAfter -and ((Get-Date) -lt $ecoRetryAfter))
+                    if (-not $blocked) {
+                        Log "sustained trigger (game=$game foreignMB=$foreign) mode=$mode"
+                        $ecoOk = Invoke-Eco
+                        $armed = Get-ArmedAfterEco -Action 'attempt-eco' -EcoSucceeded $ecoOk
+                        if ($ecoOk) {
+                            $ecoRetryAfter = $null
+                        } else {
+                            # Stay armed; the switch did NOT take. Retry after the
+                            # backoff so one transient failure can't strand PRIME.
+                            $ecoRetryAfter = (Get-Date).AddSeconds($EcoRetryBackoffSeconds)
+                            Log ("eco switch FAILED - staying armed; retry after {0}s" -f $EcoRetryBackoffSeconds)
+                        }
+                    }
                 }
-                $armed = $false   # do not re-fire eco until trigger clears
+                'already-eco' {
+                    Log "trigger but mode=$mode - nothing to do"
+                    $armed = Get-ArmedAfterEco -Action 'already-eco' -EcoSucceeded $true
+                }
+                # 'wait' -> not armed yet or debounce not met; no action
             }
         } else {
             $hits = 0
+            $ecoRetryAfter = $null   # trigger gone; clear any eco-retry backoff
             if (-not $armed) {
                 Log "trigger cleared - re-armed (PRIME re-arm countdown started)"
                 $armed = $true
