@@ -4,9 +4,11 @@
 
 - Chat = per-character `llama-server` fleet, per-port: chat :8080, embed :8081
   (ALWAYS-ON), nano :8082. Managed by `set-power-mode.ps1 prime` (arms :8080
-  only) + `start-all.ps1` (full stack incl :8081). NOT llama-swap.
-- llama-swap is a SEPARATE stack — "two stacks, do not merge"
-  (`C:\llm-serve\docs\HEXIS-INTEGRATION.md`).
+  only) + `start-all.ps1` (full stack incl :8081). This is the SOLE `:8080`
+  launcher; per-model tuning resolves from `C:\llm-serve\models.json`.
+- llama-swap retired 2026-06-10 (orphan — never in the live path, no autostart) →
+  archived at `C:\llama-swap.retired-2026-06-10`. Do NOT reintroduce a second
+  `:8080` launcher; it caused config drift (24576/65536 confusion) for zero gain.
 - Recover: `.\start-all.ps1` (idempotent, won't double-bind :8080). NEVER kill
   `llama-server.exe` to force-reload — no supervisor; embed:8081 always-on,
   killing it breaks ALL hydration → generic replies.
