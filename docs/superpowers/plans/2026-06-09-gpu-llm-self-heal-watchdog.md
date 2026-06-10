@@ -14,9 +14,11 @@
 
 ## File Structure
 
-- **Create** `gpu-heal.ps1` — pure `Get-GpuHealDecision`, dot-sourceable, no side effects.
-- **Create** `gpu-heal.Tests.ps1` — Pester 3.4 truth-table tests for the pure function.
-- **Modify** `hexis-vram-guard.ps1` — dot-source the helper; add config; add loop state; add the liveness self-heal block.
+> **Note:** `guard-decisions.ps1` + `guard-decisions.Tests.ps1` already exist (created by the 2026-06-09 eco-retry hotfix, commit `9053a25`) and the guard already dot-sources `guard-decisions.ps1`. F1 extends them rather than creating new files.
+
+- **Modify** `guard-decisions.ps1` — append pure `Get-GpuHealDecision` (no side effects).
+- **Modify** `guard-decisions.Tests.ps1` — append the gpu-heal truth-table Describe block (its top already dot-sources `guard-decisions.ps1`).
+- **Modify** `hexis-vram-guard.ps1` — add config; add loop state; add the liveness self-heal block. (Dot-source line already present.)
 
 No other files change (`set-power-mode.ps1`, `ensure-guard.ps1`, `start-all.ps1`, the scheduled task all untouched — the guard is already auto-started and kept alive).
 
@@ -25,8 +27,8 @@ No other files change (`set-power-mode.ps1`, `ensure-guard.ps1`, `start-all.ps1`
 ### Task 1: Pure decision function `Get-GpuHealDecision`
 
 **Files:**
-- Create: `gpu-heal.ps1`
-- Test: `gpu-heal.Tests.ps1`
+- Modify: `guard-decisions.ps1` (append `Get-GpuHealDecision`)
+- Test: `guard-decisions.Tests.ps1` (append the gpu-heal `Describe` block)
 
 **Decision contract (returns a PSCustomObject):**
 - `Action` — `'rearm'` or `'none'`
@@ -36,11 +38,9 @@ No other files change (`set-power-mode.ps1`, `ensure-guard.ps1`, `start-all.ps1`
 
 - [ ] **Step 1: Write the failing test (full truth table)**
 
-Create `gpu-heal.Tests.ps1`:
+Append to `guard-decisions.Tests.ps1` (the dot-source of `guard-decisions.ps1` is already at the top of that file — do not repeat it):
 
 ```powershell
-. (Join-Path $PSScriptRoot 'gpu-heal.ps1')
-
 # Defaults mirror the guard config: 15-sample debounce, budget 3.
 function New-Args {
     param(
@@ -135,21 +135,14 @@ Describe 'Get-GpuHealDecision' {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `pwsh -NoProfile -Command "Invoke-Pester -Path .\gpu-heal.Tests.ps1"`
-Expected: FAIL — `Get-GpuHealDecision` is not recognized (file/function missing).
+Run: `pwsh -NoProfile -Command "Invoke-Pester -Path .\guard-decisions.Tests.ps1"`
+Expected: FAIL — `Get-GpuHealDecision` is not recognized (function not yet added).
 
 - [ ] **Step 3: Write the minimal implementation**
 
-Create `gpu-heal.ps1`:
+Append to `guard-decisions.ps1`:
 
 ```powershell
-# gpu-heal.ps1 - pure decision function for hexis-vram-guard.ps1's gpu-llm
-# liveness self-heal (F1). NO side effects: takes the current poll state, returns
-# the action + next counter/budget. The guard supplies the impure inputs (mode
-# marker, eco-flag presence, :8080 TCP probe, resume/cooldown timers) and runs
-# the side effect (Invoke-Prime). Kept separate so the tricky boolean logic is
-# unit-testable (gpu-heal.Tests.ps1) without a running fleet.
-
 function Get-GpuHealDecision {
     [CmdletBinding()]
     param(
@@ -202,13 +195,13 @@ function Get-GpuHealDecision {
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `pwsh -NoProfile -Command "Invoke-Pester -Path .\gpu-heal.Tests.ps1"`
-Expected: PASS — 9 tests passing, 0 failed.
+Run: `pwsh -NoProfile -Command "Invoke-Pester -Path .\guard-decisions.Tests.ps1"`
+Expected: PASS — all tests passing (the pre-existing eco-trigger tests plus the 9 new gpu-heal tests), 0 failed.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add gpu-heal.ps1 gpu-heal.Tests.ps1
+git add guard-decisions.ps1 guard-decisions.Tests.ps1
 git commit -m "feat(ops): pure gpu-llm self-heal decision fn + Pester tests"
 ```
 
@@ -221,19 +214,15 @@ git commit -m "feat(ops): pure gpu-llm self-heal decision fn + Pester tests"
 
 This task adds wiring only — no behavior change yet. Verified by a parse check.
 
-- [ ] **Step 1: Dot-source the helper near the top**
+- [ ] **Step 1: Confirm the helper is dot-sourced (already present)**
 
-In `hexis-vram-guard.ps1`, immediately after the line:
-
-```powershell
-$Root = Split-Path -Parent $MyInvocation.MyCommand.Path
-```
-
-add:
+The eco-retry hotfix already added this line after `$Root = ...`:
 
 ```powershell
-. (Join-Path $Root "gpu-heal.ps1")   # Get-GpuHealDecision (pure, testable)
+. (Join-Path $Root "guard-decisions.ps1")   # pure decision fns (testable)
 ```
+
+No change needed — `Get-GpuHealDecision` (added in Task 1) lives in the same file, so it is already in scope. Skip to Step 2.
 
 - [ ] **Step 2: Add F1 config to the CONFIG block**
 
@@ -362,8 +351,8 @@ Expected: prints `parse-ok` with no parse errors.
 
 - [ ] **Step 3: Re-run the pure-function tests (no regression)**
 
-Run: `pwsh -NoProfile -Command "Invoke-Pester -Path .\gpu-heal.Tests.ps1"`
-Expected: PASS — 9 tests passing (the helper is unchanged; this confirms the dot-source path still resolves).
+Run: `pwsh -NoProfile -Command "Invoke-Pester -Path .\guard-decisions.Tests.ps1"`
+Expected: PASS — all tests passing (eco-trigger + gpu-heal; the helper is unchanged; this confirms the dot-source path still resolves).
 
 - [ ] **Step 4: Live verification — re-arm a hand-killed :8080**
 
@@ -418,11 +407,11 @@ git commit -m "feat(ops): gpu-llm self-heal re-arm in vram-guard loop (F1)"
 - Resume resets hits + budget; clock-drift safety via shared `$resumed` → Task 1 `resume-reset` + Task 3 `$lastPoll` reset after `Invoke-Prime`. ✓
 - TCP probe not HTTP → Task 3 `Get-NetTCPConnection`. ✓
 - Logging `[gpu-heal]` to `vram-guard.log` → Task 3. ✓
-- Scope: only `hexis-vram-guard.ps1` modified; `gpu-heal.ps1`/tests added (test-strategy refinement, noted) → File Structure. ✓
+- Scope: `hexis-vram-guard.ps1` modified; `guard-decisions.ps1`/tests extended (pre-existing from the eco-retry hotfix) → File Structure. ✓
 - Success criteria (re-arm hand-killed :8080; never re-arm manual/game ECO; give up after 3 + retry) → Task 3 Steps 4-5 live + Task 1 unit. ✓
 
 **Placeholder scan:** none — every step has concrete code/commands.
 
 **Type/name consistency:** `Get-GpuHealDecision` params (`Mode/EcoFlagPresent/Trig/GpuListening/Resumed/CooldownElapsed/GpuDownHits/ReArmBudget/GpuDownSamples/ReArmBudgetMax`) match the Task 3 call site exactly. Return fields (`Action/NewDownHits/NewBudget/Reason`) match consumers. Config names (`$GpuPort/$GpuDownSamples/$ReArmBudget/$ReArmCooldownMinutes`) and state (`$gpuDownHits/$reArmBudget/$gaveUpAt`) consistent across Tasks 2-3.
 
-**Note on test execution:** Pester 3.4 syntax (`Should Be`, splatting via `@(New-Args ...)` returns a hashtable splat). If a worker's pwsh resolves a Pester 5.x instead, run under Windows PowerShell 5.1: `powershell -NoProfile -Command "Invoke-Pester -Path .\gpu-heal.Tests.ps1"` (3.4 is the 5.1 built-in).
+**Note on test execution:** Pester 3.4 syntax (`Should Be`; splat a hashtable variable — `$a = New-Args ...; Get-GpuHealDecision @a`). pwsh 7.6 resolves Pester 3.4.0 on this box. If a worker's pwsh resolves a Pester 5.x instead, run under Windows PowerShell 5.1: `powershell -NoProfile -Command "Invoke-Pester -Path .\guard-decisions.Tests.ps1"` (3.4 is the 5.1 built-in).
