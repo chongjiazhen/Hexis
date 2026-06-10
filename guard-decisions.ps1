@@ -5,7 +5,7 @@
 # without a running fleet. The guard supplies the impure inputs (Get-Mode, the
 # process scan, timers) and performs the side effects (Invoke-Eco / Invoke-Prime).
 #
-# (F1 gpu-llm self-heal will add Get-GpuHealDecision to this same file.)
+# F1 gpu-llm self-heal: Get-GpuHealDecision (below) maps poll state -> rearm/none.
 
 function Get-EcoTriggerDecision {
     # Decide what the eco-trigger path should do THIS poll, given the debounced
@@ -44,4 +44,53 @@ function Get-ArmedAfterEco {
         'attempt-eco' { return (-not $EcoSucceeded) }  # success -> disarm; failure -> stay armed (retry)
         'already-eco' { return $false }                # already ECO; nothing to retry
     }
+}
+
+function Get-GpuHealDecision {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Mode,
+        [bool]$EcoFlagPresent,
+        [bool]$Trig,
+        [bool]$GpuListening,
+        [bool]$Resumed,
+        [bool]$CooldownElapsed,
+        [int]$GpuDownHits,
+        [int]$ReArmBudget,
+        [int]$GpuDownSamples,
+        [int]$ReArmBudgetMax
+    )
+
+    # Out-of-window: deliberate/guard ECO or a game/CUDA trigger present. The
+    # liveness path stays out (the trigger path owns eco<->prime here). Reset the
+    # down counter so a future in-window death starts fresh.
+    if ($Mode -eq 'eco' -or $EcoFlagPresent -or $Trig) {
+        return [pscustomobject]@{ Action='none'; NewDownHits=0; NewBudget=$ReArmBudget; Reason='out-of-window' }
+    }
+
+    # Resume from sleep / long switch: do not count the gap as downtime; refresh
+    # budget so a pre-sleep give-up does not strand the guard.
+    if ($Resumed) {
+        return [pscustomobject]@{ Action='none'; NewDownHits=0; NewBudget=$ReArmBudgetMax; Reason='resume-reset' }
+    }
+
+    # In-window and :8080 healthy: reset counter, restore budget (covers external
+    # recovery - manual `set-power-mode prime`, boot).
+    if ($GpuListening) {
+        return [pscustomobject]@{ Action='none'; NewDownHits=0; NewBudget=$ReArmBudgetMax; Reason='healthy' }
+    }
+
+    # In-window and :8080 down: advance the debounce counter.
+    $hits   = $GpuDownHits + 1
+    $budget = $ReArmBudget
+    # Budget exhausted but the cooldown elapsed: grant exactly one retry.
+    if ($budget -le 0 -and $CooldownElapsed) { $budget = 1 }
+
+    if ($hits -ge $GpuDownSamples -and $budget -gt 0) {
+        return [pscustomobject]@{ Action='rearm'; NewDownHits=$hits; NewBudget=($budget - 1); Reason='down-threshold' }
+    }
+    if ($hits -ge $GpuDownSamples) {
+        return [pscustomobject]@{ Action='none'; NewDownHits=$hits; NewBudget=$budget; Reason='budget-exhausted' }
+    }
+    return [pscustomobject]@{ Action='none'; NewDownHits=$hits; NewBudget=$budget; Reason='down-debouncing' }
 }
