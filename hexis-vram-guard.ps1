@@ -335,6 +335,51 @@ try {
             }
         }
 
+        # ---- gpu-llm liveness self-heal (F1) ----
+        # Runs every poll regardless of $trig. Acts only in-window (mode != eco,
+        # no eco-flag, no game trigger). The pure Get-GpuHealDecision owns the
+        # truth table; here we gather impure inputs and run the side effect.
+        $modeNow = Get-Mode
+        $ecoFlagPresent = Test-Path $EcoFlag
+        $gpuUp = [bool](Get-NetTCPConnection -LocalPort $GpuPort -State Listen -ErrorAction SilentlyContinue)
+        $cooldownElapsed = $false
+        if ($gaveUpAt) {
+            $cooldownElapsed = (((Get-Date) - $gaveUpAt).TotalMinutes -ge $ReArmCooldownMinutes)
+        }
+
+        $decision = Get-GpuHealDecision -Mode $modeNow -EcoFlagPresent $ecoFlagPresent `
+            -Trig $trig -GpuListening $gpuUp -Resumed $resumed -CooldownElapsed $cooldownElapsed `
+            -GpuDownHits $gpuDownHits -ReArmBudget $reArmBudget `
+            -GpuDownSamples $GpuDownSamples -ReArmBudgetMax $ReArmBudget
+
+        $gpuDownHits = $decision.NewDownHits
+        $reArmBudget = $decision.NewBudget
+
+        if ($decision.Action -eq 'rearm') {
+            # A cooldown-granted retry comes in with the give-up clock already set;
+            # restart it so a failed retry waits another full cooldown, not re-fires
+            # every poll.
+            if ($cooldownElapsed -and $gaveUpAt) { $gaveUpAt = Get-Date }
+            Log ("[gpu-heal] :{0} down >= {1} samples (mode={2}) - re-arming (budget left {3})" -f $GpuPort, $GpuDownSamples, $modeNow, $reArmBudget)
+            Invoke-Prime
+            # Invoke-Prime blocks ~4min (-Wait through set-power-mode's health gate).
+            # Reset the poll baseline so that gap is NOT misread as a host-sleep
+            # resume next iteration (which would wrongly reset hits + budget).
+            $lastPoll = Get-Date
+        }
+        elseif ($decision.Reason -eq 'budget-exhausted') {
+            if (-not $gaveUpAt) {
+                $gaveUpAt = Get-Date
+                Log ("[gpu-heal] re-arm failed {0}x; giving up until :{1} recovers or {2}m cooldown" -f $ReArmBudget, $GpuPort, $ReArmCooldownMinutes)
+            }
+        }
+        elseif ($decision.Reason -in @('healthy','resume-reset')) {
+            if ($gaveUpAt) {
+                $gaveUpAt = $null
+                Log ("[gpu-heal] :{0} recovered ({1}) - budget reset, give-up cleared" -f $GpuPort, $decision.Reason)
+            }
+        }
+
         Start-Sleep -Seconds $PollSeconds
     }
 } finally {
