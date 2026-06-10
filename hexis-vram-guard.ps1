@@ -68,6 +68,15 @@ $PrimeRearmMinutes  = 15
 # This gates how often it respawns set-power-mode so a fast-failing switch does
 # not hammer it every poll.
 $EcoRetryBackoffSeconds = 15
+# --- gpu-llm liveness self-heal (F1) ---
+# Re-arm a silently-dead :8080 (gpu-llm crashed post-arm; marker still PRIME).
+# Recovery layer; the ctx-checkpoint crash itself is prevented at source (start.ps1
+# + models.json `--ctx-checkpoints 0`). $GpuPort is hand-synced to power-profiles.psd1
+# BigPort (one constant, like $LlamaExeName - the guard does not import the psd1).
+$GpuPort              = 8080   # ActiveBig liveness port (== psd1 BigPort)
+$GpuDownSamples       = 15     # ~60s continuous down before re-arm (15 * $PollSeconds)
+$ReArmBudget          = 3      # consecutive failed re-arms before giving up
+$ReArmCooldownMinutes = 30     # after giving up, grant one more retry this long later
 # ------------------------------------------------------
 
 $LogDir = Join-Path $Root "logs"
@@ -228,6 +237,11 @@ $hits  = 0
 $clearSince = $null   # timestamp GPU first went clear; $null while triggered
 $lastPoll = Get-Date  # for wake detection: a big gap between polls = host slept
 $ecoRetryAfter = $null  # while set, suppress eco retries until this time (backoff)
+
+# F1 gpu-llm liveness state
+$gpuDownHits = 0
+$reArmBudget = $ReArmBudget
+$gaveUpAt    = $null   # set when budget hits 0; drives the cooldown retry window
 
 try {
     while ($true) {
