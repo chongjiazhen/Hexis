@@ -17,6 +17,7 @@ x-channel-base: &channel-base
     dockerfile: ops/Dockerfile.channels
   profiles:
     - active
+  restart: unless-stopped
   command: ["hexis-channels"]
   depends_on:
     db:
@@ -33,6 +34,7 @@ x-worker-base: &worker-base
     dockerfile: ops/Dockerfile.worker
   profiles:
     - active
+  restart: unless-stopped
   depends_on:
     db:
       condition: service_healthy
