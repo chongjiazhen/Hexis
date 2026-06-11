@@ -113,8 +113,9 @@ to pure peripheral I/O.
 - **`tts.py`** — Piper subprocess; sentence-chunked for low first-audio latency; one
   voice per persona.
 - **`avatar/`** — `AvatarController` interface (`set_state(idle|listening|thinking|talking)`,
-  optional `viseme(frame)`); ships a logging stub + the chosen desktop-avatar lib impl.
-  No lip-sync in v1 (state-based animation only; `viseme` is a futureproof hook).
+  optional `viseme(frame)`); ships a logging stub **+ a PyQt6 sprite-overlay impl**
+  (Variation 1 — see Avatar research). No lip-sync in v1 (state-based PNG animation only;
+  `viseme` is the futureproof hook that a later Live2D impl fills).
 - **`ws_client.py`** — connect to the adapter; send turns; receive `{say}`/`{avatar}`
   events; drive TTS + avatar.
 - **`bridge.py`** — main loop (below).
@@ -181,4 +182,34 @@ Tracked as a llm-serve task, not part of this hexis implementation.
 | TTS | Piper | CPU | be-more-agent's choice; Windows binaries, fast, voice-per-persona |
 | VLM | Moondream2 GGUF via `llama-server` | small on-demand GPU port | tiny (~2GB), only loaded/called on demand |
 | Wake word | OpenWakeWord (ONNX) | host CPU | be-more-agent parity; offline |
-| Avatar | TBD GitHub desktop-avatar lib behind `AvatarController` | host | pluggable; stub ships first |
+| Avatar | PyQt6 sprite overlay (v1) → `live2d-py` (upgrade) behind `AvatarController` | host | pluggable; sprite ships first, Live2D drops into the `viseme()` hook later |
+
+## Avatar research (2026-06-11)
+
+Filter: the full AI-VTuber apps each ship their **own** LLM/STT/TTS brain, so adopting
+one means two competing brains (and, for Soul-of-Waifu, GPL-3 viral licensing). They are
+**reference, not dependencies**. What fits the pluggable `AvatarController` is a render
+layer we drive. Three variations evaluated:
+
+1. **Sprite/PNG overlay (chosen for v1).** PyQt6/PySide6 frameless transparent
+   always-on-top window, `Qt.WindowTransparentForInput` click-through, PNG frames swapped
+   per state. This is be-more-agent's `faces/` approach as a floating Windows widget.
+   Zero model licensing, ~100-150 LOC, matches the v1 state-based cut. No real lip-sync.
+2. **Live2D via `live2d-py` (documented upgrade).** Pure-Python library (not an app)
+   wrapping the Live2D Native SDK; renders Cubism models in PyQt/pygame-OpenGL with
+   programmatic param control -> real lip-sync by driving `ParamMouthOpenY` from TTS
+   amplitude. Needs Cubism Core+Framework (proprietary, free at our scale) + a `.model3`
+   asset. Drops into the `viseme()` hook when lip-sync is wanted. `Deskpet` (Qt+Live2D)
+   is a transparent-pet-mode reference.
+3. **Fork a full app's renderer - rejected.** Big surgery, GPL-3 entanglement, inherits
+   their architecture. Study Open-LLM-VTuber's transparent pet mode + audio lip-sync for
+   ideas; do not depend on it.
+
+**Decision:** ship Variation 1 first; Variation 2 is a drop-in upgrade via the existing
+`viseme()` hook - no rework.
+
+Sources: [Open-LLM-VTuber](https://github.com/Open-LLM-VTuber/Open-LLM-VTuber),
+[live2d-py](https://github.com/Arkueid/live2d-py),
+[Deskpet](https://github.com/SpacervalLam/Deskpet),
+[Soul-of-Waifu](https://github.com/jofizcd/Soul-of-Waifu),
+[LLM-Live2D-Desktop-Assistant](https://github.com/ylxmf2005/LLM-Live2D-Desktop-Assitant).
