@@ -1,5 +1,16 @@
 # Local rig notes (this box — not team-shared)
 
+## Git branch topology (CRITICAL — never push local work to main)
+
+- `main` = UPSTREAM mirror, NOT owned (HEAD ~ release tags like "bump 1.0.5").
+- ALL local dev + patches live ONLY on branch `home-rig-local` (hundreds of
+  commits ahead of `main`, no divergence).
+- NEVER merge / fast-forward / push `home-rig-local` → `main` — that dumps local
+  work onto the upstream line. "Merge this work" on hexis = commit on
+  `home-rig-local`, full stop.
+- Contributing upstream = clean cherry-pick onto a fresh branch off `main`, never
+  by merging `home-rig-local`.
+
 ## Serving topology (CRITICAL — misreading this caused a full q36 outage)
 
 - Chat = per-character `llama-server` fleet, per-port: chat :8080, embed :8081
