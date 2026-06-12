@@ -377,14 +377,17 @@ $bigResolved = $null
 if (-not $IsEco -and ($liveChars | Where-Object { $_.Tier -eq "gpu" })) {
     # Single source of truth: alias + gguf + tuning resolved from models.json by
     # ActiveBig key. $big.* (psd1) is only a legacy fallback for un-backfilled keys.
+    # $bigResolved still resolves the ALIAS (cognition: DB llm.chat.model below).
+    # Serving (arm/kill/health-gate) is now llm-serve's serve.py (F2 lift).
     $bigResolved = Resolve-BigModel $ActiveBig $big.Repo $big.Path $big.Alias
-    Ensure-GpuServer $bigResolved $BigPort
-    # Gate: never report "armed" / flip DBs to :8080 until it answers /health.
-    # Mirrors the ECO/nano gate (below) - flipping the gpu-tier fleet to a dead
-    # endpoint silently bricks chat + heartbeat ("..." replies, no error).
-    $gpuOk = Wait-PortHealth "http://127.0.0.1:$BigPort/health" "$ActiveBig :$BigPort" 180
-    if (-not $gpuOk) {
-        throw "GPU server :$BigPort ($ActiveBig) not healthy after launch - check $LogDir\serve-$BigPort-stderr.log (likely CUDA OOM if a just-killed server's VRAM was not yet freed; retry the re-arm). Refusing to flip DBs to a dead endpoint."
+    # F2: serving relocated to llm-serve serve.py. Hexis orchestration flags pass
+    # through --extra-args; llm-serve owns tuning (models.json) + the health-gate
+    # + nano exclusivity. Exit!=0 => dead endpoint => abort before flipping DBs
+    # (preserves the "never flip the gpu fleet to a dead :8080" invariant).
+    $orchFlags = @("--reasoning-budget","0","--repeat-penalty","1.1","--repeat-last-n","256")
+    & py -3.10 C:\llm-serve\infra\serve.py arm $ActiveBig --extra-args ($orchFlags -join ' ')
+    if ($LASTEXITCODE -ne 0) {
+        throw "serve.py arm $ActiveBig failed health-gate (exit $LASTEXITCODE) - refusing to flip DBs to a dead endpoint. Check C:\llm-serve\logs\serve-8080.log"
     }
     $gpuPortsInUse += $BigPort
 }
@@ -437,13 +440,16 @@ foreach ($ch in $liveChars) {
 # so we must ensure it is up AND healthy before letting the asyncpg applier
 # point DBs at it - flipping to a dead endpoint would silently brick the fleet.
 if ($Mode -eq "eco") {
-    Ensure-NanoServer
-    $nanoOk = Wait-PortHealth "http://127.0.0.1:$NanoPort/health" "nano :$NanoPort" 180
-    if (-not $nanoOk) {
-        throw "nano :$NanoPort not healthy - refusing to flip DBs to a dead endpoint. Check llama-server, HF cache (HF_HUB_DISABLE_XET=1), and retry."
+    # F2: serve.py owns nano floor + gpu kill + exclusivity (ensure nano healthy
+    # FIRST, then free :8080). Nano sampler/reasoning are Hexis orchestration ->
+    # --extra-args (mirrors the old Ensure-NanoServer sampler block). Exit!=0 =>
+    # nano floor dead => abort before flipping DBs.
+    $nanoOrch = @("--temp","0.7","--top-p","0.8","--top-k","20","--min-p","0",
+                  "--repeat-penalty","1.1","--reasoning","off")
+    & py -3.10 C:\llm-serve\infra\serve.py eco --extra-args ($nanoOrch -join ' ')
+    if ($LASTEXITCODE -ne 0) {
+        throw "serve.py eco failed (nano :$NanoPort unhealthy, exit $LASTEXITCODE) - refusing to flip DBs to a dead endpoint."
     }
-    # Free the GPU slot.
-    Kill-Port $BigPort $ActiveBig
 } else {
     # PRIME: nano is no longer load-bearing (gpu-tier chars share :8080;
     # nano-tier psd1 entries are all retired). Only kill if no live nano-tier
