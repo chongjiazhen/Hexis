@@ -124,46 +124,22 @@ function Start-Nano {
         Write-Host "[start] nano :8082 already running"
         return
     }
-    # Thread-capped + below-normal priority: pure-CPU inference must NOT saturate
-    # all cores and starve interactive apps (this crashed VS Code).
-    # 8 physical cores -> cap at 4, leave headroom.
-    $NanoThreads = 4
-    Write-Host "[start] nano llama-server :8082 ($NanoRepo, threads=$NanoThreads, below-normal)"
-    # Tuning rationale (ECO floor; 11 personas serialize on --parallel 1):
-    #   --ctx-size 32768           : prompt bloat headroom (lovesick hit 5735 tok ceiling at 4096)
-    #   --cache-type-k/v q8_0      : halves KV cache; trivial quality loss; pairs w/ bigger ctx
-    #   --temp/top-p/top-k/min-p   : Qwen3 OFFICIAL non-thinking sampling (0.7/0.8/20/0).
-    #                                Replaced mirostat 2 (was tuned for the Nano_Imp RP 1B);
-    #                                mirostat overrides temp/top-p/top-k so the two can't coexist.
-    #   --repeat-penalty 1.1       : mild echo/loop guard - 0.6B on CPU loops easily. Not in the
-    #                                Qwen3 rec (they prefer presence_penalty) but harmless + safe.
-    #   --mlock                    : pin weights+KV in RAM, no page-fault stalls mid-stream
-    #   --n-gpu-layers 0           : CPU-only, 0 VRAM (PRIME owns GPU)
-    $nanoProc = Start-Process -FilePath $LlamaServer `
-        -ArgumentList @("-hf",$NanoRepo,
-                        "--host","0.0.0.0","--port","8082",
-                        "--ctx-size","32768","--n-gpu-layers","0",
-                        "--cache-type-k","q8_0","--cache-type-v","q8_0",
-                        "--temp","0.7","--top-p","0.8","--top-k","20","--min-p","0",
-                        "--repeat-penalty","1.1",
-                        "--mlock",
-                        "--parallel","1",
-                        "--threads","$NanoThreads","--threads-batch","$NanoThreads",
-                        "--alias","qwen3-0.6b","--jinja",
-                        # Qwen3 ships hybrid thinking ON by default. --reasoning off
-                        # sets template non-thinking mode: no <think> tag AND no CoT
-                        # narration bleeding into content. NOT --chat-template-kwargs
-                        # '{"enable_thinking":false}' (Start-Process -ArgumentList
-                        # mangles the embedded quotes -> server dies on launch); NOT
-                        # --reasoning-budget 0 alone (cuts the tag but the model still
-                        # narrates its reasoning in the content channel).
-                        "--reasoning","off") `
-        -WindowStyle Hidden -PassThru
-    try {
-        $nanoProc.PriorityClass = [System.Diagnostics.ProcessPriorityClass]::BelowNormal
-        Write-Host "[start] nano PID $($nanoProc.Id) priority=BelowNormal"
-    } catch {
-        Write-Host "[warn] could not lower nano priority: $($_.Exception.Message)"
+    # F2: nano serving relocated to llm-serve serve.py - the SOLE nano lifecycle
+    # owner (start.ps1 + set-power-mode both call it; ends the 3-way launch dup +
+    # the gpu/nano exclusivity leak). serve.py supplies serve tuning from
+    # models.json 'nano' (ctx 32768 / kv q8_0 / ngl 0 / threads 4) + --mlock +
+    # below-normal priority + the health-gate. Hexis passes only sampler/reasoning
+    # here via --extra-args (same contract as set-power-mode.ps1's eco path):
+    #   --temp/top-p/top-k/min-p : Qwen3 OFFICIAL non-thinking sampling (0.7/0.8/20/0)
+    #   --repeat-penalty 1.1     : mild echo/loop guard (0.6B on CPU loops easily)
+    #   --reasoning off          : template non-thinking - no <think> tag AND no CoT
+    #                              narration in content (NOT --reasoning-budget 0 alone)
+    $nanoOrch = @("--temp","0.7","--top-p","0.8","--top-k","20","--min-p","0",
+                  "--repeat-penalty","1.1","--reasoning","off")
+    Write-Host "[start] nano :8082 via serve.py ensure-nano"
+    & py -3.10 C:\llm-serve\infra\serve.py ensure-nano --extra-args ($nanoOrch -join ' ')
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[fail] serve.py ensure-nano failed (exit $LASTEXITCODE) - check C:\llm-serve\logs\serve-8082.log"
     }
 }
 
