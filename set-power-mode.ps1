@@ -91,239 +91,14 @@ if (-not $IsEco -and -not $IsPrimeAlias) {
 $big = $P.BigModels[$ActiveBig]
 if (-not $IsEco -and -not $big) { throw "ActiveBig '$ActiveBig' not found in BigModels (power-profiles.psd1)" }
 
-# ---- llm-serve registry: single source of truth for per-model serve flags ----
-# C:\llm-serve\models.json owns ctx/ngl/kv_quant/batch/threads per model and is
-# consumed by infra/switch.py, monitor.py, gen-litellm-config. Hexis sources GPU
-# serve TUNING from it keyed by ActiveBig; Hexis-specific ORCHESTRATION flags
-# (--alias/--jinja/--reasoning-budget) stay here - they are not serve tuning and
-# the kobold/SillyTavern consumer must never see them. Falls back to built-in
-# defaults when the registry file or the model's entry is absent, so models not
-# yet backfilled into the registry keep working unchanged.
-$RegistryPath = if ($env:HEXIS_LLM_REGISTRY) { $env:HEXIS_LLM_REGISTRY } else { 'C:\llm-serve\models.json' }
-$HFCache = Join-Path $env:USERPROFILE ".cache\huggingface\hub"
-
-function Get-RegistryEntry([string]$Key) {
-    if (-not $Key) { return $null }
-    if (-not (Test-Path $RegistryPath)) {
-        Write-Host "[registry] $RegistryPath not found - built-in serve defaults"
-        return $null
-    }
-    try {
-        $reg = Get-Content -Raw -Path $RegistryPath | ConvertFrom-Json
-    } catch {
-        Write-Host "[registry] parse failed ($($_.Exception.Message)) - built-in serve defaults"
-        return $null
-    }
-    $prop = $reg.PSObject.Properties[$Key]
-    if (-not $prop) {
-        Write-Host "[registry] no entry '$Key' - built-in serve defaults"
-        return $null
-    }
-    return $prop.Value
-}
-
-# Mirror of infra/switch.py build_llama_flags() - KEEP IN SYNC. Returns serve
-# tuning args only; the caller appends model source + Hexis orchestration flags.
-function Build-RegistryFlags($e) {
-    $kv = [string]$e.kv_quant
-    if ($kv -notin @('f16','q8_0','q4_0')) { throw "registry: unknown kv_quant '$kv'" }
-    $parts = @('-ngl', "$($e.ngl)")
-    if ($e.tensor_split) {
-        $parts += @('-ts', (($e.tensor_split | ForEach-Object { "$_" }) -join ','), '--split-mode', 'layer')
-    }
-    $parts += @('--flash-attn','true')
-    if ($kv -ne 'f16') { $parts += @('--cache-type-k',$kv,'--cache-type-v',$kv) }
-    $parts += @('-c',"$($e.ctx)",'-b',"$($e.batch_logical)",'-ub',"$($e.batch_physical)",
-                '--parallel',"$($e.parallel)",'--threads',"$($e.threads)")
-    if ($e.extra_flags) { $parts += ([string]$e.extra_flags -split '\s+') }
-    return $parts
-}
-
-# PS mirror of infra/switch.py find_gguf() + test_registry.py case 5 - KEEP IN
-# SYNC. HF cache layout: <hub>\models--<org>--<name>\snapshots\<rev>\*.gguf.
-# Globs in models.json llama.file only use '*' (PS -like compatible with fnmatch).
-function Resolve-RegistryGguf($llamaCfg) {
-    if (-not $llamaCfg -or -not $llamaCfg.repo -or -not $llamaCfg.file) { return $null }
-    $hub  = "models--" + ([string]$llamaCfg.repo -replace '/', '--')
-    $snap = Join-Path (Join-Path $HFCache $hub) "snapshots"
-    if (-not (Test-Path $snap)) { return $null }
-    Get-ChildItem -Path $snap -Recurse -Filter *.gguf -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -like ([string]$llamaCfg.file) } |
-        Select-Object -First 1 -ExpandProperty FullName
-}
-
-# Single-registry resolution: alias + gguf source + serve tuning all come from
-# C:\llm-serve\models.json keyed by the BigModels key (== ActiveBig). The psd1
-# entry is now just a key pointer (no Alias/Path/Repo). Legacy psd1 fields are
-# accepted ONLY as a fallback for a key with no registry entry (un-backfilled or
-# a retired key whose weights are gone) - that path then hard-fails cleanly.
-function Resolve-BigModel([string]$RegistryKey, [string]$LegacyRepo, [string]$LegacyPath, [string]$LegacyAlias) {
-    $entry = Get-RegistryEntry $RegistryKey
-    if ($entry) {
-        $alias = [string]$entry.alias
-        if (-not $alias) { throw "registry '$RegistryKey': alias missing" }
-        $gguf = Resolve-RegistryGguf $entry.llama
-        if (-not $gguf) {
-            throw "registry '$RegistryKey' gguf not in HF cache (repo=$($entry.llama.repo) file=$($entry.llama.file)). Download it or pick another ActiveBig."
-        }
-        return @{
-            Alias     = $alias
-            ModelArgs = @("-m", $gguf)
-            Src       = $gguf
-            Tuning    = Build-RegistryFlags $entry
-            Tag       = "registry:$RegistryKey ctx=$($entry.ctx) kv=$($entry.kv_quant) ngl=$($entry.ngl)"
-        }
-    }
-    # No registry entry -> legacy psd1 fallback (kept so an un-backfilled model
-    # still works byte-for-byte; a retired key with no weights fails cleanly).
-    if ($LegacyPath) {
-        if (-not (Test-Path $LegacyPath)) { throw "ActiveBig '$RegistryKey': no registry entry and psd1 Path missing on disk: $LegacyPath" }
-        $modelArgs = @("-m", $LegacyPath); $src = $LegacyPath
-    } elseif ($LegacyRepo) {
-        $modelArgs = @("-hf", $LegacyRepo); $src = $LegacyRepo
-    } else {
-        throw "ActiveBig '$RegistryKey': no registry entry and no psd1 Path/Repo - cannot resolve model source"
-    }
-    if (-not $LegacyAlias) { throw "ActiveBig '$RegistryKey': legacy fallback requires Alias in power-profiles.psd1" }
-    return @{
-        Alias     = $LegacyAlias
-        ModelArgs = $modelArgs
-        Src       = $src
-        Tuning    = @('-ngl','999','--flash-attn','true','--cache-type-k','q4_0',
-                      '--cache-type-v','q4_0','-c','24576','--parallel','1')
-        Tag       = "defaults ctx=24576 kv=q4_0 (no registry entry '$RegistryKey')"
-    }
-}
-
-function Get-PortPid([int]$Port) {
-    $c = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
-    if ($c) { return $c[0].OwningProcess }
-    return $null
-}
-
-function Kill-Port([int]$Port, [string]$Label) {
-    $procId = Get-PortPid $Port
-    if ($procId) {
-        Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
-        Write-Host "[kill] ${Label}: PID $procId on :$Port"
-    } else {
-        Write-Host "[kill] ${Label}: nothing on :$Port"
-    }
-}
-
-function Wait-PortHealth([string]$Url, [string]$Label, [int]$TimeoutSec = 180) {
-    Write-Host -NoNewline "[wait] $Label "
-    $deadline = (Get-Date).AddSeconds($TimeoutSec)
-    while ((Get-Date) -lt $deadline) {
-        try {
-            $r = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
-            if ($r.StatusCode -eq 200) { Write-Host "OK"; return $true }
-        } catch { }
-        Write-Host -NoNewline "."
-        Start-Sleep -Seconds 2
-    }
-    Write-Host "TIMEOUT"
-    return $false
-}
-
-# ECO floor: launch CPU-1B nano (:8082) if not already up. Mirrors start.ps1's
-# block exactly (same repo, thread cap, priority, args) so either entry point
-# produces a byte-identical server. Idempotent.
-function Ensure-NanoServer() {
-    if (Get-PortPid $NanoPort) {
-        Write-Host "[arm] nano :$NanoPort already up"
-        return
-    }
-    if (-not (Test-Path $LlamaServer)) { throw "llama-server not found at $LlamaServer" }
-    if (-not $NanoRepo) { throw "power-profiles.psd1: Nano.Repo missing" }
-    # Thread-capped + below-normal priority: pure-CPU inference must NOT saturate
-    # all cores and starve interactive apps (this crashed VS Code).
-    # 8 physical cores -> cap at 4, leave headroom.
-    $NanoThreads = 4
-    Write-Host "[arm] nano :$NanoPort ($NanoRepo, threads=$NanoThreads, below-normal)"
-    # Tuning rationale (ECO floor; 11 personas serialize on --parallel 1):
-    #   --ctx-size 32768           : prompt bloat headroom (lovesick hit 5735 tok ceiling at 4096)
-    #   --cache-type-k/v q8_0      : halves KV cache; trivial quality loss; pairs w/ bigger ctx
-    #   --temp/top-p/top-k/min-p   : Qwen3 OFFICIAL non-thinking sampling (0.7/0.8/20/0).
-    #                                Replaced mirostat 2 (was tuned for the Nano_Imp RP 1B);
-    #                                mirostat overrides temp/top-p/top-k so the two can't coexist.
-    #   --repeat-penalty 1.1       : mild echo/loop guard - 0.6B on CPU loops easily. Not in the
-    #                                Qwen3 rec (they prefer presence_penalty) but harmless + safe.
-    #   --mlock                    : pin weights+KV in RAM, no page-fault stalls mid-stream
-    #   --n-gpu-layers 0           : CPU-only, 0 VRAM (PRIME owns GPU)
-    $nanoProc = Start-Process -FilePath $LlamaServer `
-        -ArgumentList @("-hf",$NanoRepo,
-                        "--host","0.0.0.0","--port","$NanoPort",
-                        "--ctx-size","32768","--n-gpu-layers","0",
-                        "--cache-type-k","q8_0","--cache-type-v","q8_0",
-                        "--temp","0.7","--top-p","0.8","--top-k","20","--min-p","0",
-                        "--repeat-penalty","1.1",
-                        "--mlock",
-                        "--parallel","1",
-                        "--threads","$NanoThreads","--threads-batch","$NanoThreads",
-                        "--alias",$NanoAlias,"--jinja",
-                        # Qwen3 ships hybrid thinking ON by default. --reasoning off
-                        # sets template non-thinking mode: no <think> tag AND no CoT
-                        # narration bleeding into content. NOT --chat-template-kwargs
-                        # '{"enable_thinking":false}' (Start-Process -ArgumentList
-                        # mangles the embedded quotes -> server dies on launch); NOT
-                        # --reasoning-budget 0 alone (cuts the tag but the model still
-                        # narrates its reasoning in the content channel).
-                        "--reasoning","off") `
-        -WindowStyle Hidden -PassThru
-    try {
-        $nanoProc.PriorityClass = [System.Diagnostics.ProcessPriorityClass]::BelowNormal
-        Write-Host "[arm] nano PID $($nanoProc.Id) priority=BelowNormal"
-    } catch {
-        Write-Host "[warn] could not lower nano priority: $($_.Exception.Message)"
-    }
-}
-
-function Ensure-GpuServer($Resolved, [int]$Port) {
-    if (Get-PortPid $Port) {
-        Write-Host "[arm] $($Resolved.Alias) :$Port already up"
-        return
-    }
-    if (-not (Test-Path $LlamaServer)) { throw "llama-server not found at $LlamaServer" }
-    Write-Host "[arm] $($Resolved.Alias) :$Port ($($Resolved.Src)) [$($Resolved.Tag)]"
-
-    # --repeat-penalty/--repeat-last-n: RP-merge GGUFs at low quant fall into
-    # whole-paragraph repetition loops without sequence-level penalty (WorldSim
-    # IQ3_XXS). Hexis-orchestration sampler choice, not serve tuning - stays
-    # here, NOT in models.json (the kobold/SillyTavern consumer must not inherit
-    # it). Applies to every ActiveBig the fleet arms.
-    #
-    # stderr -> serve-<port>-stderr.log: llama-server launches detached + hidden,
-    # so a crash mid-load (classically CUDA OOM when a just-killed server's VRAM
-    # is not yet released - see the eco->prime race) is otherwise invisible. The
-    # capture pairs with the Wait-PortHealth gate at the call site: together they
-    # turn a silent dead :8080 into a loud, diagnosable script failure.
-    $errLog = Join-Path $LogDir "serve-$Port-stderr.log"
-    # Rotate prior log so silent mid-task crashes stay diagnosable.
-    # Start-Process -RedirectStandardError always truncates (no -Append); without
-    # rotation, every relaunch wipes the dying process's last words.
-    if (Test-Path $errLog) {
-        $stamp = (Get-Date -Format 'yyyyMMdd_HHmmss')
-        $rotated = Join-Path $LogDir "serve-$Port-stderr.$stamp.log"
-        try { Move-Item -LiteralPath $errLog -Destination $rotated -Force } catch { Write-Host "[warn] could not rotate ${errLog}: $($_.Exception.Message)" }
-        # Prune rotations beyond newest 10 to keep $LogDir bounded.
-        Get-ChildItem -LiteralPath $LogDir -Filter "serve-$Port-stderr.*.log" -ErrorAction SilentlyContinue |
-            Sort-Object LastWriteTime -Descending | Select-Object -Skip 10 |
-            ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
-    }
-    # --no-mmproj: some BigModels snapshots (e.g. q36 mudler APEX) ship a sibling
-    # mmproj.gguf. llama-server's --mmproj-auto then loads it, enters multimodal
-    # mode, and runs a 1472x1472 vision warmup whose CUDA compute buffer pushes a
-    # 16 GB card past OOM on top of the ~13 GB weights + KV. Chat is text-only;
-    # disable the projector. No-op for text-only models (nothing to disable).
-    $proc = Start-Process -FilePath $LlamaServer `
-        -ArgumentList ($Resolved.ModelArgs + @("--host","0.0.0.0","--port","$Port","--no-mmproj") + $Resolved.Tuning +
-                        @("--alias",$Resolved.Alias,"--jinja","--reasoning-budget","0",
-                          "--repeat-penalty","1.1","--repeat-last-n","256")) `
-        -RedirectStandardError $errLog `
-        -WindowStyle Hidden -PassThru
-    Write-Host "[arm] $($Resolved.Alias) PID $($proc.Id) (stderr -> $errLog)"
-}
+# ---- F2 (2026-06-12): serving relocated to llm-serve infra/serve.py ----
+# The registry resolution (Get-RegistryEntry / Build-RegistryFlags /
+# Resolve-RegistryGguf / Resolve-BigModel) + the arm/kill/health-gate helpers
+# (Get-PortPid / Kill-Port / Wait-PortHealth / Ensure-NanoServer /
+# Ensure-GpuServer) lived here as a PowerShell mirror of infra/switch.py. They are
+# gone: serve.py owns serving (tuning from models.json) and this script calls
+# `serve.py arm/eco/ensure-nano/print-alias`. Cognition (the DB flip below) stays.
+# Design: C:\llm-serve\docs\INFERENCE-ROUTER-F2-DESIGN.md.
 
 function New-LlmCfg([string]$Model, [int]$Port, [string]$EndpointOverride) {
     $endpoint = if ($EndpointOverride) { $EndpointOverride } else { "http://${DockerHost}:${Port}/v1" }
@@ -373,13 +148,19 @@ if ($liveChars.Count -eq 0) { throw "no running hexis worker containers - nothin
 # Arm the ONE shared ActiveBig server once, if PRIME-like (eco-not) AND any
 # gpu-tier char. PRIME-like = $Mode is 'prime' or any BigModels key — already
 # resolved into $ActiveBig above.
-$bigResolved = $null
+$bigAlias = $null
 if (-not $IsEco -and ($liveChars | Where-Object { $_.Tier -eq "gpu" })) {
-    # Single source of truth: alias + gguf + tuning resolved from models.json by
-    # ActiveBig key. $big.* (psd1) is only a legacy fallback for un-backfilled keys.
-    # $bigResolved still resolves the ALIAS (cognition: DB llm.chat.model below).
-    # Serving (arm/kill/health-gate) is now llm-serve's serve.py (F2 lift).
-    $bigResolved = Resolve-BigModel $ActiveBig $big.Repo $big.Path $big.Alias
+    # Serving (arm/kill/health-gate/exclusivity) is llm-serve serve.py (F2 lift).
+    # Hexis keeps one cognition need from the registry: the model ALIAS for the
+    # DB llm.chat.model value, read via the single registry reader (print-alias).
+    # NB: no `| Select-Object -First 1` — that sends StopUpstreamCommands, kills
+    # the py process early, and sets $LASTEXITCODE = -1 (false failure). Capture
+    # the (single-line) stdout directly, then trim.
+    $bigAlias = & py -3.10 C:\llm-serve\infra\serve.py print-alias $ActiveBig
+    if ($LASTEXITCODE -ne 0 -or -not $bigAlias) {
+        throw "serve.py print-alias $ActiveBig failed (exit $LASTEXITCODE) - cannot resolve model alias for the DB flip."
+    }
+    $bigAlias = "$bigAlias".Trim()
     # F2: serving relocated to llm-serve serve.py. Hexis orchestration flags pass
     # through --extra-args; llm-serve owns tuning (models.json) + the health-gate
     # + nano exclusivity. Exit!=0 => dead endpoint => abort before flipping DBs
@@ -399,8 +180,8 @@ foreach ($ch in $liveChars) {
             # all gpu personas share the one ActiveBig server on BigPort.
             # Model id = registry-resolved alias (== server --alias) so the
             # char DB and the llama-server advertise the same name.
-            if (-not $bigResolved) { $bigResolved = Resolve-BigModel $ActiveBig $big.Repo $big.Path $big.Alias }
-            $cfg = New-LlmCfg -Model $bigResolved.Alias -Port $BigPort
+            if (-not $bigAlias) { $bigAlias = "$(& py -3.10 C:\llm-serve\infra\serve.py print-alias $ActiveBig)".Trim() }
+            $cfg = New-LlmCfg -Model $bigAlias -Port $BigPort
         } else {
             # nano-tier character: uses the always-on :8082
             $cfg = New-LlmCfg -Model $NanoAlias -Port ([int]$NanoPort)
@@ -450,17 +231,9 @@ if ($Mode -eq "eco") {
     if ($LASTEXITCODE -ne 0) {
         throw "serve.py eco failed (nano :$NanoPort unhealthy, exit $LASTEXITCODE) - refusing to flip DBs to a dead endpoint."
     }
-} else {
-    # PRIME: nano is no longer load-bearing (gpu-tier chars share :8080;
-    # nano-tier psd1 entries are all retired). Only kill if no live nano-tier
-    # persona depends on it, in case the roster grows again later.
-    $liveNano = @($liveChars | Where-Object { $_.Tier -eq "nano" })
-    if ($liveNano.Count -eq 0) {
-        Kill-Port $NanoPort "nano"
-    } else {
-        Write-Host "[keep] nano :$NanoPort (live nano-tier: $($liveNano.Name -join ','))"
-    }
 }
+# PRIME: serve.py arm already enforced gpu XOR nano (killed nano for exclusivity);
+# nothing to tear down here. (Live nano-tier personas are all retired.)
 # embed (:8081) is owned by start.ps1; never touched here.
 
 # ---- Flip the DBs via the asyncpg applier ----
