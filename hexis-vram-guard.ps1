@@ -164,6 +164,13 @@ function Test-GameRunning {
                             }
                         }
                     } catch { }
+                    # Skip Windows services - they live under game dirs (e.g.
+                    # EABackgroundService under C:\Program Files\Electronic Arts)
+                    # but are not games. A service parent is 'services' or 'svchost'.
+                    $ppName = if ($pp) { $pp.ProcessName } else { '' }
+                    if ($ppName -in @('services', 'svchost')) {
+                        break  # skip this proc; continue outer foreach
+                    }
                     Log "gamedir match: $($proc.ProcessName) [PID $($proc.Id)] $path (under $d) parent=$parentDesc cmd=$cmdLine"
                     return $true
                 }
