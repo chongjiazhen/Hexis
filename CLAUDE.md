@@ -1,5 +1,7 @@
 # Repository Guidelines
 
+@~/atelier/guidelines/session-bookends.md
+
 ## Project Overview
 
 **Hexis** is an edge-native memory system that gives AI persistent identity, continuity, and autonomy.
