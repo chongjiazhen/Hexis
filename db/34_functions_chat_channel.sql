@@ -115,10 +115,17 @@ BEGIN
     raw_unit_id := _db_brain_try_uuid(raw->>'unit_id');
 
     IF importance >= 0.8 THEN
+        -- Carry the caller's metadata (kind/origin/trigger) through to the stored
+        -- memory instead of a hardcoded {'type':'conversation'} blob. This lets
+        -- self-authored proactive reach-outs (kind='reach_out') be identified and
+        -- excluded from recall context — otherwise the agent imitates its own
+        -- prior reach-outs and collapses to generic filler. metadata defaults to
+        -- {"type":"conversation"} for ordinary turns, so behaviour is unchanged
+        -- for them.
         promoted_memory_id := create_episodic_memory(
             content,
             NULL,
-            jsonb_build_object('type', 'conversation', 'recmem', jsonb_build_object('direct_promoted', true)),
+            metadata || jsonb_build_object('recmem', jsonb_build_object('direct_promoted', true)),
             NULL,
             0.0,
             CURRENT_TIMESTAMP,
@@ -371,6 +378,10 @@ DECLARE
     v_sender_id TEXT;
     v_tags JSONB;
     v_mem JSONB;
+    v_hist JSONB;
+    v_len INT;
+    v_last_nonasst INT;
+    v_keep INT := 3;  -- max trailing consecutive unanswered reach-out turns to retain
 BEGIN
     IF p_session_id IS NULL OR COALESCE(p_content, '') = '' THEN
         RETURN jsonb_build_object('skipped', true, 'reason', 'empty');
@@ -393,12 +404,34 @@ BEGIN
     INSERT INTO channel_messages (session_id, direction, content, platform_message_id, metadata)
     VALUES (p_session_id, 'outbound', p_content, NULL, v_tags);
 
-    -- 2. continuity: append the assistant turn so the next inbound reply has context
+    -- 2. continuity: append the assistant turn so the next inbound reply has
+    -- context. Then cap the trailing run of consecutive unanswered reach-out
+    -- turns to v_keep (substrate hygiene, same class as the inbound-path 40/30
+    -- trim) — an unbounded streak of the agent's own monologue otherwise
+    -- pollutes chat history the moment the user finally replies. Prior
+    -- conversation (everything up to the last non-assistant turn) is preserved;
+    -- only the surplus oldest reach-outs in the trailing run are dropped. This
+    -- is pure buffer hygiene: it never gates the reach-out decision itself.
+    SELECT COALESCE(history, '[]'::jsonb)
+           || jsonb_build_object('role', 'assistant', 'content', p_content)
+      INTO v_hist
+      FROM channel_sessions WHERE id = p_session_id;
+
+    v_len := jsonb_array_length(v_hist);
+    SELECT COALESCE(MAX(ord), 0) INTO v_last_nonasst
+      FROM jsonb_array_elements(v_hist) WITH ORDINALITY AS t(value, ord)
+     WHERE value->>'role' IS DISTINCT FROM 'assistant';
+
+    IF v_len - v_last_nonasst > v_keep THEN
+        SELECT jsonb_agg(value ORDER BY ord) INTO v_hist
+          FROM jsonb_array_elements(v_hist) WITH ORDINALITY AS t(value, ord)
+         WHERE ord <= v_last_nonasst OR ord > v_len - v_keep;
+    END IF;
+
     UPDATE channel_sessions
-    SET history = COALESCE(history, '[]'::jsonb)
-                  || jsonb_build_object('role', 'assistant', 'content', p_content),
-        last_active = CURRENT_TIMESTAMP
-    WHERE id = p_session_id;
+       SET history = v_hist,
+           last_active = CURRENT_TIMESTAMP
+     WHERE id = p_session_id;
 
     -- 3. cognitive memory: assistant-only turn (empty user = proactive), tagged.
     -- source_identity = sender_id scopes the memory to that DM partner.

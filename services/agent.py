@@ -571,6 +571,14 @@ async def run_agent(
             system_prompt += PERSONA_FORMAT_SUFFIX
         enriched_user_message = user_message
     else:
+        # Persona format mandate LAST for heartbeat too. build_system_prompt already
+        # appended the generic PERSONA_FORMAT_SUFFIX; the concrete per-persona
+        # reminder (if set) wins on recency and re-asserts voice. Heartbeat
+        # reach-out generation otherwise drifts to generic filler under a thin
+        # card — this re-anchors the persona's register without scripting WHAT it
+        # says (the reach-out decision + content stay latent).
+        if persona_format_reminder:
+            system_prompt += "\n\n---\n\n" + persona_format_reminder.strip()
         enriched_parts: list[str] = []
         sub_signals = format_subconscious_signals(subconscious_output)
         if sub_signals:

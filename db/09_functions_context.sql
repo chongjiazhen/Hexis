@@ -176,6 +176,15 @@ BEGIN
             WHERE m.type = 'episodic'
               AND m.status = 'active'
               AND (m.valid_until IS NULL OR m.valid_until > CURRENT_TIMESTAMP)
+              -- Exclude the agent's own unanswered proactive reach-outs. Surfacing
+              -- them here as "recent memory" makes the next heartbeat imitate its
+              -- own prior greeting and drift to generic filler (persona collapse).
+              -- Reach-out awareness is carried by sender telemetry, not this text.
+              -- Primary key = metadata tag (record_chat_turn_memory); the content
+              -- pattern catches legacy rows written before the tag was threaded
+              -- (empty-user proactive turns: format_recmem_turn => 'User: \n\nAssistant:').
+              AND COALESCE(m.metadata->'context'->>'kind', '') <> 'reach_out'
+              AND m.content NOT LIKE E'User: \n\nAssistant:%'
             ORDER BY m.created_at DESC
             LIMIT p_limit
         ) sub
@@ -203,6 +212,15 @@ BEGIN
             WHERE m.type = 'episodic'
               AND m.status = 'active'
               AND (m.valid_until IS NULL OR m.valid_until > CURRENT_TIMESTAMP)
+              -- Exclude the agent's own unanswered proactive reach-outs. Surfacing
+              -- them here as "recent memory" makes the next heartbeat imitate its
+              -- own prior greeting and drift to generic filler (persona collapse).
+              -- Reach-out awareness is carried by sender telemetry, not this text.
+              -- Primary key = metadata tag (record_chat_turn_memory); the content
+              -- pattern catches legacy rows written before the tag was threaded
+              -- (empty-user proactive turns: format_recmem_turn => 'User: \n\nAssistant:').
+              AND COALESCE(m.metadata->'context'->>'kind', '') <> 'reach_out'
+              AND m.content NOT LIKE E'User: \n\nAssistant:%'
             ORDER BY m.created_at DESC
             LIMIT p_limit
         ) sub
