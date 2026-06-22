@@ -283,30 +283,6 @@ async def configure_agent_for_tests(db_pool):
             )
 
 
-@pytest.fixture(scope="module", autouse=True)
-async def apply_repo_migrations(db_pool):
-    """
-    Apply any optional SQL patches from migrations/ once per module.
-
-    The DB in Docker may persist across runs; this keeps core functions
-    and tables up to date without requiring a full volume reset.
-    """
-    if os.getenv("APPLY_REPO_MIGRATIONS", "0").lower() not in {"1", "true", "yes", "on"}:
-        return
-    migrations_dir = Path(__file__).resolve().parent / "migrations"
-    if not migrations_dir.exists():
-        return
-
-    migration_paths = sorted(p for p in migrations_dir.glob("*.sql") if p.is_file())
-    if not migration_paths:
-        return
-
-    async with db_pool.acquire() as conn:
-        for path in migration_paths:
-            sql = path.read_text(encoding="utf-8")
-            await conn.execute(sql)
-
-
 @pytest.fixture(autouse=True)
 async def setup_db(db_pool):
     """Setup the database before each test."""
