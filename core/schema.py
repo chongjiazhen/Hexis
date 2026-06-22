@@ -128,6 +128,133 @@ async def apply_schema(dsn: str) -> None:
                 logger.error(f"Error applying {sql_file.name}: {e}")
                 raise
         logger.info(f"Applied {len(schema_files)} schema files")
+        # A from-scratch bootstrap already contains the latest schema, so every
+        # incremental migration is baseline-stamped (recorded as applied without
+        # executing it). This stops apply_migrations from double-running an ALTER
+        # whose effect the bootstrap files above already include.
+        await stamp_migrations(conn)
+    finally:
+        await conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Incremental migrations
+#
+# db/*.sql is a from-scratch bootstrap (rebuilds a full DB, fresh instances
+# only). It cannot evolve an existing populated DB: most CREATE TABLE statements
+# are bare, so re-running them throws "relation already exists".
+#
+# db/migrations/*.sql carries ordered deltas for DBs that already hold data.
+# A schema_migrations table tracks which have run, so each applies exactly once.
+#
+# DUAL-WRITE RULE: every schema change goes in BOTH places —
+#   1. db/*.sql       so future fresh instances get it from the bootstrap.
+#   2. db/migrations/ so existing populated DBs get it as a delta.
+# Baseline-stamping (see apply_schema) keeps the two consistent: a fresh DB
+# stamps the new migration as already-applied instead of re-running it.
+# Migrations should still be defensive (ADD COLUMN IF NOT EXISTS, etc.).
+# ---------------------------------------------------------------------------
+
+MIGRATIONS_TABLE = "schema_migrations"
+
+
+def get_migrations_dir() -> Path:
+    """Path to db/migrations/, the incremental-migration directory."""
+    return get_schema_dir() / "migrations"
+
+
+def get_migration_files(migrations_dir: Path | None = None) -> list[Path]:
+    """Migration SQL files sorted in apply order (lexical by filename).
+
+    Filenames MUST sort in the order they should apply — use a zero-padded
+    numeric or date prefix, e.g. ``0001_add_foo.sql`` or
+    ``20260622_add_foo.sql``. Returns [] when the directory is absent.
+    """
+    migrations_dir = migrations_dir or get_migrations_dir()
+    if not migrations_dir.exists():
+        return []
+    return sorted(migrations_dir.glob("*.sql"), key=lambda p: p.name)
+
+
+async def _ensure_migrations_table(conn: asyncpg.Connection) -> None:
+    await conn.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS {MIGRATIONS_TABLE} (
+            version    TEXT PRIMARY KEY,
+            applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+        """
+    )
+
+
+async def _applied_versions(conn: asyncpg.Connection) -> set[str]:
+    rows = await conn.fetch(f"SELECT version FROM {MIGRATIONS_TABLE}")
+    return {r["version"] for r in rows}
+
+
+async def stamp_migrations(
+    conn: asyncpg.Connection, migrations_dir: Path | None = None
+) -> None:
+    """Baseline: record every current migration as applied WITHOUT running it.
+
+    Flyway ``baseline`` semantics. Called after a from-scratch apply_schema so
+    the bootstrap-fresh DB does not later re-run migrations whose effect it
+    already contains.
+    """
+    await _ensure_migrations_table(conn)
+    files = get_migration_files(migrations_dir)
+    if not files:
+        return
+    await conn.executemany(
+        f"INSERT INTO {MIGRATIONS_TABLE} (version) VALUES ($1) "
+        f"ON CONFLICT (version) DO NOTHING",
+        [(f.name,) for f in files],
+    )
+
+
+async def apply_migrations_conn(
+    conn: asyncpg.Connection, migrations_dir: Path | None = None
+) -> list[str]:
+    """Apply pending migrations on an open connection, in filename order.
+
+    Each migration runs in its own transaction with its bookkeeping insert, so a
+    failure rolls back atomically and leaves schema_migrations untouched — a
+    re-run retries it. Returns the versions newly applied this call.
+    """
+    await _ensure_migrations_table(conn)
+    applied = await _applied_versions(conn)
+    newly: list[str] = []
+    for path in get_migration_files(migrations_dir):
+        if path.name in applied:
+            continue
+        sql = path.read_text(encoding="utf-8")
+        async with conn.transaction():
+            await conn.execute(sql)
+            await conn.execute(
+                f"INSERT INTO {MIGRATIONS_TABLE} (version) VALUES ($1)",
+                path.name,
+            )
+        logger.info("Applied migration %s", path.name)
+        newly.append(path.name)
+    return newly
+
+
+async def apply_migrations(dsn: str, migrations_dir: Path | None = None) -> list[str]:
+    """Connect to ``dsn`` and apply pending migrations. Returns applied versions."""
+    conn = await asyncpg.connect(dsn)
+    try:
+        return await apply_migrations_conn(conn, migrations_dir)
+    finally:
+        await conn.close()
+
+
+async def pending_migrations(dsn: str, migrations_dir: Path | None = None) -> list[str]:
+    """Versions present on disk but not yet recorded applied for ``dsn``."""
+    conn = await asyncpg.connect(dsn)
+    try:
+        await _ensure_migrations_table(conn)
+        applied = await _applied_versions(conn)
+        return [p.name for p in get_migration_files(migrations_dir) if p.name not in applied]
     finally:
         await conn.close()
 
