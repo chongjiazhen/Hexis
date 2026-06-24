@@ -236,6 +236,17 @@ if ($Mode -eq "eco") {
 # nothing to tear down here. (Live nano-tier personas are all retired.)
 # embed (:8081) is owned by start.ps1; never touched here.
 
+# ---- Mode marker (write BEFORE the DB flip) ----
+# The marker is hexis-vram-guard.ps1's source of truth for the GPU/VRAM state -
+# NOT for the cognition DB flip below. The serving action (serve.py arm/eco) has
+# already completed and health-gated by here, so VRAM reality == $Mode now. Write
+# the marker here so a DB-flip failure (e.g. asyncpg timeout while the 35B cold-
+# loads) can't strand the marker disagreeing with actual VRAM - the exact desync
+# that left "eco" on disk while :8080 stayed armed (2026-06-24).
+$markerFile = Join-Path $LogDir "current-mode.txt"
+[System.IO.File]::WriteAllText($markerFile, "$Mode`n$(Get-Date -Format o)",
+    (New-Object System.Text.UTF8Encoding($false)))
+
 # ---- Flip the DBs via the asyncpg applier ----
 $plan = @{
     dsn_base  = $P.PgDsnBase
@@ -258,11 +269,6 @@ try {
     $ErrorActionPreference = $eapPrev
 }
 if ($pyRc -ne 0) { throw "set_power_mode.py failed (exit $pyRc) - plan: $planFile" }
-
-# Mode marker - cheap source of truth for hexis-vram-guard.ps1 (no DB/port probe).
-$markerFile = Join-Path $LogDir "current-mode.txt"
-[System.IO.File]::WriteAllText($markerFile, "$Mode`n$(Get-Date -Format o)",
-    (New-Object System.Text.UTF8Encoding($false)))
 
 Write-Host ""
 Write-Host "[done] power mode = $($Mode.ToUpper())"

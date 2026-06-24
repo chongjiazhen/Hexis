@@ -64,28 +64,48 @@ RETURNING (value->>'last_heartbeat_at')::timestamptz AS new_last
 """
 
 
+# Transient failures to retry. On ECO->PRIME the GPU cold-load (~14 GB mmap)
+# starves Postgres IO, so the early personas in this serial loop can hit
+# asyncpg's connect/command timeout (observed 2026-06-24: 5/9 failed mid
+# cold-load, the later 4 passed once IO settled). A bare failure here aborts
+# set-power-mode.ps1 before it writes the mode marker AND leaves the fleet
+# split-brain (some personas flipped, some not). apply_instance is idempotent
+# (set_config overwrites; the stagger is gated on being overdue), so retrying
+# is safe — stdlib backoff, no runtime dep added to the serving path.
+_TRANSIENT_ERRORS = (asyncio.TimeoutError, OSError, asyncpg.PostgresError)
+_APPLY_ATTEMPTS = 3
+_CONNECT_TIMEOUT_S = 30.0
+
+
 async def apply_instance(dsn: str, db: str, entries: dict) -> None:
-    conn = await asyncpg.connect(dsn)
-    try:
-        for key, cfg in entries.items():
-            await conn.execute(
-                "SELECT set_config($1, $2::jsonb)", key, json.dumps(cfg)
-            )
-        mode = entries.get("agent.power_mode")
-        staggered_to = None
-        if isinstance(mode, str) and mode.strip().lower() != "eco":
-            row = await conn.fetchrow(STAGGER_HEARTBEAT_SQL)
-            if row is not None:
-                staggered_to = row["new_last"]
-        tag = (
-            f" [stagger: last_heartbeat_at -> {staggered_to.isoformat()}]"
-            if staggered_to is not None
-            else ""
-        )
-        print(f"[set-power-mode] {db}: {', '.join(entries.keys())} -> "
-              f"{entries.get('llm.chat', {}).get('model', '?')}{tag}")
-    finally:
-        await conn.close()
+    for attempt in range(1, _APPLY_ATTEMPTS + 1):
+        try:
+            conn = await asyncpg.connect(dsn, timeout=_CONNECT_TIMEOUT_S)
+            try:
+                for key, cfg in entries.items():
+                    await conn.execute(
+                        "SELECT set_config($1, $2::jsonb)", key, json.dumps(cfg)
+                    )
+                mode = entries.get("agent.power_mode")
+                staggered_to = None
+                if isinstance(mode, str) and mode.strip().lower() != "eco":
+                    row = await conn.fetchrow(STAGGER_HEARTBEAT_SQL)
+                    if row is not None:
+                        staggered_to = row["new_last"]
+                tag = (
+                    f" [stagger: last_heartbeat_at -> {staggered_to.isoformat()}]"
+                    if staggered_to is not None
+                    else ""
+                )
+                print(f"[set-power-mode] {db}: {', '.join(entries.keys())} -> "
+                      f"{entries.get('llm.chat', {}).get('model', '?')}{tag}")
+                return
+            finally:
+                await conn.close()
+        except _TRANSIENT_ERRORS:
+            if attempt == _APPLY_ATTEMPTS:
+                raise
+            await asyncio.sleep(min(2 ** (attempt - 1), 8))
 
 
 async def main() -> int:
