@@ -191,6 +191,8 @@ _HELP_GROUPS = [
     ("Stack", [
         ("up", "Start the stack"),
         ("down", "Stop the stack"),
+        ("backup", "Back up the database to a file"),
+        ("restore", "Restore the database from a backup file"),
         ("reset", "Wipe the DB and re-initialize"),
         ("ps", "List services"),
         ("logs", "Show logs"),
@@ -388,6 +390,16 @@ def build_parser() -> argparse.ArgumentParser:
     reset = sub.add_parser("reset", help="Wipe the DB and re-initialize")
     reset.add_argument("--yes", "-y", action="store_true", help="Skip confirmation prompt")
     reset.set_defaults(func="reset")
+
+    backup_p = sub.add_parser("backup", parents=[_db], help="Back up the database to a file")
+    backup_p.add_argument("--output", "-o", help="Output directory (default ~/.hexis/backups)")
+    backup_p.add_argument("--label", help="Optional label added to the filename")
+    backup_p.set_defaults(func="backup")
+
+    restore_p = sub.add_parser("restore", parents=[_db], help="Restore the database from a backup file")
+    restore_p.add_argument("path", help="Path to a .dump backup file")
+    restore_p.add_argument("--yes", "-y", action="store_true", help="Skip the confirmation prompt")
+    restore_p.set_defaults(func="restore")
 
     status = sub.add_parser("status", parents=[_db], help="Show agent status")
     status.add_argument("--json", action="store_true", help="Output JSON")
@@ -1658,6 +1670,41 @@ async def _channels_status(dsn: str, as_json: bool) -> int:
         await pool.close()
 
 
+def _do_backup(dsn: str, out_dir: str | None, label: str | None) -> int:
+    from core.backup_restore import backup
+    try:
+        path = backup(dsn, out_dir, label)
+        sys.stdout.write(f"Backup written: {path}\n")
+        return 0
+    except Exception as e:
+        _print_err(f"Backup failed: {e}")
+        return 1
+
+
+def _do_restore(dsn: str, path: str, yes: bool) -> int:
+    from core.backup_restore import restore
+    if not yes:
+        from apps.cli_theme import console
+        console.print(
+            "[bold red]WARNING:[/bold red] Restore REPLACES this database (all memories, "
+            "identity, goals) with the backup. Stop the workers first (`hexis stop`)."
+        )
+        try:
+            if input("Type 'restore' to confirm: ").strip().lower() != "restore":
+                console.print("[dim]Aborted.[/dim]")
+                return 1
+        except (KeyboardInterrupt, EOFError):
+            print()
+            return 1
+    try:
+        restore(path, dsn)
+        sys.stdout.write("Restore complete.\n")
+        return 0
+    except Exception as e:
+        _print_err(f"Restore failed: {e}")
+        return 1
+
+
 async def _channels_setup(dsn: str, channel_type: str) -> int:
     """Interactive channel setup."""
     import asyncpg
@@ -2837,6 +2884,10 @@ def main(argv: list[str] | None = None) -> int:
         else:
             _print_rich_status(payload)
         return 0
+    if func == "backup":
+        return _do_backup(_get_dsn(args), args.output, args.label)
+    if func == "restore":
+        return _do_restore(_get_dsn(args), args.path, args.yes)
     if func == "config":
         dsn = _get_dsn(args)
         cfg = asyncio.run(cli_api.config_rows(dsn, wait_seconds=args.wait_seconds))
