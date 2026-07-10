@@ -3,7 +3,26 @@
 Centralized "what's on our plate" so nothing gets dropped. Newest context at
 top of each item. Tracked in-repo (lives in `.local-notes/`).
 
-Last updated: 2026-06-09
+Last updated: 2026-07-10
+
+## ACTIVE — 0. Upstream reconcile 2026-07-10 SHIPPED + LIVE-APPLIED
+
+- Merged 13 cherry-picks to `home-rig-local` (`9232b37..557aaeb`): HMX slices 0–3
+  (export/import + migrations 0001–0008), AGE backup/restore (no upstream runner),
+  memory_edges subgraph substrate, consent-onto-DB, idempotent re-init, GIN indexes,
+  AGE tuning (jit=off), embed timeout. Full detail: per-repo memory
+  `project_upstream_reconcile_2026_07_10.md`.
+- LIVE-APPLIED all 11 DBs same day; ag_catalog shadows dropped (migrations 0003/0004
+  lack SET search_path — recheck on any future migration apply); brain recreated,
+  27 workers + api rebuilt; verified fast_recall + live `hexis export`.
+- Backups: `C:\hexis-backups\2026-07-10\` (11 dumps + ennie.hmx.json). Keep.
+- Fleet state: chat LIVE, heartbeats PAUSED (`is_paused=t` × 11, operator
+  pause-fleet.ps1). Resume = `.\resume-fleet.ps1`.
+- NEXT: (a) decide on deferred upstream sets — retention phases (keep dark; needs
+  gating audit first), prompt-to-SQL (needs persona_format_reminder port), DB-native
+  outbox 8f6980f (needs per-persona agent-stamp), 67b06c0 heartbeat-SQL (needs
+  reach-out tagging port). (b) commit untracked pause-fleet tooling. (c) optional:
+  rebase upstream PR #19 (still ignored by maintainer).
 
 **Ground truth = `git branch -a` (live work) + `git log` (shipped). Reconcile
 this file against them; per-repo memory `*.md` is point-in-time observation,
