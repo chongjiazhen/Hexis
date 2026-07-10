@@ -11,8 +11,8 @@ BIND:
 - Directive layer: `CLAUDE.local.md` (git/serving/heartbeat/clock-drift danger rules),
   `CLAUDE.md` (architecture principles, schema authority),
   `.local-notes/guidelines/{heartbeat,model-serving,schema-migration,debugging}.md`
-- Live-state home: `.local-notes/_inbox.md`  [FLAG: `.local-notes/` is gitignored — its
-  own `local-notes` repo, NOT tracked by hexis]; plus per-repo auto-memory
+- Live-state home: `.local-notes/_inbox.md`  [tracked by hexis on `home-rig-local` —
+  commit inbox updates with the session's work; verified 2026-07-10]; plus per-repo auto-memory
   `~/.claude/projects/C--hexis/memory/` [FLAG: external, untracked]
 - Reconcile target: `git -C C:\hexis log --oneline main..home-rig-local -15` + `git status -s`
   — AND the live fleet (git-shipped ≠ live), see Close-gate
