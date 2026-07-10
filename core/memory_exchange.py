@@ -935,11 +935,14 @@ async def load_source_context(conn) -> dict[str, Any]:
             "WHERE t.typname = 'graph_edge_type' ORDER BY enumlabel"
         )
     ]
-    from core.migrations import migrations_table_name
+    from core.schema import MIGRATIONS_TABLE
 
-    migrations_table = await migrations_table_name(conn)
-    schema_version = await conn.fetchval(
-        f"SELECT COALESCE(max(version), 'baseline') FROM {migrations_table}"
+    schema_version = (
+        await conn.fetchval(
+            f"SELECT COALESCE(max(version), 'baseline') FROM {MIGRATIONS_TABLE}"
+        )
+        if await conn.fetchval("SELECT to_regclass($1) IS NOT NULL", MIGRATIONS_TABLE)
+        else "baseline"
     )
     return {
         "instance_id": str(

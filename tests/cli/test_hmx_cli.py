@@ -57,7 +57,8 @@ async def test_export_jsonl_and_database_aware_dry_run(db_pool, tmp_path):
             .splitlines()[0]
             .startswith('{"record_type": "envelope"')
         )
-        assert stat.S_IMODE(output.stat().st_mode) == 0o600
+        if sys.platform != "win32":  # NTFS has no POSIX mode bits
+            assert stat.S_IMODE(output.stat().st_mode) == 0o600
 
         dry_run = _run(
             "import",

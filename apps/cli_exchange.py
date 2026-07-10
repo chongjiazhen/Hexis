@@ -118,7 +118,8 @@ def _write_private_file(path_value: str, content: str, *, overwrite: bool) -> Pa
 
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=parent)
     try:
-        os.fchmod(fd, 0o600)
+        if hasattr(os, "fchmod"):  # not on Windows; chmod bits are advisory there
+            os.fchmod(fd, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(content)
             handle.flush()
