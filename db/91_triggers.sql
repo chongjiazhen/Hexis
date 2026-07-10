@@ -56,3 +56,9 @@ CREATE TRIGGER trg_hmx_emotional_trigger_provenance
     BEFORE INSERT ON emotional_triggers
     FOR EACH ROW
     EXECUTE FUNCTION hmx_default_emotional_trigger_provenance();
+
+-- HMX Slice 0 backfill, mirrored from db/migrations/0003 per the local
+-- convention that the baseline is complete without migrations: baseline seed
+-- memories (origin 'foundational'/'discovered') predate the provenance trigger
+-- above, so stamp them here. Idempotent — only touches rows with no provenance.
+SELECT hmx_backfill_provenance();
