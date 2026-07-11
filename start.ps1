@@ -1,4 +1,8 @@
-# start.ps1 - bring up Hexis stack: Docker DB + chat + embed + nano llama-servers
+# start.ps1 - bring up Hexis stack: Docker DB + embed + nano llama-servers.
+#   Chat :8080 is NOT launched here. Per ADR 019 (serving ownership
+#   consolidation) llm-serve serve.py is the SOLE :8080 launcher; hexis is a
+#   pure consumer. set-power-mode.ps1 prime arms :8080 via `serve.py arm`
+#   (health-gated, idempotent). start-all.ps1 runs it right after this script.
 # Usage: .\start.ps1            # start services, exit
 #        .\start.ps1 -Repl      # start services then drop into chat_repl.py
 #        .\start.ps1 -Stop      # stop everything
@@ -30,28 +34,10 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $LlamaServer = "C:\llama.cpp-cuda\llama-server.exe"
 
-# Chat model (:8080) identity is sourced from the llm-serve registry (models.json
-# `q36`) so this script and set-power-mode.ps1 can never disagree on WHICH model
-# serves :8080. They previously hardcoded it independently; the start.ps1-launches-
-# first / set-power-mode-skips-"already up" race meant a registry/literal drift
-# (APEX vs heretic) silently served the wrong model. Registry is the single source;
-# the literal below is only a fallback for when models.json is unreadable (start.ps1
-# is boot-critical and must still bring chat up). -hf tag = "<repo>:<quant>".
-$ChatRepo  = "mudler/Qwen3.6-35B-A3B-Claude-4.7-Opus-Reasoning-Distilled-APEX-GGUF:I-Mini"
-$ModelsJson = "C:\llm-serve\models.json"
-try {
-    if (Test-Path $ModelsJson) {
-        $q36 = (Get-Content $ModelsJson -Raw | ConvertFrom-Json).q36
-        if ($q36 -and $q36.llama.repo -and $q36.quant) {
-            $ChatRepo = "$($q36.llama.repo):$($q36.quant)"
-            Write-Host "[chat] model from registry q36: $ChatRepo"
-        } else {
-            Write-Host "[chat] registry q36 incomplete - using built-in default $ChatRepo"
-        }
-    }
-} catch {
-    Write-Host "[chat] registry read failed ($($_.Exception.Message)) - using built-in default $ChatRepo"
-}
+# Chat model (:8080) is NOT launched by this script (ADR 019). Its identity +
+# serve tuning live in the llm-serve registry (models.json `q36`); serve.py owns
+# the launch, invoked by set-power-mode.ps1 prime. No $ChatRepo here — a second
+# resolver would be exactly the dual-source drift ADR 019 removes.
 $EmbedRepo = "ggml-org/embeddinggemma-300M-GGUF:Q8_0"
 # Always-on CPU nano (1B). The floor every character can fall to in ECO mode.
 # Kept resident in both modes; mode switches never touch it. See set-power-mode.ps1.
@@ -274,50 +260,20 @@ if ($health -ne "healthy") {
     exit 1
 }
 
-# Mode marker: read once, gate chat (:8080) + nano (:8082) launches on it.
-# set-power-mode.ps1 owns :8080 in PRIME (q36 ActiveBig per power-profiles.psd1).
-# start.ps1 launching its own Vesper-12B on :8080 in ECO mode is wrong: it
-# wastes ~7 GB VRAM that vram-guard just freed for ComfyUI/games, AND the
-# alias mismatch (Vesper here vs the q36 alias workers expect) causes silent
-# model misrouting if anything later flips configs back to :8080.
+# Mode marker: read once, gate the nano (:8082) launch on it. Chat (:8080) is
+# no longer gated/launched here — llm-serve serve.py owns it (ADR 019), armed by
+# set-power-mode.ps1 prime.
 $markerFile = Join-Path $Root "logs\current-mode.txt"
 $lastMode = $null
 if (Test-Path $markerFile) {
     $lastMode = ((Get-Content $markerFile -Raw).Trim() -split "`n")[0].Trim().ToLower()
 }
-$wantChat = ($lastMode -ne "eco")  # PRIME or unknown -> launch chat
 $wantNano = $WithNano.IsPresent -or ($lastMode -eq "eco")
 
-# 2. Chat llama-server :8080 (PRIME only; ECO = leave GPU free)
-if (-not $wantChat) {
-    Write-Host "[skip] chat :8080 (mode=$lastMode; set-power-mode.ps1 prime owns :8080)"
-} elseif (Get-PortPid 8080) {
-    Write-Host "[start] chat :8080 already running"
-} else {
-    Write-Host "[start] chat llama-server :8080 ($ChatRepo)"
-    # --no-mmproj: $ChatRepo (mudler q36 APEX) ships a sibling mmproj.gguf that
-    # -hf auto-pulls; llama-server then loads it as a multimodal model and runs a
-    # 1472x1472 vision warmup whose CUDA compute buffer OOMs the 16 GB card on top
-    # of the ~13 GB weights + 64K-ctx KV. Chat is text-only; skip the projector.
-    Start-Process -FilePath $LlamaServer `
-        -ArgumentList @("-hf",$ChatRepo,"--no-mmproj",
-                        "--host","0.0.0.0","--port","8080",
-                        "--ctx-size","65536","--n-gpu-layers","999",
-                        "--flash-attn","true",
-                        "--cache-type-k","q4_0",
-                        "--cache-type-v","q4_0",
-                        "-b","2048","-ub","512",         
-                        "--parallel","1",
-                        "--threads","8",
-                        # --ctx-checkpoints 0: disable context-checkpoint restore.
-                        # The restore path produces partial-prompt MoE batches that
-                        # trip a CUDA "invalid argument" in MUL_MAT_ID on the 5060 Ti
-                        # (sm_120 via PTX-JIT). Crashed :8080 dead 7.5h on 2026-06-09.
-                        "--ctx-checkpoints","0",
-                        "--alias","qwen36-35b-a3b-iq3","--jinja") `
-        -RedirectStandardError (Join-Path $Root "logs\serve-8080-stderr.log") `
-        -WindowStyle Hidden
-}
+# 2. Chat llama-server :8080 — NOT launched here (ADR 019). serve.py is the sole
+#    :8080 launcher; set-power-mode.ps1 prime arms it (health-gated) right after
+#    start-all.ps1 calls this script. A direct Start-Process here would restore
+#    the dual-launcher smell ADR 019 removed.
 
 # 3. Embed llama-server :8081
 Start-Embed
@@ -325,19 +281,16 @@ Start-Embed
 # 4. Nano CPU-1B llama-server :8082 (ECO floor only). CPU -> 0 VRAM.
 # Post 2026-05-20 heartbeat-to-GPU migration, the live fleet routes
 # llm.chat/llm.heartbeat/llm.subconscious at :8080 (q36 MoE), so PRIME no longer
-# needs nano resident. $wantNano was computed earlier alongside $wantChat.
+# needs nano resident. $wantNano was computed from the mode marker above.
 if (-not $wantNano) {
     Write-Host "[skip] nano :8082 (mode=$lastMode; pass -WithNano to force)"
 } else {
     Start-Nano
 }
 
-# 5. Wait health. embed is always fatal; chat is fatal when launched (PRIME);
-#    nano is best-effort (CPU load slower, must not block the stack).
-$chatOk  = $true  # treat as OK in ECO (skipped); only matters if we launched
-if ($wantChat) {
-    $chatOk = Wait-Health "http://127.0.0.1:8080/health"  "chat :8080" 240
-}
+# 5. Wait health. embed is fatal; nano is best-effort (CPU load slower, must not
+#    block the stack). Chat (:8080) is not waited on here — set-power-mode.ps1
+#    prime health-gates the arm downstream (serve.py arm throws on a dead :8080).
 $embedOk = Wait-Health "http://127.0.0.1:8081/health"  "embed :8081" 120
 if ($wantNano) {
     $nanoOk = Wait-Health "http://127.0.0.1:8082/health" "nano :8082" 180
@@ -346,8 +299,8 @@ if ($wantNano) {
     }
 }
 
-if (-not ($chatOk -and $embedOk)) {
-    Write-Host "[fail] one or more servers did not become healthy"
+if (-not $embedOk) {
+    Write-Host "[fail] embed :8081 did not become healthy"
     exit 1
 }
 
@@ -359,11 +312,7 @@ if (-not $NoWatchdog) {
 
 Write-Host ""
 Write-Host "[ready] Hexis stack up"
-if ($wantChat) {
-    Write-Host "  chat  http://127.0.0.1:8080"
-} else {
-    Write-Host "  chat  (not launched; mode=$lastMode; use set-power-mode.ps1 prime)"
-}
+Write-Host "  chat  (not launched here; set-power-mode.ps1 prime arms :8080 via serve.py - ADR 019)"
 Write-Host "  embed http://127.0.0.1:8081"
 if ($wantNano) {
     Write-Host "  nano  http://127.0.0.1:8082  (CPU-1B, ECO floor)"

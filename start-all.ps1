@@ -88,15 +88,12 @@ function Test-StackPrereqs {
     $dbHealth = (docker inspect hexis_brain --format '{{.State.Health.Status}}' 2>$null)
     $ok = $true
     if ($dbHealth -ne "healthy") { Write-Host "[verify] db not healthy (status: $dbHealth)"; $ok = $false }
-    # Mode-gated: in ECO, set-power-mode.ps1 owns :8080 and start.ps1 skips launching it.
-    # Don't require :8080 here or verify always fails on ECO boots.
-    $markerFile = Join-Path $Root "logs\current-mode.txt"
-    $lastMode = if (Test-Path $markerFile) { (Get-Content $markerFile -ErrorAction SilentlyContinue | Select-Object -First 1).Trim() } else { "" }
-    if ($lastMode -ne "eco") {
-        if (-not (Test-Port 8080)) { Write-Host "[verify] chat llama-server :8080 not listening"; $ok = $false }
-    } else {
-        Write-Host "[verify] chat :8080 check skipped (mode=eco)"
-    }
+    # Chat :8080 is NOT checked here (ADR 019): start.ps1 no longer launches it;
+    # set-power-mode.ps1 prime arms it at step 4, AFTER this prereq gate + after
+    # the workers exist (the arm health-gates :8080 itself, and set-power-mode
+    # enumerates running worker containers). Gating workers on :8080 here would
+    # be a chicken-and-egg deadlock now that the arm comes later. Only db + embed
+    # (start.ps1-owned) are prerequisites for bringing the workers up.
     if (-not (Test-Port 8081))   { Write-Host "[verify] embed llama-server :8081 not listening"; $ok = $false }
     return $ok
 }
