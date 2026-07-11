@@ -78,6 +78,14 @@ $NanoRepo    = $P.Nano.Repo
 #                         the psd1 if you want the override to persist.
 $BigPort   = [int]$P.BigPort
 $ActiveBig = $P.ActiveBig
+# ADR 019 item 2: gpu-tier COGNITION consumes the llm-serve router front, not the
+# raw backend :8080. Serving/arm still targets $BigPort (:8080) — the router's
+# backend — but the DB llm.* endpoint points at the router. Same box; workers
+# reach it via $DockerHost (host.docker.internal — the bridge net makes localhost
+# the container's own loopback). Virtual model 'hexis-active' → router rewrites to
+# the live backend and survives PRIME/ECO flips, so the DB never pins a quant.
+$RouterPort  = 8090
+$RouterModel = 'hexis-active'
 $IsEco     = ($Mode -eq 'eco')
 $IsPrimeAlias = ($Mode -eq 'prime')
 if (-not $IsEco -and -not $IsPrimeAlias) {
@@ -148,19 +156,12 @@ if ($liveChars.Count -eq 0) { throw "no running hexis worker containers - nothin
 # Arm the ONE shared ActiveBig server once, if PRIME-like (eco-not) AND any
 # gpu-tier char. PRIME-like = $Mode is 'prime' or any BigModels key — already
 # resolved into $ActiveBig above.
-$bigAlias = $null
 if (-not $IsEco -and ($liveChars | Where-Object { $_.Tier -eq "gpu" })) {
     # Serving (arm/kill/health-gate/exclusivity) is llm-serve serve.py (F2 lift).
-    # Hexis keeps one cognition need from the registry: the model ALIAS for the
-    # DB llm.chat.model value, read via the single registry reader (print-alias).
-    # NB: no `| Select-Object -First 1` — that sends StopUpstreamCommands, kills
-    # the py process early, and sets $LASTEXITCODE = -1 (false failure). Capture
-    # the (single-line) stdout directly, then trim.
-    $bigAlias = & py -3.10 C:\llm-serve\infra\serve.py print-alias $ActiveBig
-    if ($LASTEXITCODE -ne 0 -or -not $bigAlias) {
-        throw "serve.py print-alias $ActiveBig failed (exit $LASTEXITCODE) - cannot resolve model alias for the DB flip."
-    }
-    $bigAlias = "$bigAlias".Trim()
+    # No print-alias here: per ADR 019 item 2 the DB llm.* model is the router
+    # virtual model 'hexis-active' ($RouterModel), not the backend quant alias, so
+    # cognition no longer needs the registry alias. (Dropping it also removes a
+    # failure path that could abort a flip for a value we no longer consume.)
     # F2: serving relocated to llm-serve serve.py. Hexis orchestration flags pass
     # through --extra-args; llm-serve owns tuning (models.json) + the health-gate
     # + nano exclusivity. Exit!=0 => dead endpoint => abort before flipping DBs
@@ -177,11 +178,11 @@ foreach ($ch in $liveChars) {
     $name = $ch.Name
     if (-not $IsEco) {
         if ($ch.Tier -eq "gpu") {
-            # all gpu personas share the one ActiveBig server on BigPort.
-            # Model id = registry-resolved alias (== server --alias) so the
-            # char DB and the llama-server advertise the same name.
-            if (-not $bigAlias) { $bigAlias = "$(& py -3.10 C:\llm-serve\infra\serve.py print-alias $ActiveBig)".Trim() }
-            $cfg = New-LlmCfg -Model $bigAlias -Port $BigPort
+            # ADR 019 item 2: all gpu personas consume the llm-serve router
+            # (:8090) via the virtual model 'hexis-active' — NOT raw :8080 + the
+            # pinned quant. serve.py armed the backend on $BigPort above; the
+            # router fronts it and survives PRIME/ECO flips.
+            $cfg = New-LlmCfg -Model $RouterModel -Port $RouterPort
         } else {
             # nano-tier character: uses the always-on :8082
             $cfg = New-LlmCfg -Model $NanoAlias -Port ([int]$NanoPort)
