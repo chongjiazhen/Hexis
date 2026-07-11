@@ -108,15 +108,24 @@ async def load_llm_config(
     default_model: str = DEFAULT_LLM_MODEL,
     fallback_key: str | None = None,
 ) -> dict[str, Any]:
-    cfg = await conn.fetchval("SELECT get_config($1)", key)
-    if cfg is None and fallback_key:
-        cfg = await conn.fetchval("SELECT get_config($1)", fallback_key)
+    async def _fetch_parsed(k: str):
+        raw = await conn.fetchval("SELECT get_config($1)", k)
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except Exception:
+                raw = None
+        return raw
 
-    if isinstance(cfg, str):
-        try:
-            cfg = json.loads(cfg)
-        except Exception:
-            cfg = None
+    cfg = await _fetch_parsed(key)
+    # Fall back when the key is absent OR holds JSON null. get_config returns SQL
+    # NULL for an absent row but JSON null (-> None after parse) for a seeded
+    # 'null'::jsonb value; both mean "no override, use the fallback". Parsing
+    # before the None-check makes 'null'::jsonb honor fallback_key — otherwise it
+    # skipped the fallback and landed on the hardcoded default_model (gpt-4o).
+    # ADR 019: keeps llm.recmem inheriting llm.subconscious -> the :8090 router.
+    if cfg is None and fallback_key:
+        cfg = await _fetch_parsed(fallback_key)
 
     if not isinstance(cfg, dict):
         cfg = {}
