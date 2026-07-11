@@ -4,8 +4,8 @@ Env vars (all optional except where noted):
   HEXIS_INSTANCE         instance name; DB is hexis_<name>            (required)
   HEXIS_CHARACTER        character filename stem (e.g. 'baymax')      (required)
   HEXIS_USER             user-facing name                              default: 'Family'
-  HEXIS_LLM_MODEL        llm alias                                     default: 'baymax-qwen-3b'
-  HEXIS_LLM_PORT         llama-server port on host                     default: 8082
+  HEXIS_LLM_MODEL        llm alias (router virtual model)              default: 'hexis-active'
+  HEXIS_LLM_PORT         llm-serve router port on host                 default: 8090
   HEXIS_TELEGRAM_ENV     env var name that holds the bot token         optional
   HEXIS_TELEGRAM_ALLOWED JSON array of chat IDs or '*'                 default: '"*"'
   HEXIS_AMBIENT_CHANCE   float for group ambient reply probability     default: 0.0
@@ -36,8 +36,11 @@ DSN = os.environ.get(
 )
 
 USER_NAME = os.environ.get("HEXIS_USER", "Family")
-LLM_MODEL = os.environ.get("HEXIS_LLM_MODEL", "baymax-qwen-3b")
-LLM_PORT = int(os.environ.get("HEXIS_LLM_PORT", "8082"))
+# ADR 019: fresh onboards consume the llm-serve router (:8090/hexis-active), not a
+# raw backend port. The router prefers the GPU 35B (:8080) and fails over to the CPU
+# nano (:8082), so a new persona works in either power mode with no per-persona port.
+LLM_MODEL = os.environ.get("HEXIS_LLM_MODEL", "hexis-active")
+LLM_PORT = int(os.environ.get("HEXIS_LLM_PORT", "8090"))
 LLM_ENDPOINT_DOCKER = f"http://host.docker.internal:{LLM_PORT}/v1"
 
 TELEGRAM_TOKEN_ENV = os.environ.get("HEXIS_TELEGRAM_ENV")

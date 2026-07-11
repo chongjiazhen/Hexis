@@ -176,27 +176,18 @@ if (-not $IsEco -and ($liveChars | Where-Object { $_.Tier -eq "gpu" })) {
 
 foreach ($ch in $liveChars) {
     $name = $ch.Name
-    if (-not $IsEco) {
-        if ($ch.Tier -eq "gpu") {
-            # ADR 019 item 2: all gpu personas consume the llm-serve router
-            # (:8090) via the virtual model 'hexis-active' — NOT raw :8080 + the
-            # pinned quant. serve.py armed the backend on $BigPort above; the
-            # router fronts it and survives PRIME/ECO flips.
-            $cfg = New-LlmCfg -Model $RouterModel -Port $RouterPort
-        } else {
-            # nano-tier character: uses the always-on :8082
-            $cfg = New-LlmCfg -Model $NanoAlias -Port ([int]$NanoPort)
-        }
-    }
-    else {
-        # ECO: everyone -> nano, unless Sam override given
-        if ($name -eq "Sam" -and $SamEndpoint) {
-            if (-not $SamModel) { throw "-SamEndpoint requires -SamModel" }
-            $cfg = New-LlmCfg -Model $SamModel -Port 0 -EndpointOverride $SamEndpoint
-            Write-Host "[eco] Sam piggybacks $SamModel @ $SamEndpoint"
-        } else {
-            $cfg = New-LlmCfg -Model $NanoAlias -Port ([int]$NanoPort)
-        }
+    # ADR 019: ALL cognition consumes the router (:8090/hexis-active) regardless of
+    # tier or mode. Every persona prefers the GPU 35B (:8080) but accepts the CPU
+    # nano (:8082); the router's prefer-:8080/failover-:8082 probe IS that policy, so
+    # cognition never picks a backend port. Tier still gates whether :8080 gets armed
+    # (above), but no longer selects the endpoint. Sam keeps an ECO escape hatch to
+    # piggyback an operator-loaded model (vibe-coding / SillyTavern).
+    if ($IsEco -and $name -eq "Sam" -and $SamEndpoint) {
+        if (-not $SamModel) { throw "-SamEndpoint requires -SamModel" }
+        $cfg = New-LlmCfg -Model $SamModel -Port 0 -EndpointOverride $SamEndpoint
+        Write-Host "[eco] Sam piggybacks $SamModel @ $SamEndpoint"
+    } else {
+        $cfg = New-LlmCfg -Model $RouterModel -Port $RouterPort
     }
 
     $instances += @{

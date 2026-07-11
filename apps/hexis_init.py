@@ -1011,7 +1011,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--character", default=None,
                     help="Character card name (e.g. 'hexis', 'jarvis'). Omit for express defaults")
     p.add_argument("--endpoint", default=None,
-                    help="LLM API endpoint URL (e.g. http://host.docker.internal:8080/v1)")
+                    help="LLM API endpoint URL (e.g. http://host.docker.internal:8090/v1, the llm-serve router)")
     p.add_argument("--name", default=None,
                     help="What the agent should call you (default: 'User')")
     p.add_argument("--no-docker", action="store_true", default=False,
