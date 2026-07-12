@@ -71,8 +71,8 @@ class HeartbeatWorker:
         self.instance = instance or os.getenv("HEXIS_INSTANCE")
         self.pool: asyncpg.Pool | None = None
         self.running = False
-        # Track ECO/PRIME so we only log on transition, not every poll tick.
-        self._last_eco: bool | None = None
+        # Track CPU-floor vs GPU so we only log on transition, not every poll tick.
+        self._last_cpu_floor: bool | None = None
 
     async def connect(self) -> None:
         self.pool = await asyncpg.create_pool(
@@ -112,17 +112,17 @@ class HeartbeatWorker:
         logger.info("HeartbeatWorker (timer) starting...")
         await self.connect()
 
-        # Prime self._last_eco from current power_mode so the in-loop
+        # Prime self._last_cpu_floor from live serving capability so the in-loop
         # transition log fires only on actual state CHANGE (not on cold-start
-        # None -> True/False). Runtime transitions PRIME<->ECO log correctly;
+        # None -> True/False). Runtime transitions gpu<->cpu-floor log correctly;
         # cold-start state is NOT logged here (a logger.info call at this
         # exact point silently fails to surface to docker logs for reasons
         # not yet identified - other logger.info calls in this file work
         # fine, including the transition logs in the loop body below).
         try:
-            self._last_eco = await self._is_eco_mode()
+            self._last_cpu_floor = await _on_cpu_floor()
         except Exception:
-            self._last_eco = None
+            self._last_cpu_floor = None
 
         try:
             while self.running:
@@ -137,14 +137,14 @@ class HeartbeatWorker:
                         logger.debug("Outside active hours; skipping heartbeat.")
                         await asyncio.sleep(POLL_INTERVAL * 10)
                         continue
-                    in_eco = await self._is_eco_mode()
-                    if in_eco != self._last_eco:
-                        if in_eco:
-                            logger.info("ECO mode entered — heartbeat cycles paused (no LLM, no episodic write).")
-                        elif self._last_eco is not None:
-                            logger.info("ECO mode exited — heartbeat cycles resumed.")
-                        self._last_eco = in_eco
-                    if in_eco:
+                    on_floor = await _on_cpu_floor()
+                    if on_floor != self._last_cpu_floor:
+                        if on_floor:
+                            logger.info("CPU floor (nano) live — heartbeat cycles paused (1B can't follow tool template; would write garbage).")
+                        elif self._last_cpu_floor is not None:
+                            logger.info("GPU backend live — heartbeat cycles resumed.")
+                        self._last_cpu_floor = on_floor
+                    if on_floor:
                         await asyncio.sleep(POLL_INTERVAL * 10)
                         continue
                     await self._submit_heartbeat_if_due()
@@ -173,23 +173,6 @@ class HeartbeatWorker:
         try:
             async with self.pool.acquire() as conn:
                 return bool(await conn.fetchval("SELECT is_agent_configured() AND is_init_complete()"))
-        except Exception:
-            return False
-
-    async def _is_eco_mode(self) -> bool:
-        """Skip heartbeat cycle entirely when agent.power_mode = 'eco'.
-
-        ECO floor uses nano-imp-1b (1B CPU) which can't follow the Hexis tool
-        prompt template - autonomous heartbeats produce garbage that gets
-        stored as episodic memory and corrupts persona long-term (see
-        tools/probe-eco for empirical case). Skip silently; PRIME flip via
-        set-power-mode.ps1 resumes cycles.
-        """
-        if not self.pool:
-            return False
-        try:
-            async with self.pool.acquire() as conn:
-                return await _is_eco_mode(conn)
         except Exception:
             return False
 
@@ -282,21 +265,39 @@ async def _is_agentic_heartbeat_enabled(conn) -> bool:
         return False
 
 
-async def _is_eco_mode(conn) -> bool:
-    """
-    Read agent.power_mode. Returns True when 'eco' (heartbeat should skip).
-    Falls back to False (PRIME behavior) on any error so a missing key never
-    silently silences the fleet.
-    """
+async def _fetch_router_health(url: str, timeout: float = 2.0):
+    """GET the :8090 router /health; parsed JSON dict, or None on any error /
+    non-200 (503 no_upstream included). Thin HTTP seam so _on_cpu_floor's
+    interpretation logic stays unit-testable."""
+    import httpx
     try:
-        val = await conn.fetchval("SELECT get_config('agent.power_mode')")
-        if val is None:
-            return False
-        if isinstance(val, str):
-            return val.strip().strip('"').lower() == 'eco'
-        return str(val).lower() == 'eco'
+        async with httpx.AsyncClient() as client:
+            r = await client.get(url, timeout=timeout)
+        if r.status_code != 200:
+            return None
+        return r.json()
     except Exception:
+        return None
+
+
+async def _on_cpu_floor() -> bool:
+    """Capability guard (ADR-020 §2): True when the live :8090 backend is the CPU
+    floor (nano :8082), which can't follow the Hexis tool template — autonomous
+    cycles on it emit garbage that corrupts episodic memory (tools/probe-eco).
+
+    Detects the floor by upstream PORT (ADR-017/018: the nano floor is :8082),
+    NOT the router's internal prime/eco label — so it survives the phase-4 label
+    rename to gpu/cpu untouched. Replaces the old agent.power_mode DB read: reads
+    live serving *capability*, does not resurrect the mode flag. Fails OPEN
+    (proceed) on any error so a router blip never silently silences the fleet.
+    Independent of the manual is_paused switch (enforced in the SQL decider)."""
+    url = os.environ.get("HEXIS_ROUTER_HEALTH_URL", "http://127.0.0.1:8090/health")
+    floor_port = os.environ.get("HEXIS_CPU_FLOOR_PORT", "8082")
+    health = await _fetch_router_health(url)
+    if not health:
         return False
+    upstream = str(health.get("upstream", "")).rstrip("/")
+    return upstream.endswith(f":{floor_port}")
 
 
 def create_heartbeat_handler(
@@ -515,12 +516,13 @@ class MaintenanceWorker:
                     logger.debug("Gateway record failed (non-fatal)", exc_info=True)
 
     async def _run_subconscious_if_due(self) -> None:
-        # WARNING: NOT gated on agent.power_mode='eco'. Safe today only
-        # because maintenance.subconscious_enabled defaults to false. If you
-        # ever flip that to true, add an _is_eco_mode() check here first or
-        # nano-shaped reasoning will pollute persona long-term memory in
-        # ECO. The chat path's ECO branch in services/chat.py is the
-        # canonical pattern; the heartbeat gate is in HeartbeatWorker.run().
+        # Capability guard (ADR-020 §2): skip autonomous subconscious maintenance
+        # on the CPU floor (1B) — nano-shaped reasoning pollutes persona long-term
+        # memory. Independent of the manual is_paused switch (SQL decider). Was
+        # ungated + "safe only while subconscious_enabled=false"; now gated for
+        # real so flipping that flag on is safe.
+        if await _on_cpu_floor():
+            return
         if not self.pool:
             return
         async with self.pool.acquire() as conn:
@@ -706,9 +708,11 @@ async def _handle_alert_webhook(
     reacted = False
     if priority == "high":
         reacted = True
-        async with pool.acquire() as conn:
-            eco = await _is_eco_mode(conn)
-        if not eco:
+        # Capability guard (ADR-020 §2): don't autonomously generate an alert
+        # reaction on the CPU floor (1B) — it would be garbage. Skip counts as
+        # handled (reacted stays True); the reaction is not queued for the batch.
+        on_floor = await _on_cpu_floor()
+        if not on_floor:
             comment = await generate_alert_reaction(
                 pool, alert_text=text, title=title
             )
