@@ -36,7 +36,8 @@ import asyncpg
 _CONNECT_TIMEOUT_S = 30.0
 
 
-# Mirror of scripts/set_power_mode.py STAGGER_HEARTBEAT_SQL. After a long pause
+# STAGGER_HEARTBEAT_SQL (self-contained since set_power_mode.py was retired,
+# ADR-020). After a long pause
 # every persona's last_heartbeat_at is stale, so should_run_heartbeat() returns
 # true for the whole fleet on the first post-resume poll tick and all ~26 workers
 # submit simultaneously behind the single --parallel 1 GPU slot. Roll overdue

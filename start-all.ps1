@@ -148,30 +148,11 @@ if ($composeRc -ne 0) {
     exit 1
 }
 
-# 4. Normalize to PRIME so every boot lands in a known mode (non-fatal:
-#    stack is up regardless; this only sets each character's llm.* config).
-$setMode = Join-Path $Root "set-power-mode.ps1"
-if (Test-Path $setMode) {
-    Write-Host "[mode] normalizing to PRIME"
-    try {
-        & $setMode prime
-        if ($LASTEXITCODE -ne 0) { Write-Host "[warn] set-power-mode prime exited $LASTEXITCODE - stack still up, config not normalized" }
-    } catch {
-        Write-Host "[warn] set-power-mode prime failed: $($_.Exception.Message) - stack still up"
-    }
-} else {
-    Write-Host "[mode] set-power-mode.ps1 not present - skipping mode normalize"
-}
-
-# 4b. VRAM guard: auto-fallback to ECO if a game/heavy GPU app appears.
-#     Single-instance (own lockfile); spawn hidden if not already running.
-#     Delegated to ensure-guard.ps1 (shared with the Hexis Guard Watchdog task).
-$ensureGuard = Join-Path $Root "ensure-guard.ps1"
-if (Test-Path $ensureGuard) {
-    & $ensureGuard
-} else {
-    Write-Host "[guard] ensure-guard.ps1 not present - no auto-fallback"
-}
+# 4. Serving + GPU-slot automation moved OUT of hexis (ADR-019 sole serving
+#    owner; ADR-020 §6). No PRIME normalize (endpoint owned by bootstrap_instance
+#    + db/99_local_overrides.sql, not a mode flip) and no vram-guard launch — the
+#    auto-claim daemon (auto-yield on host GPU demand) now lives in llm-serve
+#    (infra/auto_claim_daemon.py). :8080 arms lazily on demand (cron/router).
 
 # 5. Summary
 Write-Host ""
