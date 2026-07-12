@@ -122,10 +122,10 @@ function Start-Nano {
     #                              narration in content (NOT --reasoning-budget 0 alone)
     $nanoOrch = @("--temp","0.7","--top-p","0.8","--top-k","20","--min-p","0",
                   "--repeat-penalty","1.1","--reasoning","off")
-    Write-Host "[start] nano :8082 via serve.py ensure-nano"
-    & py -3.10 C:\llm-serve\infra\serve.py ensure-nano --extra-args ($nanoOrch -join ' ')
+    Write-Host "[start] nano :8082 via serve.py ensure-cpu"
+    & py -3.10 C:\llm-serve\infra\serve.py ensure-cpu --extra-args ($nanoOrch -join ' ')
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "[fail] serve.py ensure-nano failed (exit $LASTEXITCODE) - check C:\llm-serve\logs\serve-8082.log"
+        Write-Host "[fail] serve.py ensure-cpu failed (exit $LASTEXITCODE) - check C:\llm-serve\logs\serve-8082.log"
     }
 }
 
