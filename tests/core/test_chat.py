@@ -109,14 +109,14 @@ async def test_chat_turn_eco_writes_tagged_memory(monkeypatch):
     async def fake_connect(_dsn, **_kwargs):
         yield mem
 
-    async def fake_power(_pool, _dsn):
-        return "eco"
+    async def fake_floor():
+        return True
 
     async def fake_slim(**_kwargs):
         return "eco voice reply"
 
     monkeypatch.setattr(chat_mod.CognitiveMemory, "connect", fake_connect)
-    monkeypatch.setattr(chat_mod, "_read_power_mode", fake_power)
+    monkeypatch.setattr(chat_mod, "on_cpu_floor", fake_floor)
     monkeypatch.setattr(chat_mod, "_eco_slim_chat", fake_slim)
 
     result = await chat_mod.chat_turn(
@@ -140,14 +140,14 @@ async def test_chat_turn_eco_fallback_skips_memory(monkeypatch):
     async def fake_connect(_dsn, **_kwargs):
         yield mem
 
-    async def fake_power(_pool, _dsn):
-        return "eco"
+    async def fake_floor():
+        return True
 
     async def fake_slim(**_kwargs):
         return ""  # empty -> fallback reply, no memory write
 
     monkeypatch.setattr(chat_mod.CognitiveMemory, "connect", fake_connect)
-    monkeypatch.setattr(chat_mod, "_read_power_mode", fake_power)
+    monkeypatch.setattr(chat_mod, "on_cpu_floor", fake_floor)
     monkeypatch.setattr(chat_mod, "_eco_slim_chat", fake_slim)
 
     result = await chat_mod.chat_turn(
@@ -169,14 +169,14 @@ async def test_stream_chat_turn_eco_writes_tagged_memory(monkeypatch):
     async def fake_connect(_dsn, **_kwargs):
         yield mem
 
-    async def fake_power(_pool, _dsn):
-        return "eco"
+    async def fake_floor():
+        return True
 
     async def fake_slim(**_kwargs):
         return "eco stream reply"
 
     monkeypatch.setattr(chat_mod.CognitiveMemory, "connect", fake_connect)
-    monkeypatch.setattr(chat_mod, "_read_power_mode", fake_power)
+    monkeypatch.setattr(chat_mod, "on_cpu_floor", fake_floor)
     monkeypatch.setattr(chat_mod, "_eco_slim_chat", fake_slim)
 
     chunks = [

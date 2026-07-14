@@ -12,6 +12,7 @@ from core.agent_api import db_dsn_from_env, get_agent_profile_context, pool_size
 from core.agent_loop import AgentEvent
 from core.cognitive_memory_api import CognitiveMemory, MemoryType
 from core.llm import chat_completion, normalize_llm_config
+from core.serving import on_cpu_floor
 from core.tools import create_default_registry, ToolContext, ToolExecutionContext, ToolRegistry
 from services.agent import run_agent, stream_agent
 from services.decline import classify_decline, Decline
@@ -117,39 +118,10 @@ async def _eco_slim_chat(
     return (result.get("content") or "").strip()
 
 
-async def _read_power_mode(pool: Any | None, dsn: str | None) -> str:
-    """
-    Return 'eco' or 'prime' from agent.power_mode config. Falls back to
-    'prime' on any error so a missing key or transient DB blip never silently
-    bricks the chat path. Cached at the config-row level by Postgres; cheap to
-    call once per turn.
-    """
-    import asyncpg
-    try:
-        if pool is not None:
-            async with pool.acquire() as conn:
-                val = await conn.fetchval("SELECT get_config('agent.power_mode')")
-        else:
-            conn = await asyncpg.connect(dsn or db_dsn_from_env())
-            try:
-                val = await conn.fetchval("SELECT get_config('agent.power_mode')")
-            finally:
-                await conn.close()
-    except Exception:
-        return 'prime'
-    if val is None:
-        return 'prime'
-    if isinstance(val, str):
-        mode = val.strip().strip('"').lower()
-    else:
-        mode = str(val).lower()
-    return 'eco' if mode == 'eco' else 'prime'
-
-
 async def _read_decline_enabled(pool: Any | None, dsn: str | None) -> bool:
     """Return chat.decline.enabled. Fail toward replying (False) on any error or
     missing key so a transient DB blip or unmigrated DB can never silence a
-    persona. Mirrors _read_power_mode's fail-to-prime posture."""
+    persona. Same fail-open posture as the capability guard (core.serving)."""
     import asyncpg
     try:
         if pool is not None:
@@ -470,15 +442,17 @@ async def chat_turn(
     normalized = normalize_llm_config(llm_config)
     history = history or []
 
-    # ECO mode: bypass RLM + tool-agent stack entirely (the heavy prompt
-    # template makes 1B emit code-REPL garbage). Use a slim direct LLM call
-    # with persona_system_prompt + tiny anchor only. No tools, no recall. The
-    # turn IS still persisted via _eco_remember (tagged metadata.origin='eco')
-    # so eco vs prime quality stays measurable downstream.
-    is_eco = (await _read_power_mode(pool, dsn) == 'eco')
+    # CPU floor (ADR-020 §2): when the live :8090 upstream is the 1B nano, bypass
+    # the RLM + tool-agent stack entirely — the heavy prompt template makes the 1B
+    # emit code-REPL garbage. Use a slim direct LLM call with persona_system_prompt
+    # + tiny anchor only. No tools, no recall. The turn IS still persisted via
+    # _eco_remember (tagged metadata.origin='eco') so floor-vs-GPU reply quality
+    # stays measurable downstream — the tag is a data contract, keep the name.
+    # Reads live serving capability; the retired power-mode DB flag is gone.
+    on_floor = await on_cpu_floor()
     decline_enabled = await _read_decline_enabled(pool, dsn)
-    if is_eco:
-        logger.info("ECO mode: chat_turn -> slim direct LLM (no RLM, no tools; turn persisted tagged origin=eco)")
+    if on_floor:
+        logger.info("CPU floor live: chat_turn -> slim direct LLM (no RLM, no tools; turn persisted tagged origin=eco)")
         try:
             assistant_text = await _eco_slim_chat(
                 user_message=user_message,
@@ -689,14 +663,14 @@ async def stream_chat_turn(
     dsn = dsn or db_dsn_from_env()
     history = history or []
 
-    # ECO mode: bypass RLM/agent stack, use slim direct LLM call (no streaming
-    # available there — yield the full text as a single chunk). Same rationale
-    # as chat_turn: 1B can't parse the heavy template; slim path keeps the
-    # persona voice viable.
-    is_eco = (await _read_power_mode(pool, dsn) == 'eco')
+    # CPU floor (ADR-020 §2): bypass RLM/agent stack, use slim direct LLM call (no
+    # streaming available there — yield the full text as a single chunk). Same
+    # rationale as chat_turn: the 1B can't parse the heavy template; the slim path
+    # keeps the persona voice viable. Driven by live serving capability.
+    on_floor = await on_cpu_floor()
     decline_enabled = await _read_decline_enabled(pool, dsn)
-    if is_eco:
-        logger.info("ECO mode: stream_chat_turn -> slim direct LLM (no stream, single chunk)")
+    if on_floor:
+        logger.info("CPU floor live: stream_chat_turn -> slim direct LLM (no stream, single chunk)")
         normalized_cfg = normalize_llm_config(llm_config)
         try:
             text = await _eco_slim_chat(

@@ -92,8 +92,8 @@ async def test_stream_chat_turn_strips_session_assessment(monkeypatch):
     """stream_chat_turn must NOT leak the rubric block and must store it
     as a strategic memory; the episodic conversation write must be clean."""
 
-    async def _fake_read_power_mode(pool, dsn):
-        return "prime"
+    async def _fake_on_cpu_floor():
+        return False
 
     async def _fake_stream_agent(pool, registry, **kwargs):
         # Yield the Esme reply split across several TEXT_DELTA events.
@@ -113,7 +113,7 @@ async def test_stream_chat_turn_strips_session_assessment(monkeypatch):
     async def _fake_create_pool(dsn, **kwargs):
         return _FakePool()
 
-    monkeypatch.setattr("services.chat._read_power_mode", _fake_read_power_mode)
+    monkeypatch.setattr("services.chat.on_cpu_floor", _fake_on_cpu_floor)
     monkeypatch.setattr("services.chat.stream_agent", _fake_stream_agent)
     monkeypatch.setattr(
         "services.chat.create_default_registry", _fake_create_default_registry

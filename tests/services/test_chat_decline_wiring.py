@@ -61,10 +61,10 @@ async def test_read_decline_enabled_failure_returns_false(monkeypatch):
 
 
 async def test_chat_turn_eco_path_declines(monkeypatch):
-    """ECO path: a decline marker from the slim call is honored + rendered."""
-    async def _fake_power_mode(*a, **k):
-        return "eco"
-    monkeypatch.setattr(chat, "_read_power_mode", _fake_power_mode)
+    """CPU-floor slim path: a decline marker from the slim call is honored + rendered."""
+    async def _fake_on_floor():
+        return True
+    monkeypatch.setattr(chat, "on_cpu_floor", _fake_on_floor)
 
     async def _fake_decline_enabled(*a, **k):
         return True
@@ -93,10 +93,10 @@ async def test_chat_turn_eco_path_declines(monkeypatch):
 
 
 async def test_stream_chat_turn_eco_path_declines(monkeypatch):
-    """Streaming ECO path: a decline marker is honored + rendered in the yielded chunk."""
-    async def _fake_power_mode(*a, **k):
-        return "eco"
-    monkeypatch.setattr(chat, "_read_power_mode", _fake_power_mode)
+    """Streaming CPU-floor slim path: a decline marker is honored + rendered in the yielded chunk."""
+    async def _fake_on_floor():
+        return True
+    monkeypatch.setattr(chat, "on_cpu_floor", _fake_on_floor)
 
     async def _fake_decline_enabled(*a, **k):
         return True
