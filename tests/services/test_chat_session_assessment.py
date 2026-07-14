@@ -60,12 +60,27 @@ class _FakePool:
 
 
 class _FakeMemClient:
-    """Records remember() calls. Async context manager via CognitiveMemory."""
+    """Records both memory writes the chat path makes. Async context manager via
+    CognitiveMemory.
+
+    - ``remember()`` — used for the strategic session-assessment memory.
+    - ``record_chat_turn_memory()`` — how ``_remember_conversation`` persists the
+      conversation turn itself (it does NOT call ``remember(type=EPISODIC)``).
+    """
     def __init__(self):
         self.remember_calls = []
+        self.chat_turn_calls = []
 
     async def remember(self, content, **kwargs):
         self.remember_calls.append({"content": content, **kwargs})
+
+    async def record_chat_turn_memory(self, user_message, assistant_message, **kwargs):
+        self.chat_turn_calls.append({
+            "user_message": user_message,
+            "assistant_message": assistant_message,
+            **kwargs,
+        })
+        return {"direct_promoted": True, "raw": {"status": "stored"}}
 
 
 class _FakeCognitiveMemory:
@@ -143,17 +158,17 @@ async def test_stream_chat_turn_strips_session_assessment(monkeypatch):
     assert "Great work this scene." in visible
 
     # A strategic memory must have been written for the assessment, and the
-    # episodic conversation write must NOT contain the block.
+    # persisted conversation turn must NOT contain the block.
     client = _FakeCognitiveMemory.last_client
     assert client is not None
     strategic = [
         c for c in client.remember_calls if c.get("type") == MemoryType.STRATEGIC
     ]
-    episodic = [
-        c for c in client.remember_calls if c.get("type") == MemoryType.EPISODIC
-    ]
     assert len(strategic) == 1, "expected one strategic session-assessment memory"
     assert "focus_next:" in strategic[0]["content"]
-    assert len(episodic) == 1, "expected one episodic conversation memory"
-    assert "SESSION-ASSESSMENT" not in episodic[0]["content"]
-    assert "[session-assessment]" not in episodic[0]["content"]
+
+    turns = client.chat_turn_calls
+    assert len(turns) == 1, "expected one persisted conversation turn"
+    assert "SESSION-ASSESSMENT" not in turns[0]["assistant_message"]
+    assert "[session-assessment]" not in turns[0]["assistant_message"]
+    assert turns[0]["context"]["metadata"]["origin"] == "prime"
