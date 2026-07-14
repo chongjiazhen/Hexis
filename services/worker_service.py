@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 from core.agent_api import db_dsn_from_env
 from core.gateway import EventSource, Gateway, GatewayConsumer, GatewayEvent
 from core.rabbitmq_bridge import RabbitMQBridge
+from core.serving import fetch_router_health, on_cpu_floor
 from core.state import (
     is_agent_terminated,
     mark_subconscious_decider_run,
@@ -265,39 +266,15 @@ async def _is_agentic_heartbeat_enabled(conn) -> bool:
         return False
 
 
-async def _fetch_router_health(url: str, timeout: float = 2.0):
-    """GET the :8090 router /health; parsed JSON dict, or None on any error /
-    non-200 (503 no_upstream included). Thin HTTP seam so _on_cpu_floor's
-    interpretation logic stays unit-testable."""
-    import httpx
-    try:
-        async with httpx.AsyncClient() as client:
-            r = await client.get(url, timeout=timeout)
-        if r.status_code != 200:
-            return None
-        return r.json()
-    except Exception:
-        return None
-
-
-async def _on_cpu_floor() -> bool:
-    """Capability guard (ADR-020 §2): True when the live :8090 backend is the CPU
-    floor (nano :8082), which can't follow the Hexis tool template — autonomous
-    cycles on it emit garbage that corrupts episodic memory (tools/probe-eco).
-
-    Detects the floor by upstream PORT (ADR-017/018: the nano floor is :8082),
-    NOT the router's internal prime/eco label — so it survives the phase-4 label
-    rename to gpu/cpu untouched. Replaces the old agent.power_mode DB read: reads
-    live serving *capability*, does not resurrect the mode flag. Fails OPEN
-    (proceed) on any error so a router blip never silently silences the fleet.
-    Independent of the manual is_paused switch (enforced in the SQL decider)."""
-    url = os.environ.get("HEXIS_ROUTER_HEALTH_URL", "http://127.0.0.1:8090/health")
-    floor_port = os.environ.get("HEXIS_CPU_FLOOR_PORT", "8082")
-    health = await _fetch_router_health(url)
-    if not health:
-        return False
-    upstream = str(health.get("upstream", "")).rstrip("/")
-    return upstream.endswith(f":{floor_port}")
+# Capability guard (ADR-020 §2) lives in core/serving.py so services.chat can share
+# it without importing this module's rabbit/gateway/argparse chain. True when the
+# live :8090 backend is the CPU floor (nano :8082), which can't follow the Hexis
+# tool template — autonomous cycles on it emit garbage that corrupts episodic memory
+# (tools/probe-eco). Fails OPEN on any error; independent of the manual is_paused
+# switch (enforced in the SQL decider). These aliases keep the call sites below —
+# and their tests — unchanged.
+_fetch_router_health = fetch_router_health
+_on_cpu_floor = on_cpu_floor
 
 
 def create_heartbeat_handler(
