@@ -663,8 +663,7 @@ INSERT INTO config (key, value, description) VALUES
     ('heartbeat.cost_hybrid_ingest', '3'::jsonb, 'Hybrid ingestion - fast pass then slow on high-signal chunks')
 ON CONFLICT (key) DO NOTHING;
 INSERT INTO config (key, value, description) VALUES
-    ('agent.tools', '["recall","sense_memory_availability","explore_concept","get_procedures","get_strategies","remember","manage_goals","manage_schedule","manage_backlog","aggregate_signals"]'::jsonb, 'Allowed tool names for chat-context tool use. Names MUST match the ToolHandlers registered in core/tools/ — services.agent applies this list as the chat allowlist via _allowed_tools_for_mode. Heartbeat keeps the full registry. Update this seed when registry names change; otherwise the chat path silently drops missing names.'),
-    ('agent.power_mode', '"prime"'::jsonb, 'Power mode: prime (full LLM behavior) or eco (canned chat reply, heartbeat skipped, no memory writes). Flipped by set-power-mode.ps1.')
+    ('agent.tools', '["recall","sense_memory_availability","explore_concept","get_procedures","get_strategies","remember","manage_goals","manage_schedule","manage_backlog","aggregate_signals"]'::jsonb, 'Allowed tool names for chat-context tool use. Names MUST match the ToolHandlers registered in core/tools/ — services.agent applies this list as the chat allowlist via _allowed_tools_for_mode. Heartbeat keeps the full registry. Update this seed when registry names change; otherwise the chat path silently drops missing names.')
 ON CONFLICT (key) DO NOTHING;
 INSERT INTO config (key, value, description) VALUES
     ('maintenance.maintenance_interval_seconds', '60'::jsonb, 'Seconds between subconscious maintenance ticks'),
