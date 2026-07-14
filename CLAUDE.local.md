@@ -38,8 +38,20 @@
   `cnt`/`heartbeat_count`, `last_heartbeat_at`, `next_heartbeat_at`,
   `current_energy` (10=never ran, regens →20), `is_paused`, `init_stage`.
 - "Promoted" = container Up AND per-DB gate (`agent.is_configured=true` +
-  `agent.consent_status="consent"`) AND `heartbeat_count` climbing. First two
-  are necessary-not-sufficient; only a rising cnt proves the loop runs.
+  `agent.consent_status="consent"`) AND heartbeats COMPLETING. First two are
+  necessary-not-sufficient.
+- **A rising `heartbeat_count` does NOT prove the loop works** (burned 2026-07-14):
+  `start_heartbeat()` bumps `heartbeat_count` + `last_heartbeat_at` at the TOP of the
+  cycle. Climbing cnt = cycles START. `next_heartbeat_at` is the COMPLETION clock (single
+  writer, `db/13_functions_emotional_state.sql:1048`, same UPDATE that clears
+  `active_heartbeat_id`). Stale `next` + fresh `last` = starting, never finishing.
+  Ground-truth completion check:
+  `SELECT max(created_at) FROM memories WHERE metadata->'context' ? 'heartbeat_id';`
+- **Dead embed `:8081` silently kills finalize FLEET-WIDE** — `create_episodic_memory`
+  needs an embedding, so every heartbeat throws at the finish line while cnt keeps
+  climbing. 2.5-day silent outage 07-11→07-14. Also breaks chat hydration.
+- Night gate (`heartbeat.timezone=Asia/Singapore`, night 23→8): nothing completes at
+  night. Don't try to verify heartbeat recovery after 23:00 local.
 - Container `Up Xh` ≠ healthy: `core.gateway` consumer loop wedges after a
   `hexis_brain` bounce (`Connect call failed …5432`, asyncpg `cannot switch
   to state 12`) and does NOT self-heal. Fix = restart workers:
