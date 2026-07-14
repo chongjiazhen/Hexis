@@ -146,9 +146,21 @@ async def test_successful_reach_out_is_persisted(db_pool):
             await conn.execute("DELETE FROM subconscious_units WHERE source_identity = 'carol'")
 
 
-async def test_quiet_gated_reach_out_never_reaches_channel(db_pool):
-    """When the SQL gate skips a quiet reach-out, no outbox message is emitted,
-    so the channel-side consumer should never see anything to deliver."""
+async def test_quiet_recipient_is_not_vetoed_in_sql(db_pool):
+    """A recipient inside their local night window is NOT vetoed by the schema.
+
+    This pins a DELIBERATE absence. `execute_heartbeat_action` used to veto a
+    reach_out_user whose recipient was in quiet hours, returning
+    {queued: false, reason: 'recipient_quiet_hours'}. Commit f3986ed (all-latent
+    reach-out pivot) stripped that veto: whether 3am is an acceptable hour to
+    message someone is a judgment about a relationship, so it belongs to the
+    persona's own reasoning, not to a hardcoded SQL window. The schema queues;
+    the persona decides whether to reach out at all.
+
+    So: quiet recipient -> still queued, outbox message still emitted. If someone
+    re-adds a SQL-level quiet gate, this test fails and they have to come read
+    this docstring first.
+    """
     async with db_pool.acquire() as conn:
         # Reset energy so this test isn't blocked by prior tests' accumulated charges
         # (asyncpg's connection.transaction() COMMITS on normal exit, so earlier
@@ -182,11 +194,17 @@ async def test_quiet_gated_reach_out_never_reaches_channel(db_pool):
         )
         res = raw if isinstance(raw, dict) else json.loads(raw)
         inner = res.get("result", {})
-        assert inner.get("queued") is False, f"expected gate to fire; got {inner}"
-        assert inner.get("reason") == "recipient_quiet_hours"
+        assert inner.get("queued") is True, (
+            f"quiet recipient must still queue (no SQL veto since f3986ed); got {inner}"
+        )
+        assert inner.get("reason") != "recipient_quiet_hours", (
+            "the recipient_quiet_hours veto was removed by the all-latent pivot; "
+            "quiet-hours judgment belongs to the persona, not the schema"
+        )
 
         outbox = res.get("outbox_messages") or []
-        assert outbox == [], f"gated skip must produce zero outbox messages; got {outbox}"
+        assert len(outbox) == 1, f"expected one outbox message; got {outbox}"
+        assert outbox[0]["payload"]["sender_id"] == "gated"
 
     try:
         # Channel consumer never sees anything because outbox is empty.
