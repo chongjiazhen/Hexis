@@ -3,7 +3,58 @@
 Centralized "what's on our plate" so nothing gets dropped. Newest context at
 top of each item. Tracked in-repo (lives in `.local-notes/`).
 
-Last updated: 2026-07-10
+Last updated: 2026-07-14
+
+## ACTIVE — 0a. ADR-020 phase 6 — `agent.power_mode` RETIRED (SHIPPED + LIVE-APPLIED 2026-07-14)
+
+- 6 commits `c4fe9f1..00b6767` on `home-rig-local` (+ spec `564bcbe`, plan `cd0a40a`).
+  Phase 6's premise ("reads already gone, key inert") was FALSE: `chat.py:478,696` still
+  read the flag live, so the DELETE would have flipped any `'eco'` instance to the heavy
+  path. Re-homed first, then deleted.
+- `core/serving.py` (new leaf module) = the shared capability probe
+  (`on_cpu_floor()`, port-based on `:8082`, fails OPEN). `worker_service` aliases it;
+  `chat.py` slim path now branches on it. `_read_power_mode` deleted. `metadata.origin='eco'`
+  KEPT — persisted data contract, do not rename.
+- **ADR-020 §4 amended** (`C:\ai-workspace` `06d1cea`): §4 said delete the chat eco branch;
+  that was written when it was a canned reply. It is now the slim direct-LLM path = §2's
+  "1B competent envelope". Branch KEPT, only the mode read died.
+- LIVE: migration `0009` applied to all 11 DBs (0 surviving rows, 0009 stamped); 28 workers
+  + api rebuilt `--no-deps --force-recreate --build`; new code verified INSIDE containers
+  (`on_cpu_floor` present, `_read_power_mode` absent).
+- Suite: 2072 passed / 16 failed — all 16 pre-existing (verified vs clean-HEAD worktree).
+  **2 of them are NIGHT-ONLY** (`test_should_run_heartbeat_respects_pause_and_interval`,
+  `test_worker_check_and_run_heartbeat_queues_decision_call`): the 23→8 night throttle makes
+  `should_run_heartbeat()` FALSE. Green by day. Suite is not deterministic across time-of-day.
+- NEXT: nothing required. Phase 6 closed.
+
+## ACTIVE — 0b. Fleet cognition — embed outage FIXED, autonomy still INERT (2026-07-14)
+
+- **Autonomous loop was dead 07-11 → 07-14** and every liveness check said "healthy".
+  Chain: `watch-embed.ps1` watchdog died 06-23 (stale `logs/watch-embed.pid`, no scheduled
+  task) → embed `:8081` died ~07-11, nothing respawned it → `finalize_heartbeat` →
+  `create_episodic_memory` → `memories.embedding` NOT NULL → `:8081` → threw. Zero heartbeat
+  completions fleet-wide for 2.5 days. Chat hydration broken the whole time too.
+- **Why it hid:** `start_heartbeat()` bumps `heartbeat_count` at the TOP of the cycle. A
+  climbing cnt proves cycles START, not COMPLETE. `next_heartbeat_at` is the real completion
+  clock (single writer, `db/13:1048`). Real check:
+  `SELECT max(created_at) FROM memories WHERE metadata->'context' ? 'heartbeat_id';`
+  (CLAUDE.local.md's "rising cnt proves the loop runs" is WRONG — fix it there.)
+- FIXED: embed restarted 14:20 UTC (3 personas completed within 13 min, first in 2.5 days);
+  watchdog re-armed (PID 31136). **Unverified for the other 6** — night gate (23→8
+  Asia/Singapore) closed at 23:00 local. **NEXT STEP: after 08:00 local, check the 6 stuck
+  personas (vera/denali/ennie/hazel/vesper/null) complete → `next_heartbeat_at` advances past
+  now. If they don't, the embed root-cause is WRONG.**
+- **OPEN, not fixed — the bigger one:** heartbeats that DO complete take ZERO actions —
+  `"Heartbeat #N: No actions taken"`, `actions=[]`, `reasoning="RLM loop timed out"`
+  (fallback at `services/hexis_rlm.py:354`: loop exhausts max_iterations w/o `FINAL(...)`,
+  then the 120s rescue call fails). Autonomy is inert even when finalize works. Suspect
+  (UNTESTED): 9 personas queueing on one `--parallel 1` slot serving a 35B MoE.
+  `null` is a different signature (last completion 06-25, REPL garbage in `active_reasoning`).
+- **OPEN (small):** `start.ps1 -EmbedOnly` starts embed and `exit 0` WITHOUT arming the
+  watchdog — and that is the path `watch-embed.ps1` itself re-invokes. Also the
+  "Hexis Guard Watchdog" scheduled task still fires every 5 min at `ensure-guard.ps1`,
+  which ADR-020 phase 3 DELETED (exits 0, fails silently). That task slot is the obvious
+  durable home for the embed watchdog, which currently dies on logoff.
 
 ## ACTIVE — 0. Upstream reconcile 2026-07-10 SHIPPED + LIVE-APPLIED
 
@@ -16,8 +67,9 @@ Last updated: 2026-07-10
   lack SET search_path — recheck on any future migration apply); brain recreated,
   27 workers + api rebuilt; verified fast_recall + live `hexis export`.
 - Backups: `C:\hexis-backups\2026-07-10\` (11 dumps + ennie.hmx.json). Keep.
-- Fleet state: chat LIVE, heartbeats PAUSED (`is_paused=t` × 11, operator
-  pause-fleet.ps1). Resume = `.\resume-fleet.ps1`.
+- ~~Fleet state: heartbeats PAUSED × 11~~ — **STALE. Resumed since; verified 2026-07-14:
+  `is_paused=false` on all 11, cnt climbing.** Read `heartbeat_state` per DB; never assert
+  pause state from a note. (But cnt climbing ≠ completing — see §0b.)
 - NEXT: (a) decide on deferred upstream sets — retention phases (keep dark; needs
   gating audit first), prompt-to-SQL (needs persona_format_reminder port), DB-native
   outbox 8f6980f (needs per-persona agent-stamp), 67b06c0 heartbeat-SQL (needs
