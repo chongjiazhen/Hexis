@@ -6,6 +6,7 @@ import re
 import pytest
 
 from services.hexis_rlm import (
+    extract_decision_json,
     find_code_blocks,
     find_final_answer,
     format_execution_result,
@@ -54,6 +55,34 @@ class TestParsing:
     def test_find_final_none(self):
         text = "Still thinking..."
         assert find_final_answer(text) is None
+
+    def test_extract_decision_bare_json_from_prose(self):
+        # Reasoning-distilled models (q36) narrate then emit a bare JSON
+        # decision without the FINAL(...) wrapper. The exhaustion rescue must
+        # still recover the decision + its actions.
+        text = (
+            "I'm still exploring, but I'll commit now.\n"
+            '{"reasoning": "user unresponsive 50h", '
+            '"actions": [{"action": "update_trust", '
+            '"params": {"partner_id": "user1", "new_level": 0.4}}], '
+            '"goal_changes": []}'
+        )
+        answer = extract_decision_json(text)
+        assert answer is not None
+        parsed = json.loads(answer)
+        assert parsed["actions"][0]["action"] == "update_trust"
+        assert parsed["actions"][0]["params"]["new_level"] == 0.4
+
+    def test_extract_decision_prefers_final_wrapper(self):
+        text = 'FINAL({"reasoning": "done", "actions": [{"action": "rest", "params": {}}]})'
+        answer = extract_decision_json(text)
+        assert answer is not None
+        assert json.loads(answer)["actions"][0]["action"] == "rest"
+
+    def test_extract_decision_none_when_no_json(self):
+        # Model kept exploring: prose + a repl block, no decision object.
+        text = "Let me check who is talking to me.\n```repl\nprint(context.keys())\n```"
+        assert extract_decision_json(text) is None
 
     def test_format_execution_result_stdout(self):
         result = REPLResult(stdout="hello\n", stderr="", execution_time=0.1, local_vars={"x": "int"})

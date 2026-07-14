@@ -129,6 +129,66 @@ def find_final_answer(text: str, repl: HexisLocalREPL | None = None) -> str | No
     return None
 
 
+def _first_json_object(text: str) -> str | None:
+    """Return the first balanced top-level {...} object in text, or None.
+
+    Brace-scans (string- and escape-aware) so a decision object with nested
+    params survives; ignores braces inside JSON string literals.
+    """
+    start = text.find("{")
+    while start != -1:
+        depth = 0
+        in_str = False
+        esc = False
+        for i in range(start, len(text)):
+            ch = text[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                elif ch == '"':
+                    in_str = False
+                continue
+            if ch == '"':
+                in_str = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start : i + 1]
+        start = text.find("{", start + 1)
+    return None
+
+
+def extract_decision_json(text: str) -> str | None:
+    """Extract a decision JSON string from a (possibly non-FINAL) response.
+
+    Reasoning-distilled models (q36) narrate and emit a bare JSON decision
+    without the FINAL(...) wrapper, so the exhaustion rescue can't rely on
+    find_final_answer alone. Prefer a FINAL(...) payload when present, else
+    fall back to the first balanced JSON object that parses. Returns None when
+    the response carries no parseable decision (e.g. the model kept exploring
+    with a repl block).
+    """
+    final = find_final_answer(text)
+    if final is not None:
+        try:
+            json.loads(final)
+            return final
+        except (json.JSONDecodeError, TypeError):
+            pass
+    candidate = _first_json_object(text)
+    if candidate is not None:
+        try:
+            json.loads(candidate)
+            return candidate
+        except (json.JSONDecodeError, TypeError):
+            return None
+    return None
+
+
 def format_execution_result(result: REPLResult) -> str:
     """Format a REPLResult for inclusion in message history."""
     parts = []
@@ -329,13 +389,15 @@ def _run_loop(
         new_messages = format_iteration(response, code_blocks, results)
         message_history.extend(new_messages)
 
-    # If we ran out of iterations without a FINAL, use the last response
-    if final_answer is None:
+    # If we ran out of iterations without a FINAL, force a decision.
+    if final_answer is None and chat_mode:
+        # Chat exhaustion: the last response IS the reply (prose). Ask once for
+        # a final answer, but fall back to the raw response — chat wants prose,
+        # not a structured decision.
         logger.warning(
-            "RLM loop exhausted %d iterations without FINAL, using last response",
+            "RLM chat exhausted %d iterations without FINAL, using last response",
             max_iterations,
         )
-        # Make one more call asking for a final answer
         message_history.append({
             "role": "user",
             "content": (
@@ -351,6 +413,39 @@ def _run_loop(
             response = future.result(timeout=120)
             final_answer = find_final_answer(response, repl) or response
         except Exception:
+            final_answer = '{"reasoning": "RLM loop timed out", "actions": [], "goal_changes": []}'
+    elif final_answer is None:
+        # Heartbeat exhaustion. Reasoning-distilled models (q36) narrate and
+        # write REPL code but never emit the FINAL(...) contract, even when the
+        # soft rescue asks for it — they just write another repl block. A HARD
+        # stop ("no code, no prose, JSON only") makes them commit; extract the
+        # decision object whether or not it lands inside a FINAL() wrapper.
+        logger.warning(
+            "RLM loop exhausted %d iterations without FINAL, forcing decision",
+            max_iterations,
+        )
+        message_history.append({
+            "role": "user",
+            "content": (
+                "Stop exploring. Output your decision NOW as a single JSON object and "
+                "nothing else -- no code blocks, no prose, no FINAL() wrapper. Schema: "
+                '{"reasoning": str, "actions": [{"action": str, "params": object}], '
+                '"goal_changes": [], "emotional_assessment": {"valence": float, '
+                '"arousal": float, "primary_emotion": str}}. Base it on everything you '
+                "have learned. If nothing warrants an action, use an empty actions list."
+            ),
+        })
+        try:
+            future = asyncio.run_coroutine_threadsafe(
+                _llm_completion(message_history, llm_config, max_tokens=4096),
+                loop,
+            )
+            response = future.result(timeout=120)
+            final_answer = extract_decision_json(response)
+        except Exception as e:
+            logger.error("RLM heartbeat rescue call failed: %s", e)
+            final_answer = None
+        if final_answer is None:
             final_answer = '{"reasoning": "RLM loop timed out", "actions": [], "goal_changes": []}'
 
     return {
