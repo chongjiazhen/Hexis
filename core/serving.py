@@ -15,7 +15,16 @@ import os
 from typing import Any
 
 ROUTER_HEALTH_URL_ENV = "HEXIS_ROUTER_HEALTH_URL"
-DEFAULT_ROUTER_HEALTH_URL = "http://127.0.0.1:8090/health"
+# Host gateway, NOT loopback. Every caller of on_cpu_floor runs inside a
+# container (chat.py -> api; worker_service.py -> the *_worker services), and in
+# a container 127.0.0.1 is the CONTAINER — the probe is refused, on_cpu_floor
+# fails open, and the guard is silently dead. That is exactly what shipped:
+# measured 2026-07-14 in hexis_callisto_heartbeat_worker, env unset,
+# 127.0.0.1:8090 refused while host.docker.internal:8090 answered 200. hexis
+# already reaches the router this way for llm.chat / llm.heartbeat, so the health
+# probe now matches the rest of the config. A host-native run (no container)
+# overrides back to loopback via HEXIS_ROUTER_HEALTH_URL.
+DEFAULT_ROUTER_HEALTH_URL = "http://host.docker.internal:8090/health"
 CPU_FLOOR_PORT_ENV = "HEXIS_CPU_FLOOR_PORT"
 DEFAULT_CPU_FLOOR_PORT = "8082"
 
