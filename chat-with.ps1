@@ -11,7 +11,8 @@
 #   .\chat-with.ps1 sam
 #   .\chat-with.ps1            # no arg -> list available characters
 #
-# Source of truth: power-profiles.psd1 Characters array.
+# Source of truth: RUNNING worker containers (the psd1 Characters roster froze
+# pre-newchars and was retired with power-profiles.psd1 per ADR-020).
 # chat_repl.py routes by POSTGRES_DB env (no instance-registry awareness).
 
 param(
@@ -22,9 +23,25 @@ param(
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-$ProfilePath = Join-Path $Root "power-profiles.psd1"
-if (-not (Test-Path $ProfilePath)) { throw "power-profiles.psd1 not found at $ProfilePath" }
-$P = Import-PowerShellDataFile -Path $ProfilePath
+# Enumerate personas from live containers: hexis_<persona>_<role>_worker.
+# Default agent (Sam) runs as hexis_<role>_worker (no infix) -> db hexis_memory.
+function Get-Roster {
+    $names = & docker ps --filter "name=hexis" --format "{{.Names}}" 2>$null
+    if ($LASTEXITCODE -ne 0) { throw "docker unreachable - cannot enumerate live fleet" }
+    $seen = [ordered]@{}
+    foreach ($n in $names) {
+        $n = "$n".Trim()
+        if ($n -match '^hexis_(?:(.+)_)?(heartbeat|channel|maintenance)_worker$') {
+            $persona = if ($Matches[1]) { $Matches[1] } else { '_default' }
+            $seen[$persona] = $true
+        }
+    }
+    foreach ($p in $seen.Keys) {
+        if ($p -eq '_default') { [pscustomobject]@{ Name = 'sam'; Db = 'hexis_memory' } }
+        else { [pscustomobject]@{ Name = $p; Db = "hexis_$p" } }
+    }
+}
+$Roster = @(Get-Roster)
 
 $Py = Join-Path $Root "venv\Scripts\python.exe"
 if (-not (Test-Path $Py)) { throw "venv python not found at $Py (venv not set up?)" }
@@ -32,11 +49,9 @@ $ReplScript = Join-Path $Root "chat_repl.py"
 if (-not (Test-Path $ReplScript)) { throw "chat_repl.py not found at $ReplScript" }
 
 function Show-Roster {
-    Write-Host "Available characters:"
-    foreach ($c in $P.Characters) {
-        $inst = $c.Db -replace '^hexis_', ''
-        $tier = $c.Prime.Tier
-        Write-Host ("  {0,-8} (instance: {1,-8} tier: {2})" -f $c.Name, $inst, $tier)
+    Write-Host "Available characters (live workers):"
+    foreach ($c in $Roster) {
+        Write-Host ("  {0,-10} (db: {1})" -f $c.Name, $c.Db)
     }
     Write-Host ""
     Write-Host "Usage: .\chat-with.ps1 <name>"
@@ -44,10 +59,9 @@ function Show-Roster {
 
 if (-not $Character) { Show-Roster; return }
 
-# Match arg against Name, instance token, or full Db (case-insensitive).
-$match = $P.Characters | Where-Object {
-    $inst = $_.Db -replace '^hexis_', ''
-    ($_.Name -ieq $Character) -or ($inst -ieq $Character) -or ($_.Db -ieq $Character)
+# Match arg against Name or full Db (case-insensitive).
+$match = $Roster | Where-Object {
+    ($_.Name -ieq $Character) -or ($_.Db -ieq $Character)
 } | Select-Object -First 1
 
 if (-not $match) {

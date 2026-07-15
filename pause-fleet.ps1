@@ -15,9 +15,10 @@
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-$ProfilePath = Join-Path $Root "power-profiles.psd1"
-if (-not (Test-Path $ProfilePath)) { throw "power-profiles.psd1 not found at $ProfilePath" }
-$P = Import-PowerShellDataFile -Path $ProfilePath
+# DSN base for the instance DBs (power-profiles.psd1 retired per ADR-020;
+# override with HEXIS_PG_DSN_BASE if the port/creds ever move).
+$PgDsnBase = if ($env:HEXIS_PG_DSN_BASE) { $env:HEXIS_PG_DSN_BASE }
+             else { 'postgresql://hexis_user:hexis_password@127.0.0.1:43815' }
 
 $LogDir = Join-Path $Root "logs"
 if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Force -Path $LogDir | Out-Null }
@@ -31,7 +32,7 @@ if (-not (Test-Path $py)) { throw "venv python not found at $py" }
 $eapPrev = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 try {
-    & $py (Join-Path $Root "scripts\pause_fleet.py") --action pause --dsn-base $P.PgDsnBase --snapshot $Snapshot 2>&1 |
+    & $py (Join-Path $Root "scripts\pause_fleet.py") --action pause --dsn-base $PgDsnBase --snapshot $Snapshot 2>&1 |
         ForEach-Object { Write-Host $_ }
     $rc = $LASTEXITCODE
 } finally {

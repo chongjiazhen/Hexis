@@ -1,7 +1,7 @@
 # hexis-status.ps1 - one-shot fleet health check.
 #
-# Reads power-profiles.psd1 (for ports/power mode) + live `docker ps` and reports:
-#   - current power mode (logs/current-mode.txt marker)
+# Probes the serving ports + live `docker ps` and reports (ADR-020: the
+# gpu-llm/cpu-llm rows ARE the serving indicator; no mode marker):
 #   - LLM port liveness + the model each port actually serves
 #   - per-character DB: configured?, consent, and the model llm.chat points at
 #
@@ -15,9 +15,8 @@
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-$ProfilePath = Join-Path $Root "power-profiles.psd1"
-if (-not (Test-Path $ProfilePath)) { throw "power-profiles.psd1 not found at $ProfilePath" }
-$P = Import-PowerShellDataFile -Path $ProfilePath
+# Serving ports (fixed contract: llm-serve serve.py + ADR-019; psd1 retired ADR-020)
+$GpuPort = 8080; $CpuPort = 8082; $EmbedPort = 8081
 
 function Test-Port([int]$Port) {
     $c = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
@@ -34,10 +33,8 @@ function Get-ServedModel([int]$Port) {
     }
 }
 
-# DB creds from PgDsnBase (postgresql://user:pass@host:port). Container = hexis_brain.
-$dsnBase = $P.PgDsnBase
-$dbUser  = "hexis_user"
-if ($dsnBase -match "://([^:]+):") { $dbUser = $Matches[1] }
+# DB user (container = hexis_brain); override with HEXIS_PG_USER if creds move.
+$dbUser = if ($env:HEXIS_PG_USER) { $env:HEXIS_PG_USER } else { "hexis_user" }
 
 function Get-DbConfig([string]$Db) {
     $sql = "SELECT key || '=' || (value #>> '{}') FROM config WHERE key IN ('agent.is_configured','agent.consent_status') UNION ALL SELECT 'model=' || COALESCE(value->>'model','?') FROM config WHERE key='llm.chat';"
@@ -56,22 +53,13 @@ function Get-DbConfig([string]$Db) {
 Write-Host ""
 Write-Host "=== HEXIS FLEET STATUS ===" -ForegroundColor Cyan
 
-# --- Power mode marker ---
-$markerFile = Join-Path $Root "logs\current-mode.txt"
-if (Test-Path $markerFile) {
-    $marker = (Get-Content $markerFile -Raw).Trim() -split "`n"
-    Write-Host ("mode      : {0}  (set {1})" -f $marker[0].ToUpper().Trim(), $marker[1].Trim())
-} else {
-    Write-Host "mode      : (no marker - set-power-mode never run)"
-}
-
-# --- LLM ports ---
+# --- LLM ports (gpu-llm/cpu-llm rows ARE the serving indicator, ADR-020 §7) ---
 Write-Host ""
 Write-Host "--- LLM servers ---"
 $ports = [ordered]@{
-    ("BigPort/ActiveBig=" + $P.ActiveBig) = [int]$P.BigPort
-    "Nano"  = [int]$P.Nano.Port
-    "Embed" = [int]$P.Embed.Port
+    "gpu-llm" = $GpuPort
+    "cpu-llm" = $CpuPort
+    "embed"   = $EmbedPort
 }
 foreach ($label in $ports.Keys) {
     $pt = $ports[$label]
