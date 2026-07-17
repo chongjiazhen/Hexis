@@ -1,8 +1,8 @@
 # start.ps1 - bring up Hexis stack: Docker DB + embed + nano llama-servers.
 #   Chat :8080 is NOT launched here. Per ADR 019 (serving ownership
 #   consolidation) llm-serve serve.py is the SOLE :8080 launcher; hexis is a
-#   pure consumer. set-power-mode.ps1 prime arms :8080 via `serve.py arm`
-#   (health-gated, idempotent). start-all.ps1 runs it right after this script.
+#   pure consumer. :8080 is armed via `serve.py gpu <key>` (health-gated,
+#   idempotent, claim-lock-honouring - ADR-020; set-power-mode.ps1 retired).
 # Usage: .\start.ps1            # start services, exit
 #        .\start.ps1 -Repl      # start services then drop into chat_repl.py
 #        .\start.ps1 -Stop      # stop everything
@@ -289,8 +289,8 @@ if (-not $wantNano) {
 }
 
 # 5. Wait health. embed is fatal; nano is best-effort (CPU load slower, must not
-#    block the stack). Chat (:8080) is not waited on here — set-power-mode.ps1
-#    prime health-gates the arm downstream (serve.py arm throws on a dead :8080).
+#    block the stack). Chat (:8080) is not waited on here — `serve.py gpu`
+#    health-gates the arm downstream (throws on a dead :8080; ADR-020 verbs).
 $embedOk = Wait-Health "http://127.0.0.1:8081/health"  "embed :8081" 120
 if ($wantNano) {
     $nanoOk = Wait-Health "http://127.0.0.1:8082/health" "nano :8082" 180
