@@ -31,6 +31,30 @@
   `hexis_<P>` databases. Port 43815→5432.
 - `hexis_brain` container may be recreated by `up --build` when compose config
   changes — data is safe (volume persists without `-v`).
+- NEVER `docker compose down -v` — wipes every `hexis_<P>` persona DB (2026-05-29
+  wipe). Data destruction, not a reset.
+- `compose up --build` WITHOUT `--no-deps` recreates `hexis_brain` and wedges the
+  fleet gateway. Resume / rebuild MUST pass `--no-deps` (recipe: model-serving.md
+  §Multi-persona).
+
+## Done means — the close-gate, and where open work lives
+
+A commit on `home-rig-local` is NOT done; green throwaway-DB tests are never the
+gate (the trigger-drop trap below passes them and breaks live). Done per change:
+
+- **SQL / schema / view** — live-applied to the running `hexis_<P>` DBs
+  (schema-migration.md §Live migration), INSTEAD OF trigger re-created in the
+  same migration, verified by a real `UPDATE`.
+- **`services/prompts/*.md` or `core/`** — baked into worker images: rebuild
+  with `--no-deps --force-recreate --build`, then in-container
+  `grep -c <new_term>` (NOT read per turn).
+- **heartbeat / behavior** — the completion query above, never `cnt`.
+- **serving** — fleet green via `.\hexis-status.ps1`; recover `.\start-all.ps1`.
+
+Open work = `.local-notes/_inbox.md` (tracked; done rows leave to git). Reconcile
+every "shipped" claim against `git log --oneline main..home-rig-local` before
+trusting it; at close, trim shipped rows and write the next-step pointer there.
+`~/.claude/projects/C--hexis/memory/` is external — never shows in `git status`.
 
 ## Heartbeat liveness (verify autonomous loop ACTUALLY runs)
 

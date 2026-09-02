@@ -113,7 +113,9 @@ silences the fleet.
   `docker compose build` only builds `db` (worker services are profile-gated) — deploy
   with `docker compose -f docker-compose.yml -f docker-compose.newchars.yml up -d
   --no-deps --force-recreate --build $SVCS` where `$SVCS` is an explicit worker+api
-  list (never `db`, to dodge the brain-IP wedge).
+  list (never `db`, to dodge the brain-IP wedge). Verify the bake landed with an
+  in-container `docker exec <worker> grep -c <new_term> <file>` — prompts are NOT
+  read per turn, so a rebuilt image with an old layer looks fine until it isn't.
 - **Probe CPU-floor/persona quality**: `tools/probe-eco/probe-all.sh` (runs N prompts
   through `chat_turn` per persona, scrubs probe-generated memories). Use when evaluating
   nano model swaps or sampling/prompt tuning. (Directory keeps its `probe-eco` name; the

@@ -40,6 +40,10 @@ New columns require explicit `ALTER TABLE memories ADD COLUMN IF NOT EXISTS <nam
 `db/00_tables.sql` only does `CREATE TABLE`, so re-applying it after a column add is
 a no-op on the live DB.
 
+`CREATE OR REPLACE VIEW` silently DROPS the view's INSTEAD OF trigger — re-create
+the trigger in the same migration and verify with a real `UPDATE` through the
+view. A throwaway-DB test passes either way; only live shows the drop.
+
 Re-apply live:
 ```bash
 docker exec -i hexis_brain psql -U hexis_user -d <persona> -v ON_ERROR_STOP=1 -f - < db/<file>.sql
