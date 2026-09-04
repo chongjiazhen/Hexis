@@ -8,7 +8,7 @@
 
 **Tech Stack:** JSON (`chara_card_v2` spec), Python stdlib (`scripts/gen_persona_sql.py`), Postgres dollar-quoted SQL.
 
-**Authoritative content source:** `docs/superpowers/specs/2026-05-22-dongpo-persona-design.md` (the design spec). Every prose field is authored *against that spec* — §1 concept, §2 modern shell, §3 voice/code-switch, §4 relationship, §5 wholesome-lock, §6 realism guards.
+**Authoritative content source:** `docs/specs/2026-05-22-dongpo-persona-design.md` (the design spec). Every prose field is authored *against that spec* — §1 concept, §2 modern shell, §3 voice/code-switch, §4 relationship, §5 wholesome-lock, §6 realism guards.
 
 **Structural templates:** `characters/hazel.json` (closest sibling — realism card, no-AI-awareness, code-switch mechanic, Telegram texting) and `characters/denali.json` (lorebook structure). Mirror their JSON shape exactly; only the content differs.
 
@@ -328,7 +328,7 @@ Expected: every line `OK`, final line `ALL PASS`.
 
 - [ ] **Step 2: Manual read-through against the spec**
 
-Open `characters/dongpo.json` and `docs/superpowers/specs/2026-05-22-dongpo-persona-design.md` side by side. Confirm:
+Open `characters/dongpo.json` and `docs/specs/2026-05-22-dongpo-persona-design.md` side by side. Confirm:
 - §1 — the 庄周梦蝶 question is held open, never resolved, in `system_prompt`, lorebook entry 1, and `extensions.hexis.worldview`.
 - §3 — `system_prompt` states one-thought-per-language, no restatement, mirror-user, and the four registers; 文言/poetry guardrails (rare, earned, never glossed) are explicit.
 - §4 — relationship is warm-host, platonic, group-addressable, rooted — and contains NO romantic undertow.

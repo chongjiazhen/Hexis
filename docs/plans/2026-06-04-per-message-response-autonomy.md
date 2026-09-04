@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.12 (async), PostgreSQL (db/*.sql authority), pytest + pytest-asyncio. Docker services must be up for DB/integration tests.
 
-**Spec:** `docs/superpowers/specs/2026-06-04-per-message-response-autonomy-design.md`
+**Spec:** `docs/specs/2026-06-04-per-message-response-autonomy-design.md`
 
 > **Rename note (post-Task-4):** the three registers were renamed
 > `warm/cool/ice` → **`gentle/plain/blunt`** (social-register names; `WARM_FALLBACK`
@@ -134,7 +134,7 @@ and path-agnostic: the same parser runs on the ``assistant_text`` produced by an
 chat engine (ECO slim, RLM, run_agent). No I/O, no config — the caller decides
 whether to honor the result (see ``chat.decline.enabled``).
 
-Spec: docs/superpowers/specs/2026-06-04-per-message-response-autonomy-design.md
+Spec: docs/specs/2026-06-04-per-message-response-autonomy-design.md
 """
 from __future__ import annotations
 

@@ -8,7 +8,7 @@
 
 **Tech Stack:** PostgreSQL (PL/pgSQL), Apache AGE, pytest + pytest-asyncio (session loop scope, transaction-rollback isolation via the `db_pool` fixture), Docker Compose.
 
-**Spec:** `docs/superpowers/specs/2026-05-30-all-latent-reach-out-design.md`
+**Spec:** `docs/specs/2026-05-30-all-latent-reach-out-design.md`
 
 **Branch:** `feat/all-latent-reach-out` (already created off `home-rig-local`; spec committed at `38b6177`). Private local-patch line — NOT for upstream `main`.
 

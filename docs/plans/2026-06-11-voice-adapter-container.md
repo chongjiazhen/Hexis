@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.11, `asyncio`, `websockets`, existing `channels/` framework, `pytest` + `pytest-asyncio` (session loop scope).
 
-**Spec:** `docs/superpowers/specs/2026-06-11-voice-vision-embodiment-design.md`
+**Spec:** `docs/specs/2026-06-11-voice-vision-embodiment-design.md`
 
 **Scope note:** This is Plan 1 of 2. Plan 2 (host-side `voice-bridge/`: activation, STT, TTS, vision, avatar, ws_client) builds against the WS protocol frozen here. v1 turns are **text-only** — the host runs the VLM and folds any vision description into `text`. The `image_b64` field is reserved (capability `media=True`) but not plumbed into a brain-side attachment in v1.
 

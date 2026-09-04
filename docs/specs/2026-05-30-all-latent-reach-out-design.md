@@ -4,7 +4,7 @@
 **Status:** Design (approved for plan)
 **Supersedes:** the deterministic per-sender cooldown gate shipped in `3c2ffea`
 (`feat(heartbeat): per-sender reach-out cooldown + state-merge trigger fix`).
-**Related prior art:** `docs/superpowers/specs/2026-05-26-timezone-aware-reach-out-design.md`
+**Related prior art:** `docs/specs/2026-05-26-timezone-aware-reach-out-design.md`
 (the quiet-hours / timezone gate, `88f6aa2`), whose hard veto this design also dissolves.
 
 ## Thesis

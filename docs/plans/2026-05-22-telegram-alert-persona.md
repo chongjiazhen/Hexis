@@ -34,7 +34,7 @@ This is an existing codebase. Key facts:
 | `services/worker_service.py` (modify) | `create_webhook_handler` gains a `bridge` param and an `alert`-source branch; `handle_heartbeat` calls the batched scan; `_amain` passes `bridge`. |
 | `tests/services/test_alert_reaction.py` (new) | Unit + DB tests for the new module. |
 | `tests/services/test_worker_webhook_alert.py` (new) | DB tests for the alert webhook handler. |
-| `docs/superpowers/specs/2026-05-22-telegram-alert-persona-design.md` (exists) | The approved design. |
+| `docs/specs/2026-05-22-telegram-alert-persona-design.md` (exists) | The approved design. |
 | `README.md` (modify) | Short operator section: webhook contract + scheduled-ritual note. |
 
 ---

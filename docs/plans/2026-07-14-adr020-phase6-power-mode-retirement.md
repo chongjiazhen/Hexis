@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.11+, asyncpg, httpx, pytest + pytest-asyncio, PostgreSQL, raw-SQL numbered migrations (`db/migrations/`).
 
-**Spec:** `docs/superpowers/specs/2026-07-14-adr020-phase6-power-mode-retirement-design.md`
+**Spec:** `docs/specs/2026-07-14-adr020-phase6-power-mode-retirement-design.md`
 
 ## Global Constraints
 

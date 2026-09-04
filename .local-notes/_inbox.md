@@ -290,7 +290,7 @@ Path traveled: trinity Greek (Thea/Iris/Lyra) → pentad (+Galene +Mneme) → au
 - **Re-decide ~2026-05-26.** Check `hexis_vera` memories: did maintenance
   cluster/consolidate the coaching episodics into anything strategic?
 - **If a build is needed:** Option 1 (buffer `stream_chat_turn` + tolerant
-  regex) is fully documented — `docs/superpowers/specs/2026-05-22-comms-trainer-persona-design.md`
+  regex) is fully documented — `docs/specs/2026-05-22-comms-trainer-persona-design.md`
   §9a + a `KNOWN GAP` comment in `services/chat.py` `stream_chat_turn`.
   Operator: how does SillyTavern do streaming but still regex (more flexible text editor? not messenging app)
 
@@ -338,8 +338,8 @@ Path traveled: trinity Greek (Thea/Iris/Lyra) → pentad (+Galene +Mneme) → au
   (heartbeat call + bridge wire). Tests: 11 (`test_alert_reaction.py` +
   `test_worker_webhook_alert.py`).
 - **Docs:**
-  - Design: `docs/superpowers/specs/2026-05-22-telegram-alert-persona-design.md`
-  - Plan (6 tasks, all DONE): `docs/superpowers/plans/2026-05-22-telegram-alert-persona.md`
+  - Design: `docs/specs/2026-05-22-telegram-alert-persona-design.md`
+  - Plan (6 tasks, all DONE): `docs/plans/2026-05-22-telegram-alert-persona.md`
   - Operator: `README.md:137-170`
 - **Shipping commits:** `cbc20a2` (outbox builder), `32649fe` (reaction
   turn), `cce241f` (batched scan), `b60a8a4` (webhook handler), `6694506`
@@ -349,7 +349,7 @@ Path traveled: trinity Greek (Thea/Iris/Lyra) → pentad (+Galene +Mneme) → au
   helper sends direct to Telegram when webhook unavailable, buffers for
   replay on hexis recovery (replay drained as `deliver=false` memory-only,
   no stale reactions). Spec at
-  `docs/superpowers/specs/2026-05-22-alert-direct-fallback-design.md`.
+  `docs/specs/2026-05-22-alert-direct-fallback-design.md`.
   No code yet. Resume here when alert traffic justifies resilience cost.
 - **End-to-end smoke (resume sanity check):** with fleet up + persona's
   `channel.telegram.alert_chat_id` set →

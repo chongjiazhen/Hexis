@@ -8,7 +8,7 @@
 
 **Tech Stack:** PowerShell (pwsh 7 / Windows PowerShell 5.1), Pester 3.4 (pure-function unit tests, no mocks).
 
-**Spec:** `docs/superpowers/specs/2026-06-09-gpu-llm-self-heal-watchdog-design.md`
+**Spec:** `docs/specs/2026-06-09-gpu-llm-self-heal-watchdog-design.md`
 
 ---
 

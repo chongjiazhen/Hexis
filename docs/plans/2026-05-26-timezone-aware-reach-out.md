@@ -8,7 +8,7 @@
 
 **Tech Stack:** PostgreSQL (plpgsql, IANA tz via `AT TIME ZONE`), Python 3.10+ asyncio (no Python code changes — DB + prompts only), pytest-asyncio, Docker Compose (worker image rebuild for prompts).
 
-**Spec:** `docs/superpowers/specs/2026-05-26-timezone-aware-reach-out-design.md` (commit `b511d1b`).
+**Spec:** `docs/specs/2026-05-26-timezone-aware-reach-out-design.md` (commit `b511d1b`).
 
 ---
 
@@ -987,7 +987,7 @@ metadata:
 
 **Why:** Existing agent-wide night-throttle (`is_heartbeat_night` / `should_run_heartbeat` cadence switch) only gated whether agents run at all in operator's local night — useless for protecting recipients in other timezones. New per-recipient gate sits *inside* the action handler so it composes with the outer agent-wide gate without replacing it.
 
-**How to apply:** Spec at `docs/superpowers/specs/2026-05-26-timezone-aware-reach-out-design.md`; plan at `docs/superpowers/plans/2026-05-26-timezone-aware-reach-out.md`; migration runbook at `.local-notes/migrations/2026-05-26-timezone-aware-reach-out/README.md`. Three SQL files re-apply via `CREATE OR REPLACE`; heartbeat workers rebuild for prompt changes per `feedback_prompt_files_baked_rebuild_required`.
+**How to apply:** Spec at `docs/specs/2026-05-26-timezone-aware-reach-out-design.md`; plan at `docs/plans/2026-05-26-timezone-aware-reach-out.md`; migration runbook at `.local-notes/migrations/2026-05-26-timezone-aware-reach-out/README.md`. Three SQL files re-apply via `CREATE OR REPLACE`; heartbeat workers rebuild for prompt changes per `feedback_prompt_files_baked_rebuild_required`.
 
 **Deferred to v2:**
 - Auto timezone learning from conversation (semantic memory tag → propose tz update action).

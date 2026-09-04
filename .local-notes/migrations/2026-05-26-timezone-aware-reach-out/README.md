@@ -118,6 +118,6 @@ ROLLBACK;
 
 ## Related
 
-- Spec: `docs/superpowers/specs/2026-05-26-timezone-aware-reach-out-design.md`
-- Plan: `docs/superpowers/plans/2026-05-26-timezone-aware-reach-out.md`
+- Spec: `docs/specs/2026-05-26-timezone-aware-reach-out-design.md`
+- Plan: `docs/plans/2026-05-26-timezone-aware-reach-out.md`
 - Heartbeat night throttle (complementary, not replaced): `is_heartbeat_night()` in `db/07_functions_heartbeat.sql`
